@@ -2,78 +2,121 @@
 <html lang=en>
 
 <head>
-    <meta charset=UTF-8 />
-    <meta name=viewport content="width=device-width,initial-scale=1" />
-    <meta http-equiv=X-UA-Compatible content="ie=edge" />
-    <link rel=stylesheet href=https://use.fontawesome.com/releases/v5.8.1/css/all.css
-        integrity=sha384-50oBUHEmvpQ+1lW4y57PTFmhCaXp0ML5d60M1M7uH2+nqUivzIebhndOJK28anvf crossorigin=anonymous />
-    <title>Jacek Gulij</title>
-    <link href="./frontend/index.bundle.css" rel="stylesheet">
+  <meta charset=UTF-8 />
+  <meta name=viewport content="width=device-width,initial-scale=1" />
+  <meta http-equiv=X-UA-Compatible content="ie=edge" />
+  <script src=https://kit.fontawesome.com/1da462781e.js crossorigin=anonymous></script>
+  <title>Jacek Gulij - Game Developer</title>
+  <meta name=keywords content="game developer, unity, android, games, virtual reality, augmented reality, vr, ar">
+  <meta name=description content="I'm a Unity developer who specializes in VR/AR and mobile.">
+  <link href="./frontend/index.bundle.css" rel="stylesheet">
 </head>
 
 <body>
-    <div class=container>
-        <menu>
-            <ul>
-                <li><a href=#projects>Projects</a></li>
-                <li><a href=#contact>Contact</a></li>
-            </ul>
-        </menu>
-        <div class=content>
-            <div class=banner>
-                <div class=banner-info>
-                    <h1>Jacek Gulij</h1>
-                    <p> Your friendly neighbourhood Unity developer. </p> <span class=icon> <a
-                            href=https://github.com/Jacykow target=_blank><i class="fab fa-github-square"></i></a>
-                    </span> <span class=icon> <a href=https://www.linkedin.com/in/jacekgulij target=_blank><i
-                                class="fab fa-linkedin"></i></a> </span>
-                </div>
-                <div class=banner-animation id=svg></div>
-            </div>
-            <h2 id=projects>Projects</h2>
-            <div class=projects>
-                <div class=project>
-                    <div class=project-img> <img class=img-wrapper src=frontend/resources/82f79ece801c48263513afe491abda19.png /> <video
-                            class=img-content controls>
-                            <source src=frontend/resources/goldenrails.webm type=video/webm /> </video> </div>
-                    <h3>Golden Rails</h3>
-                    <p> Drive your train through the wild west while avoiding incoming obstacles! </p> <a target=_blank
-                        href="https://play.google.com/store/apps/details?id=com.gulij.goldenrails" class=link><img
-                            src=frontend/resources/ac1faa4b9e7849e4b25bd42b994877bd.png /></a>
-                    <div class=labels>
-                        <div class=label>Android</div>
-                        <div class=label>C#</div>
-                        <div class=label>Unity</div>
-                    </div>
-                </div>
-            </div>
-            <h2 id=contact>Contact</h2>
-            <div class=contact style="margin-bottom: 60px">
-                <p>Reach me by email: <a class=link-span href="mailto:jacekgulij@gmail.com">jacekgulij@gmail.com</a></p>
-                <!-- <div class=form-submit-message>E-mail has been sent!</div>
-                <form name=message-form class=visible>
-                    <div class=form-elements-wrapper>
-                        <div class="form-element short"> <i class="far fa-envelope"></i> <input type=email
-                                placeholder=E-mail name=email /> </div>
-                    </div>
-                    <div class=form-elements-wrapper>
-                        <div class=form-element> <i class="fas fa-pencil-alt"></i> <textarea placeholder=Message
-                                name=message></textarea> </div>
-                    </div>
-                    <div class=form-elements-wrapper> <label class=chb> <input type=checkbox name=confirmation
-                                class="option-input checkbox" /> Send confirmation e-mail </label> </div> <button
-                        type=submit class=submit-button> <span class=default> Send </span> <span
-                            class=loading>Loading...</span> </button>
-                    <div class=error-message></div>
-                </form> -->
-            </div>
+  <div class=container>
+    <menu>
+      <ul>
+        <li><a href=#projects>Projects</a></li>
+        <li><a href=#contact>Contact</a></li>
+      </ul>
+    </menu>
+    <div class=content>
+      <div class=banner>
+        <div class=banner-info>
+          <h1>Jacek Gulij</h1>
+          <p> Your friendly neighbourhood Unity developer. </p> <span class=icon> <a href=https://github.com/Jacykow
+              target=_blank><i class="fab fa-github-square"></i></a> </span> <span class=icon> <a
+              href=https://www.linkedin.com/in/jacekgulij target=_blank><i class="fab fa-linkedin"></i></a> </span>
         </div>
+        <div class=banner-animation id=svg></div>
+      </div>
+      <h2 id=projects>Projects</h2>
+      <div class=projects>
+        <div class="project project--video-rotated" id=black-iris>
+          <div class=project-img> <img class=img-wrapper src=frontend/resources/21b7df1099b7b2c36af417cbf04add3c.png /> <video
+              class=img-content controls>
+              <source src=frontend/resources/black-iris.webm type=video/webm />
+              <source src=frontend/resources/black-iris.mp4 type=video/mp4 /> <img src=frontend/resources/e6edeca823807dd173e7a598e8dc69d8.png
+                alt="Your browser does not support a video tag." />
+            </video> </div>
+          <div class=project-text>
+            <h3>Black Iris</h3>
+            <p> Black Iris is a dynamic action game that pulls you into the world of monsters governed by one, simple
+              rule – the rarer your eye color is, the higher in society you are. <br /><br /> Join in for the adventure
+              of a lifetime with the seasoned warrior hoping to reclaim his eye – Black Iris – that was stolen by a
+              powerful, evil warlock. <br /><br /> Slash through hordes of monsters on your way to the top of the
+              warlock’s mighty tower. Discover new levels, skins, and hone your skills while trying to obtain the
+              highest possible score in every level – don’t let your friends beat yourself to it! <br /><br /> See you
+              in the tower! </p>
+            <div class=project-socials> <a href=https://www.facebook.com/Mogul-Games-104354578576122 target=_blank><i
+                  class="fa-brands fa-facebook-square"></i></a> <a href=https://www.instagram.com/mogul_games/
+                target=_blank><i class="fa-brands fa-instagram-square"></i></a> <a href=https://twitter.com/games_mogul
+                target=_blank><i class="fa-brands fa-twitter-square"></i></a> </div>
+            <div class=labels>
+              <div class=label>Android</div>
+              <div class=label>C#</div>
+              <div class=label>Unity</div>
+            </div>
+            <p class=project-team>Team members: Director & Lead Programmer - Jacek Gulij, Lead Graphic Designer - Antoni
+              Grześkowiak, Marketing & Lead Creative Designer - Krystian Pabianiak, UI Developer - Joanna Grabińska</p>
+          </div>
+        </div>
+        <div class=project id=golden-rails>
+          <div class=project-img> <img class=img-wrapper src=frontend/resources/164516ef847d4a7dc748686baef7b96b.png /> <video
+              class=img-content controls>
+              <source src=frontend/resources/goldenrails.webm type=video/webm />
+              <source src=frontend/resources/goldenrails.mp4 type=video/mp4 /> <img src=frontend/resources/2d2bfe9f0bc75384ca98edd349b0c582.png
+                alt="Your browser does not support a video tag." />
+            </video> </div>
+          <div class=project-text>
+            <h3>Golden Rails</h3>
+            <p> Drive your train through the wild west while avoiding incoming obstacles! </p> <a target=_blank
+              href="https://play.google.com/store/apps/details?id=com.gulij.goldenrails" class=link><img
+                src=frontend/resources/2737546ba7e8c3ccb468c9bebc9eb190.png /></a>
+            <div class=labels>
+              <div class=label>Android</div>
+              <div class=label>C#</div>
+              <div class=label>Unity</div>
+            </div>
+            <p class=project-team>Team members: Director & Lead Programmer - Jacek Gulij, Lead Graphic Designer - Antoni
+              Grześkowiak, Backend Programmer - Wojciech Rak, UI Designer - Weronika Jankowska, Music & Sounds - Zuzanna
+              Piniarska, Law Consultant - Hubert Węcławek</p>
+          </div>
+        </div>
+        <div class=project id=ice-master>
+          <div class=project-img> <img class=img-wrapper src=frontend/resources/164516ef847d4a7dc748686baef7b96b.png /> <video
+              class=img-content controls>
+              <source src=frontend/resources/ice-master.webm type=video/webm />
+              <source src=frontend/resources/ice-master.mp4 type=video/mp4 /> <img src=frontend/resources/9de54148e0b656b203c3f485787b2e7f.png
+                alt="Your browser does not support a video tag." />
+            </video> </div>
+          <div class=project-text>
+            <h3>Ice Master</h3>
+            <p> Dodge bats and collect gems. Watch out for the incoming thunderstorm! How high can you climb? Check out
+              your friends' scores. </p> <a target=_blank
+              href="https://play.google.com/store/apps/details?id=com.gulij.icemaster" class=link><img
+                src=frontend/resources/2737546ba7e8c3ccb468c9bebc9eb190.png /></a>
+            <div class=labels>
+              <div class=label>Android</div>
+              <div class=label>C#</div>
+              <div class=label>Unity</div>
+            </div>
+            <p class=project-team>Team members: Director & Lead Programmer - Jacek Gulij, Lead Graphic Designer - Michał
+              Stybowski, UI Programmer - Mateusz Bąk</p>
+          </div>
+        </div>
+      </div>
+      <h2 id=contact>Contact</h2>
+      <div class=contact>
+        <p>Reach me by email: <a class=link-span href=mailto:jacekgulij@gmail.com>jacekgulij@gmail.com</a></p>
+      </div>
     </div>
-    <div class=footer>
-        <p> This website has been made by Weronika Jankowska. Visit her other creations at <a class=link-span
-                href=http://www.wjankowska.com target=_blank> wjankowska.com </a> </p>
-    </div>
-    <script type="text/javascript" src="frontend/index.bundle.js"></script>
+  </div>
+  <div class=footer>
+    <p> This website has been made by Weronika Jankowska. Visit her other creations at <a class=link-span
+        href=http://www.wjankowska.com target=_blank> wjankowska.com </a> </p>
+  </div>
+  <script type="text/javascript" src="frontend/index.bundle.js"></script>
 </body>
 
 </html>
