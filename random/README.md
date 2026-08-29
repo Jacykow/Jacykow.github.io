@@ -154,10 +154,16 @@ don't clip it.
 `tools/gen-dice.js` builds each die's real polyhedron from its vertices and derives the
 faces as a convex hull. Every solid is then laid to rest on a face — that face's normal
 points at the floor — spun about the vertical until its silhouette is symmetric, and
-viewed through **one shared camera** (`PITCH`), so the perspective is identical across
-the whole set and every die has a surface flat on the ground. Back faces are culled and
-the rest shaded with a Lambert term. The result is baked into the SVG sprite; there is
-no 3D at runtime, just static paths.
+viewed through **one shared camera**. Back faces are culled and the rest shaded with a
+Lambert term. The result is baked into the SVG sprite; there is no 3D at runtime, just
+static paths.
+
+Only two things differ between shapes: **which face rests on the ground**, and the
+**yaw** it is spun to. The camera's pitch, position and scale are constants — the
+projection never looks at the shape. Every solid is normalised to a circumradius of 1,
+so apparent size falls out of the geometry itself rather than a per-shape fit; a die
+that is genuinely squatter renders smaller. To resize one deliberately, give it a `size`
+in the shape list, which scales the solid in 3D before the camera ever sees it.
 
 The value is drawn centred on the die at one constant size, the same for every shape and
 every value, so the generator emits no per-shape CSS.
