@@ -19,6 +19,9 @@
     paneTools: $('paneTools'), drawer: $('drawerToggle')
   };
 
+  /* dice-count thresholds where the result display steps down a size */
+  const DENSITY = { dense: 18, denser: 60, plain: 240 };
+
   const DEFAULT_EXPR = '4d6dl1 # ability score';
   const LS_SAVED = 're.saved.v1';
   const LS_LAST = 're.last.v1';
@@ -215,15 +218,23 @@
       ? E.fmt(roll.total) + (Math.abs(roll.total) === 1 ? ' hit' : ' hits')
       : E.fmt(roll.total);
 
+    // Dice are drawn as shapes; they shrink as the count climbs and fall back to
+    // plain chips past the point where thousands of SVG nodes would stall typing.
+    const n = roll.diceCount;
+    const opts = n > DENSITY.plain ? { plain: true } : null;
+    const density = opts ? ' plain'
+      : n > DENSITY.denser ? ' denser'
+      : n > DENSITY.dense ? ' dense' : '';
+
     let rows;
     if (many) {
       rows = roll.sets.map((s, i) =>
         '<div class="setrow"><span class="i">#' + (i + 1) + '</span>' +
-          '<span class="body">' + s.html() + '</span>' +
+          '<span class="body">' + s.html(opts) + '</span>' +
           '<span class="st">' + E.fmt(s.total()) + '</span></div>'
       ).join('');
     } else {
-      rows = '<div class="setrow"><span class="body">' + roll.sets[0].html() + '</span></div>';
+      rows = '<div class="setrow"><span class="body">' + roll.sets[0].html(opts) + '</span></div>';
     }
 
     let tally = '';
@@ -248,7 +259,7 @@
           '<div class="sub">' + meta.join('<span>&middot;</span>') + '</div>' +
         '</div>' +
       '</div>' +
-      '<div class="rows">' + rows + '</div>' + tally +
+      '<div class="rows' + density + '">' + rows + '</div>' + tally +
     '</div>';
   }
 

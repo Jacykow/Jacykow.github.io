@@ -104,6 +104,16 @@ pow round sign sin sqrt tan`. `round()` rounds half away from zero.
 * **Result** — the top card re-rolls as you type; <kbd>Enter</kbd> freezes it and rolls
   again, building a log. Dropped dice are struck out, exploded dice are amber, re-rolled
   dice show their original value, successes and criticals are colour-coded.
+
+  Each die is drawn as its actual solid: tetrahedron, cube, octahedron, pentagonal
+  trapezohedron, dodecahedron, icosahedron, a coin for `d2` and a zocchihedron for `d%`.
+  Sizes with no standard solid (`d3`, `d7`, …) get a generic token, and Fudge dice are
+  cubes reading `−` / `0` / `+`. The shapes are one inline SVG sprite referenced with
+  `<use>`, so they cost no extra requests and recolour from CSS.
+
+  Dice shrink as the count grows — 34px, then 26px past 18 dice, then 19px past 60 — and
+  past 240 dice they fall back to plain text chips so typing never stalls. Those
+  thresholds live in `DENSITY` at the top of `app.js`.
 * **Explain** — one row per token. Click a row to select that token in the field; moving
   the caret highlights the matching row.
 * **Details** — Monte-Carlo distribution of the total (min / mean / median / max / std dev

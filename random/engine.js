@@ -419,6 +419,50 @@
 
   const cpText = (cp) => cp ? cp.op + cp.v : '';
 
+  /* Only these sizes have a standard solid; anything else gets a generic token.
+     d4/d6/d8/d12/d20 are the Platonic solids, d10 is a pentagonal trapezohedron,
+     d100 a zocchihedron, d2 a coin. Fudge dice are cubes. */
+  const SOLIDS = { 2: 'd2', 4: 'd4', 6: 'd6', 8: 'd8', 10: 'd10', 12: 'd12', 20: 'd20', 100: 'd100' };
+  const shapeFor = (sides, fudge) => fudge ? 'd6' : (SOLIDS[sides] || 'gen');
+
+  /** the digits shown on the face; Fudge dice read as -, 0, + */
+  function faceText(v, fudge) {
+    if (!fudge) return fmt(v);
+    return v > 0 ? '+' : (v < 0 ? '−' : '0');
+  }
+
+  function dieHTML(r, shape, fudge) {
+    const cls = ['die', 's-' + shape].concat(r.tags);
+    if (r.dropped) cls.push('dropped');
+    const title = (r.tags.length ? r.tags.join(', ') : 'natural') +
+      (r.dropped ? ', dropped' : '') +
+      (r.from !== null && r.from !== undefined ? ', was ' + fmt(r.from) : '');
+
+    const face = faceText(r.v, fudge);
+    const size = face.length >= 3 ? ' v3' : (face.length === 2 ? ' v2' : '');
+
+    // one corner slot: a re-rolled die shows what it was, otherwise mark explosions
+    let badge = '';
+    if (r.from !== null && r.from !== undefined) badge = '<s>' + esc(faceText(r.from, fudge)) + '</s>';
+    else if (r.tags.indexOf('exploded') >= 0) badge = '!';
+
+    return '<span class="' + cls.join(' ') + '" title="' + esc(title) + '">' +
+      '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
+      '<use href="#sh-' + shape + '"/></svg>' +
+      '<span class="dieval' + size + '">' + esc(face) + '</span>' +
+      (badge ? '<span class="diebadge">' + badge + '</span>' : '') +
+      '</span>';
+  }
+
+  /** compact chip used when a roll has too many dice to draw as shapes */
+  function chipHTML(r, fudge) {
+    const cls = ['chip-die'].concat(r.tags);
+    if (r.dropped) cls.push('dropped');
+    const was = (r.from !== null && r.from !== undefined) ? '<s>' + esc(faceText(r.from, fudge)) + '</s>' : '';
+    const bang = r.tags.indexOf('exploded') >= 0 ? '<sup>!</sup>' : '';
+    return '<span class="' + cls.join(' ') + '">' + was + esc(faceText(r.v, fudge)) + bang + '</span>';
+  }
+
   /* -------------------------------------------------------- result nodes */
   const NumResult = (v) => ({
     k: 'num', total: () => v, html: () => '<span class="r-num">' + fmt(v) + '</span>'
@@ -438,25 +482,25 @@
           case '^': return Math.pow(a, b);
         }
       },
-      html: () => l.html() + '<span class="r-op">' + esc(op) + '</span>' + r.html()
+      html: (o) => l.html(o) + '<span class="r-op">' + esc(op) + '</span>' + r.html(o)
     };
   }
 
   const NegResult = (v) => ({
     k: 'neg', children: [v], total: () => -v.total(),
-    html: () => '<span class="r-op">-</span>' + v.html()
+    html: (o) => '<span class="r-op">-</span>' + v.html(o)
   });
 
   const ParenResult = (v) => ({
     k: 'paren', inner: v, children: [v], total: () => v.total(),
-    html: () => '<span class="r-brk">(</span>' + v.html() + '<span class="r-brk">)</span>'
+    html: (o) => '<span class="r-brk">(</span>' + v.html(o) + '<span class="r-brk">)</span>'
   });
 
   const FuncResult = (name, args) => ({
     k: 'func', children: args,
     total: () => FUNCS[name].apply(null, args.map((a) => a.total())),
-    html: () => '<span class="r-fn">' + name + '</span><span class="r-brk">(</span>' +
-      args.map((a) => a.html()).join('<span class="r-op">,</span>') + '<span class="r-brk">)</span>'
+    html: (o) => '<span class="r-fn">' + name + '</span><span class="r-brk">(</span>' +
+      args.map((a) => a.html(o)).join('<span class="r-op">,</span>') + '<span class="r-brk">)</span>'
   });
 
   /* --------------------------------------------------------- dice rolling */
@@ -609,15 +653,9 @@
         return s;
       },
 
-      html() {
-        const parts = rolls.map((r) => {
-          const cls = ['die'].concat(r.tags);
-          if (r.dropped) cls.push('dropped');
-          const was = (r.from !== null && r.from !== undefined) ? '<s>' + fmt(r.from) + '</s>' : '';
-          const bang = r.tags.indexOf('exploded') >= 0 ? '<sup>!</sup>' : '';
-          const title = (r.tags.length ? r.tags.join(', ') : 'natural') + (r.dropped ? ', dropped' : '');
-          return '<span class="' + cls.join(' ') + '" title="' + esc(title) + '">' + was + fmt(r.v) + bang + '</span>';
-        });
+      html(o) {
+        const shape = shapeFor(this.sides, this.fudge);
+        const parts = rolls.map((r) => (o && o.plain) ? chipHTML(r, this.fudge) : dieHTML(r, shape, this.fudge));
         return '<span class="r-notn">' + esc(this.notation) + '</span>' +
           '<span class="r-brk">[</span>' + parts.join('') + '<span class="r-brk">]</span>';
       }
@@ -696,10 +734,10 @@
         for (const u of units) if (!u.dropped) s += u.val;
         return s;
       },
-      html() {
+      html(o) {
         const inner = subs.map((s, i) => {
           const dead = !single && units[i] && units[i].dropped;
-          return '<span class="r-sub' + (dead ? ' dropped-sub' : '') + '">' + s.html() + '</span>';
+          return '<span class="r-sub' + (dead ? ' dropped-sub' : '') + '">' + s.html(o) + '</span>';
         }).join('<span class="r-op">,</span>');
         return '<span class="r-brk">{</span>' + inner + '<span class="r-brk">}</span>';
       }
@@ -1021,8 +1059,10 @@
     const p = parse(input);
     const sets = [];
     for (let i = 0; i < p.repeat; i++) sets.push(evaluate(p.ast));
+    let diceCount = 0;
+    for (const s of sets) { const bag = []; collectDice(s, bag); diceCount += bag.length; }
     return {
-      input: p.trimmed, notation: p.notation, label: p.label, repeat: p.repeat, sets,
+      input: p.trimmed, notation: p.notation, label: p.label, repeat: p.repeat, sets, diceCount,
       total: sets.reduce((a, s) => a + s.total(), 0),
       successMode: sets.length > 0 && !!sets[0].successMode,
       successes: sets.reduce((a, s) => a + (s.successMode ? s.successes() : 0), 0),

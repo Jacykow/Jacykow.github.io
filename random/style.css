@@ -141,8 +141,10 @@ kbd{
 .card .sub .pulse{color:var(--accent)}
 .card .rows{
   margin-top:9px; padding-top:9px; border-top:1px dashed var(--border);
-  font-family:var(--mono); font-size:13px; color:var(--dim); line-height:2.1; word-break:break-word;
+  font-family:var(--mono); font-size:13px; color:var(--dim); word-break:break-word;
+  line-height:calc(var(--dsz) * 1.24);   /* rows must clear the die shapes */
 }
+.card .rows.plain{line-height:2.1}
 .setrow{display:flex; gap:10px; align-items:baseline; padding:1px 0}
 .setrow .i{color:var(--dimmer); font-size:11px; min-width:22px; flex:none}
 .setrow .body{flex:1; min-width:0}
@@ -150,17 +152,72 @@ kbd{
 .tally{font-size:12px; margin-top:7px; font-family:var(--mono); color:var(--dim)}
 .tally b{color:var(--green)} .tally i{font-style:normal; color:var(--red)}
 
-.die{display:inline-block; padding:1px 6px; margin:0 2px; border-radius:5px; background:#222735; border:1px solid #2f3646; color:var(--text)}
-.die.dropped{opacity:.38; text-decoration:line-through; background:transparent}
-.die.exploded{border-color:var(--accent); color:var(--accent)}
-.die.rerolled{border-color:var(--blue)}
-.die.clamped{border-style:dashed; border-color:var(--purple)}
-.die.critSuccess{border-color:var(--green); color:var(--green); font-weight:700}
-.die.critFail{border-color:var(--red); color:var(--red); font-weight:700}
-.die.success{background:rgba(95,214,138,.15); border-color:rgba(95,214,138,.5); color:var(--green)}
-.die.failure{background:rgba(245,120,111,.15); border-color:rgba(245,120,111,.5); color:var(--red)}
-.die s{color:var(--dimmer); margin-right:4px; font-size:11px}
-.die sup{color:var(--dimmer); font-size:9px}
+/* ---- dice ---------------------------------------------------------------
+   Each die is an <svg><use> silhouette with the value laid over it. The shape
+   inherits stroke/fill from --dc/--df, so every state just swaps those two. */
+.card .rows{--dsz:34px}
+.card .rows.dense{--dsz:26px}
+.card .rows.denser{--dsz:19px}
+.card .rows.denser .diebadge{display:none}
+
+.die{
+  --dc:#5d6780; --df:#1d222d;
+  position:relative; display:inline-block; vertical-align:middle;
+  width:var(--dsz); height:var(--dsz); margin:0 1px; color:var(--text);
+}
+.dieshape{
+  position:absolute; inset:0; width:100%; height:100%;
+  fill:var(--df); stroke:var(--dc); stroke-width:2.6;
+  stroke-linejoin:round; stroke-linecap:round;
+}
+.dieval{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-size:calc(var(--dsz) * .42); font-weight:650; line-height:1; letter-spacing:-.02em;
+}
+.dieval.v2{font-size:calc(var(--dsz) * .35)}
+.dieval.v3{font-size:calc(var(--dsz) * .27)}
+.diebadge{
+  position:absolute; top:calc(var(--dsz) * -.06); right:calc(var(--dsz) * -.1);
+  font-size:calc(var(--dsz) * .27); line-height:1; color:var(--dimmer); pointer-events:none;
+}
+.diebadge s{color:var(--dimmer)}
+
+/* the value sits at the visual centre of the face, which is not the centre of
+   the silhouette for the pointed solids */
+.s-d4 .dieval{transform:translateY(13%); font-size:calc(var(--dsz) * .32)}
+.s-d4 .dieval.v2{font-size:calc(var(--dsz) * .26)}
+.s-d100 .dieval.v3{font-size:calc(var(--dsz) * .30)}
+.s-d8 .dieval{transform:translateY(5%); font-size:calc(var(--dsz) * .36)}
+.s-d20 .dieval{transform:translateY(-4%); font-size:calc(var(--dsz) * .36)}
+.s-d10 .dieval{transform:translateY(-2%)}
+.s-d12 .dieval{transform:translateY(2%)}
+
+.die.exploded{--dc:var(--accent)}
+.die.rerolled{--dc:var(--blue)}
+.die.clamped{--dc:var(--purple)}
+.die.critSuccess{--dc:var(--green)}
+.die.critSuccess .dieval{color:var(--green)}
+.die.critFail{--dc:var(--red)}
+.die.critFail .dieval{color:var(--red)}
+.die.success{--dc:var(--green); --df:rgba(95,214,138,.20)}
+.die.success .dieval{color:var(--green)}
+.die.failure{--dc:var(--red); --df:rgba(245,120,111,.20)}
+.die.failure .dieval{color:var(--red)}
+.die.dropped{opacity:.34}
+.die.dropped .dieval{text-decoration:line-through}
+
+/* plain fallback for very large rolls */
+.chip-die{display:inline-block; padding:1px 5px; margin:0 2px; border-radius:4px; background:#222735; border:1px solid #2f3646; color:var(--text)}
+.chip-die.dropped{opacity:.38; text-decoration:line-through; background:transparent}
+.chip-die.exploded{border-color:var(--accent); color:var(--accent)}
+.chip-die.rerolled{border-color:var(--blue)}
+.chip-die.clamped{border-style:dashed; border-color:var(--purple)}
+.chip-die.critSuccess{border-color:var(--green); color:var(--green); font-weight:700}
+.chip-die.critFail{border-color:var(--red); color:var(--red); font-weight:700}
+.chip-die.success{background:rgba(95,214,138,.15); border-color:rgba(95,214,138,.5); color:var(--green)}
+.chip-die.failure{background:rgba(245,120,111,.15); border-color:rgba(245,120,111,.5); color:var(--red)}
+.chip-die s{color:var(--dimmer); margin-right:4px; font-size:11px}
+.chip-die sup{color:var(--dimmer); font-size:9px}
 .r-op{color:var(--dimmer); padding:0 4px}
 .r-brk{color:var(--pink)}
 .r-fn{color:var(--purple)}
@@ -285,8 +342,9 @@ kbd{
   .card .top{gap:11px}
   .card .total{font-size:27px; min-width:40px}
   .card .expr{font-size:12px}
-  .card .rows{font-size:12.5px; line-height:2}
-  .die{padding:1px 5px; margin:0 1px}
+  .card .rows{font-size:12.5px; --dsz:30px}
+  .card .rows.dense{--dsz:24px}
+  .card .rows.denser{--dsz:18px}
 
   /* bigger tap targets in the drawer */
   .tabs button{padding:11px 14px; font-size:12.5px}
