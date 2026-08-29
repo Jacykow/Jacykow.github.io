@@ -47,66 +47,86 @@
   /* every size that has a solid of its own, for the gallery */
   const DICE_GALLERY = [2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 100];
 
+  /* Each entry is [code, description, form].
+       atom   — inserted where the caret is
+       suffix — appended to the dice term or bracket the caret is in
+       wrap   — wraps that term in a function
+     The code is written with (_) standing for the expression it attaches to,
+     so the reference shows placement rather than a bare fragment. */
   const REFERENCE = [
     ['Dice', [
-      ['d20', 'one twenty-sided die'],
-      ['4d6', 'four six-sided dice, summed'],
-      ['(2+2)d6', 'computed quantity'],
-      ['3d(2*6)', 'computed number of sides']
+      ['d20', 'one twenty-sided die', 'atom'],
+      ['4d6', 'four six-sided dice, summed', 'atom'],
+      ['(2+2)d6', 'computed quantity', 'atom'],
+      ['3d(2*6)', 'computed number of sides', 'atom']
     ]],
     ['Exploding', [
-      ['!', 're-roll and add on the highest face'],
-      ['!>4', 'explode on anything over 4'],
-      ['!!', 'compounding: fold into one die'],
-      ['!p', 'penetrating: extra dice take -1'],
-      ['e6', 'explode once on 6 or more'],
-      ['ie6', 'explode repeatedly on 6 or more']
+      ['(_)!', 're-roll and add on the highest face', 'suffix'],
+      ['(_)!>4', 'explode on anything over 4', 'suffix'],
+      ['(_)!p', 'penetrating: extra dice take -1', 'suffix'],
+      ['(_)e6', 'explode once on 6 or more', 'suffix'],
+      ['(_)ie6', 'explode repeatedly on 6 or more', 'suffix']
     ]],
     ['Keep & drop', [
-      ['kh3', 'keep the highest 3'],
-      ['kl1', 'keep the lowest 1 (disadvantage)'],
-      ['dl1', 'drop the lowest 1'],
-      ['dh1', 'drop the highest 1']
+      ['(_)kh3', 'keep the highest 3', 'suffix'],
+      ['(_)kl1', 'keep the lowest 1 (disadvantage)', 'suffix'],
+      ['(_)dl1', 'drop the lowest 1', 'suffix'],
+      ['(_)dh1', 'drop the highest 1', 'suffix']
     ]],
     ['Re-rolling', [
-      ['r', 're-roll 1s until they are not 1s'],
-      ['r<3', 're-roll anything under 3'],
-      ['ro1', 're-roll 1s exactly once'],
-      ['u', 'force every die to be unique'],
-      ['uo', 're-roll duplicates once']
+      ['(_)r', 're-roll 1s until they are not 1s', 'suffix'],
+      ['(_)r<3', 're-roll anything under 3', 'suffix'],
+      ['(_)ro1', 're-roll 1s exactly once', 'suffix'],
+      ['(_)u', 'force every die to be unique', 'suffix'],
+      ['(_)uo', 're-roll duplicates once', 'suffix']
     ]],
     ['Successes', [
-      ['>=8', 'count each 8+ as a success'],
-      ['f<=1', 'each 1 or less cancels a success'],
-      ['t8', 'alias for >=8'],
-      ['cs>=19', 'flag 19+ as a critical success'],
-      ['cf<=2', 'flag 2 or less as a critical fail']
+      ['(_)>=8', 'count each 8+ as a success', 'suffix'],
+      ['(_)f<=1', 'each 1 or less cancels a success', 'suffix'],
+      ['(_)t8', 'alias for >=8', 'suffix'],
+      ['(_)cs>=19', 'flag 19+ as a critical success', 'suffix'],
+      ['(_)cf<=2', 'flag 2 or less as a critical fail', 'suffix']
     ]],
-    ['Clamp & sort', [
-      ['min2', 'treat anything below 2 as 2'],
-      ['max5', 'treat anything above 5 as 5'],
-      ['sa', 'sort dice ascending'],
-      ['sd', 'sort dice descending']
+    ['Clamp', [
+      ['(_)min2', 'treat anything below 2 as 2', 'suffix'],
+      ['(_)max5', 'treat anything above 5 as 5', 'suffix']
     ]],
     ['Bracket groups', [
-      ['(3d6+2d8)kh3', 'keep the best 3 dice across the group'],
-      ['(4d6+2d10)dl2', 'drop the worst 2 overall'],
-      ['(2d6+3d8)>=5', 'count every die of 5 or more'],
-      ['(2d20+2d12)sd', 'sort every die in the group']
+      ['(3d6+2d8)kh3', 'keep the best 3 dice across the group', 'atom'],
+      ['(4d6+2d10)dl2', 'drop the worst 2 overall', 'atom'],
+      ['(2d6+3d8)>=5', 'count every die of 5 or more', 'atom'],
+      ['(2d20+2d12)kl1', 'keep the single worst die', 'atom']
     ]],
     ['Maths', [
-      ['+ - * / % ^', 'the usual operators'],
-      ['(1d6+2)*3', 'parentheses set the order'],
-      ['floor(3d6/2)', 'round down'],
-      ['max(1d20, 1d20)', 'best of two rolls'],
-      ['abs ceil round sqrt', 'also available']
+      ['(_)+2', 'add', 'suffix'],
+      ['(_)-2', 'subtract', 'suffix'],
+      ['(_)*2', 'multiply', 'suffix'],
+      ['(_)/2', 'divide', 'suffix'],
+      ['(_)%2', 'remainder', 'suffix'],
+      ['(_)^2', 'raise to a power', 'suffix']
+    ]],
+    ['Functions', [
+      ['floor(_)', 'round down', 'wrap'],
+      ['ceil(_)', 'round up', 'wrap'],
+      ['round(_)', 'round to nearest', 'wrap'],
+      ['abs(_)', 'absolute value', 'wrap'],
+      ['sqrt(_)', 'square root', 'wrap'],
+      ['sign(_)', 'sign: -1, 0 or 1', 'wrap'],
+      ['log(_)', 'natural logarithm', 'wrap'],
+      ['exp(_)', 'e to the power of', 'wrap'],
+      ['sin(_)', 'sine', 'wrap'],
+      ['cos(_)', 'cosine', 'wrap'],
+      ['tan(_)', 'tangent', 'wrap'],
+      ['max(_, 1)', 'the largest argument', 'wrap'],
+      ['min(_, 1)', 'the smallest argument', 'wrap'],
+      ['pow(_, 2)', 'raise to a power', 'wrap']
     ]],
     ['Whole roll', [
-      ['6x 4d6dl1', 'repeat the expression 6 times'],
-      ['2d20kh1 # attack', 'label after # (ignored by maths)']
+      ['6x ', 'repeat the expression 6 times', 'prefix'],
+      [' # note', 'label, ignored by the maths', 'append']
     ]],
     ['Comparisons', [
-      ['= != < > <= >=', 'usable after !, r, u, f, cs, cf']
+      ['= != < > <= >=', 'usable after !, r, u, f, cs, cf', null]
     ]]
   ];
 
@@ -262,10 +282,13 @@
 
   /** history entries below the newest collapse to a single line */
   function lineHTML(roll, idx) {
-    return '<div class="line" data-open="' + idx + '" title="show the dice">' +
-      '<span class="lt">' + esc(totalText(roll)) + '</span>' +
-      '<span class="lx">' + esc(roll.notation) + '</span>' +
-      (roll.label ? '<span class="ll">#&nbsp;' + esc(roll.label) + '</span>' : '') +
+    // the label replaces the expression when there is one; showing both is noise
+    const name = roll.label
+      ? '<span class="ll">' + esc(roll.label) + '</span>'
+      : '<span class="lx">' + esc(roll.notation) + '</span>';
+    return '<div class="line" data-open="' + idx + '" title="show the breakdown">' +
+      '<span class="lt">' + esc(totalText(roll)) + '</span>' + name +
+      '<span class="ldice">' + roll.sets[0].html(roll.diceCount > DENSITY.plain ? { plain: true } : null) + '</span>' +
       '<span class="lm">' + esc(roll.time) + '</span>' +
     '</div>';
   }
@@ -304,9 +327,9 @@
     if (many) meta.push(roll.sets.length + ' sets, summed');
     if (live) meta.push('<span class="pulse">live &mdash; Enter to keep</span>');
     else meta.push(roll.time);
-    if (idx > 0) meta.push('<button class="fold" data-fold="' + idx + '">collapse</button>');
+    meta.push('<button class="again" data-again="' + idx + '">roll again</button>');
 
-    return '<div class="card' + (live ? ' live' : '') + '">' +
+    return '<div class="card' + (live ? ' live' : '') + '" data-card="' + idx + '">' +
       '<div class="top">' +
         '<div class="total">' + esc(totalText(roll)) + '</div>' +
         '<div class="meta">' +
@@ -331,6 +354,7 @@
         ? cardHTML(e.roll, i === 0 && state.topIsLive, i)
         : lineHTML(e.roll, i)
     ).join('');
+    drawTrees(el.result);
   }
 
   function makeRoll() {
@@ -450,9 +474,14 @@
 
   function renderReference() {
     const html = '<div class="refgrid">' + galleryHTML() + REFERENCE.map(([name, items]) =>
-      '<div class="refgroup"><h3>' + esc(name) + '</h3>' + items.map(([code, desc]) =>
-        '<div class="refrow"><code data-ins="' + esc(code) + '">' + esc(code) + '</code>' +
-        '<span>' + esc(desc) + '</span></div>').join('') + '</div>').join('') + '</div>';
+      '<div class="refgroup"><h3>' + esc(name) + '</h3>' + items.map(([code, desc, form]) => {
+        // entries with no placement rule are documentation only, not insertable
+        const tag = form
+          ? ' data-ins="' + esc(code) + '" data-form="' + form + '"'
+          : ' class="inert"';
+        return '<div class="refrow"><code' + tag + '>' + esc(code) + '</code>' +
+          '<span>' + esc(desc) + '</span></div>';
+      }).join('') + '</div>').join('') + '</div>';
 
     // wide screens get the permanent left rail, narrow ones the drawer tab
     const host = wide.matches ? el.refSide : el.reference;
@@ -460,9 +489,17 @@
     other.innerHTML = '';
     host.innerHTML = html;
 
+    const HINT = {
+      atom: 'click to insert at the caret',
+      suffix: 'click to attach to the term the caret is in',
+      wrap: 'click to wrap the term the caret is in',
+      prefix: 'click to add to the front of the expression',
+      append: 'click to add to the end of the expression'
+    };
     host.querySelectorAll('[data-ins]').forEach((c) => {
-      if (c.tagName === 'CODE') c.title = 'click to insert at the caret';
-      c.addEventListener('click', () => insertAtCaret(c.getAttribute('data-ins')));
+      const form = c.getAttribute('data-form') || 'atom';
+      c.title = HINT[form] || HINT.atom;
+      c.addEventListener('click', () => applySnippet(c.getAttribute('data-ins'), form));
     });
   }
 
@@ -473,6 +510,107 @@
     t.focus();
     t.setSelectionRange(a + text.length, a + text.length);
     onInput();
+  }
+
+  /* ------------------------------------------------- placement-aware insert
+     Reference snippets say where they attach: `(_)kh3` hangs off a term,
+     `floor(_)` wraps one. Find the innermost dice term or bracket the caret
+     sits in and act on that, so clicking builds on what is already typed. */
+  function targetSpan() {
+    if (!state.inspect) return null;
+    const p = state.inspect.parsed, off = p.offset;
+    const pos = Math.max(0, Math.min(el.ta.selectionStart, el.ta.value.length) - off);
+    let best = null, last = null;
+
+    (function walk(n) {
+      if (!n || typeof n !== 'object') return;
+      if (n.sp && (n.t === 'dice' || n.t === 'group' || n.t === 'paren')) {
+        if (!last || n.sp[1] > last.sp[1]) last = n;
+        if (pos >= n.sp[0] && pos <= n.sp[1] &&
+            (!best || (n.sp[1] - n.sp[0]) < (best.sp[1] - best.sp[0]))) best = n;
+      }
+      for (const k of ['l', 'r', 'v', 'sub', 'qty', 'sides']) walk(n[k]);
+      if (n.args) n.args.forEach(walk);
+    }(p.ast));
+
+    const node = best || last;
+    // nothing dice-like to hang off: treat the whole expression as the target
+    if (!node) return { a: off, b: el.ta.value.length, whole: true };
+    return { a: node.sp[0] + off, b: node.sp[1] + off, whole: false };
+  }
+
+  function applySnippet(code, form) {
+    const t = el.ta;
+    if (!form || form === 'atom') return insertAtCaret(code.replace(/\(_\)/g, ''));
+
+    if (form === 'prefix') {
+      t.value = code + t.value;
+      t.focus(); t.setSelectionRange(code.length, code.length);
+      return onInput();
+    }
+    if (form === 'append') {
+      const at = t.value.length;
+      t.value = t.value + code;
+      t.focus(); t.setSelectionRange(at + code.length, at + code.length);
+      return onInput();
+    }
+
+    const sp = targetSpan();
+    if (!sp) return insertAtCaret(code.replace(/\(_\)/g, ''));
+    const inner = t.value.slice(sp.a, sp.b);
+
+    let replacement, caret;
+    if (form === 'suffix') {
+      // modifiers only bind to a die or a bracket, so bracket anything else
+      const tail = code.replace(/^\(_\)/, '');
+      const base = sp.whole ? '(' + inner + ')' : inner;
+      replacement = base + tail;
+      caret = sp.a + replacement.length;
+    } else {                                   // wrap
+      replacement = code.replace('_', inner);
+      caret = sp.a + replacement.length;
+    }
+
+    t.value = t.value.slice(0, sp.a) + replacement + t.value.slice(sp.b);
+    t.focus();
+    t.setSelectionRange(caret, caret);
+    onInput();
+  }
+
+  /* ------------------------------------------------------------ sum tree
+     Every summing node carries data-sum. Measure where each one sits over the
+     dice and draw it as a bracket underneath, innermost nearest the dice. */
+  const SUM_ROW = 17;
+  function drawTrees(root) {
+    root.querySelectorAll('.setrow .body').forEach((body) => {
+      const nodes = Array.prototype.slice.call(body.querySelectorAll('[data-sum]'));
+      if (!nodes.length) return;
+      const base = body.getBoundingClientRect();
+      const items = nodes.map((n) => {
+        let depth = 0, p = n.parentElement;
+        while (p && p !== body) {
+          if (p.hasAttribute && p.hasAttribute('data-sum')) depth++;
+          p = p.parentElement;
+        }
+        const r = n.getBoundingClientRect();
+        return { depth, left: r.left - base.left, width: r.width, sum: n.getAttribute('data-sum') };
+      });
+      const maxDepth = items.reduce((a, i) => Math.max(a, i.depth), 0);
+
+      const layer = document.createElement('div');
+      layer.className = 'sumtree';
+      layer.style.height = ((maxDepth + 1) * SUM_ROW) + 'px';
+      for (const it of items) {
+        const bar = document.createElement('div');
+        bar.className = 'sumbar';
+        bar.style.left = it.left + 'px';
+        bar.style.width = Math.max(it.width, 20) + 'px';
+        bar.style.top = ((maxDepth - it.depth) * SUM_ROW) + 'px';
+        bar.innerHTML = '<span class="sumval">' + esc(it.sum) + '</span>';
+        layer.appendChild(bar);
+      }
+      body.appendChild(layer);
+    });
   }
 
   /* ================================================================ saved */
@@ -647,16 +785,23 @@
     });
 
     el.result.addEventListener('click', (ev) => {
+      const again = ev.target.closest('[data-again]');
+      if (again) {
+        const e = state.log[+again.getAttribute('data-again')];
+        if (e) { el.ta.value = e.roll.input; onInput(); commitRoll(); }
+        return;
+      }
       const open = ev.target.closest('[data-open]');
       if (open) {
         const e = state.log[+open.getAttribute('data-open')];
         if (e) { e.expanded = true; renderResult(); }
         return;
       }
-      const fold = ev.target.closest('[data-fold]');
-      if (fold) {
-        const e = state.log[+fold.getAttribute('data-fold')];
-        if (e) { e.expanded = false; renderResult(); }
+      // clicking an expanded card anywhere inert folds it back up
+      const card = ev.target.closest('[data-card]');
+      if (card && !ev.target.closest('button, a, input')) {
+        const i = +card.getAttribute('data-card');
+        if (i > 0 && state.log[i]) { state.log[i].expanded = false; renderResult(); }
       }
     });
     $('btnClear').addEventListener('click', () => {

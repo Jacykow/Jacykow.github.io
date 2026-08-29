@@ -40,7 +40,8 @@ complete and least ambiguous version of that family. A few Dice Maiden shorthand
 ### Modifiers
 
 Modifiers chain onto a dice term in any written order — they are always **applied** in the
-fixed order below, so `4d6kh3!` and `4d6!kh3` mean the same thing.
+fixed order below, so `4d6kh3!` and `4d6!kh3` mean the same thing. A term may only
+explode once; `!!` is rejected rather than quietly exploding twice.
 
 | # | Notation | Meaning |
 |---|---|---|
@@ -48,8 +49,7 @@ fixed order below, so `4d6kh3!` and `4d6!kh3` mean the same thing.
 | 2 | `max5` | any roll above 5 counts as 5 |
 | 3 | `!` | exploding: re-roll and add on the highest face |
 | 3 | `!>4`, `!=6`, `!6` | explode on a specific comparison |
-| 3 | `!!` | compounding: the extra roll folds into the same die |
-| 3 | `!p`, `!!p` | penetrating: every extra roll takes −1 |
+| 3 | `!p` | penetrating: every extra roll takes −1 |
 | 3 | `e6` / `ie6` | Dice Maiden: explode once / repeatedly on 6+ |
 | 4 | `r`, `r<3`, `r1` | re-roll until the die no longer qualifies |
 | 4 | `ro`, `ro1` | re-roll at most once |
@@ -60,7 +60,6 @@ fixed order below, so `4d6kh3!` and `4d6!kh3` mean the same thing.
 | 8 | `f<=1`, `f1` | each qualifying die cancels one success |
 | 9 | `cs>=19` | flag critical successes (display only) |
 | 10 | `cf<=2` | flag critical failures (display only) |
-| 11 | `s`, `sa`, `sd` | sort the dice ascending / descending |
 
 Comparison points are `=`, `!=`, `<`, `>`, `<=`, `>=`. A bare number after `!`, `r`, `ro`,
 `u`, `uo`, `cs` or `cf` means "equal to" (`r1` == `r=1`); after `f` it means "or less"
@@ -75,10 +74,10 @@ single term:
 (3d6+2d8)kh3      keep the best 3 dice across the whole group
 (4d6+2d10)dl2     drop the worst 2 overall
 (2d6+3d8)>=5      count every die of 5 or more as a success
-(2d20+2d12)sd     sort every die in the group
+(2d20+2d12)kl1    keep the single worst die
 ```
 
-Keep, drop, target success/failure and sorting are the modifiers that make sense here.
+Keep, drop and target success/failure are the modifiers that make sense here.
 
 ### Maths
 
@@ -104,9 +103,15 @@ pow round sign sin sqrt tan`. `round()` rounds half away from zero.
   again, building a log. Dropped dice are struck out, exploded dice are amber, re-rolled
   dice show their original value, successes and criticals are colour-coded.
 
-  Dice within a term are joined by the `+` they stand for, and anything that adds up —
-  a term of several dice, a bracket group — carries its own running subtotal, so
-  `((d6e2+d6)*d6)+d6e3` shows what each piece came to on the way to the total.
+  Dice within a term are joined by the `+` they stand for, and every subtotal is drawn as
+  a bracket in a tree beneath them, innermost nearest the dice — so `((2d6+d6)*d6)+8d10`
+  shows what each bracket came to on the way to the total. Past three dice a term overlaps
+  its own dice so it never takes more room than three; the individual faces stop mattering
+  there and the subtotal speaks for the term.
+
+  Each card carries a **roll again** button, and clicking an opened history entry anywhere
+  inert folds it back up. Collapsed entries show their dice, and their label if they have
+  one, otherwise the expression — never both.
 
   Each die is a 3D render of a real solid, drawn from one inline SVG sprite referenced
   with `<use>`, so the shapes cost no extra requests and recolour from CSS:
@@ -133,9 +138,14 @@ pow round sign sin sqrt tan`. `round()` rounds half away from zero.
 * **Details** — Monte-Carlo distribution of the total (min / mean / median / max / std dev
   / percentiles) with a histogram. Sample size adapts to keep it responsive.
 * **Reference** — a gallery of every die that has a solid of its own, plus the full cheat
-  sheet; click any die or snippet to insert it at the caret. From 1000px up it sits in a
-  permanent rail on the left; below that it folds back into the drawer as a tab. That
-  breakpoint is the single `wide` media query in `app.js`.
+  sheet. From 1000px up it sits in a permanent rail on the left; below that it folds back
+  into the drawer as a tab. That breakpoint is the single `wide` media query in `app.js`.
+
+  Snippets show where they attach, with `(_)` standing for the expression they act on:
+  `(_)kh3` hangs off a term, `floor(_)` wraps one. Clicking finds the innermost dice term
+  or bracket the caret is in and edits *that*, so `2d6+3d8` with the caret in the first
+  term becomes `2d6!+3d8` rather than gaining a stray fragment. Entries with no sensible
+  placement are shown greyed and are not clickable.
 * **Saved** — expressions kept in `localStorage`. <kbd>Ctrl</kbd>+<kbd>S</kbd> to save.
 * **Copy link** — puts the expression in the URL hash so it can be shared.
 

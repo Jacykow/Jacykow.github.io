@@ -150,11 +150,12 @@ kbd{
 .card .lbl{color:var(--purple); font-size:12.5px}
 .card .sub{font-size:11.5px; color:var(--dimmer); margin-top:2px; display:flex; gap:10px; flex-wrap:wrap}
 .card .sub .pulse{color:var(--accent)}
-.card .sub .fold{
-  background:none; border:none; color:var(--dimmer); font-size:11.5px; padding:0;
-  text-decoration:underline dotted; font-family:var(--sans);
+.card .sub .again{
+  background:none; border:1px solid var(--border); color:var(--dim); font-size:11px;
+  padding:1px 8px; border-radius:999px; font-family:var(--sans);
 }
-.card .sub .fold:hover{color:var(--text)}
+.card .sub .again:hover{color:var(--accent); border-color:var(--accent)}
+.card[data-card]:not([data-card="0"]){cursor:zoom-out}
 
 /* collapsed history entry: one line, newest entry excepted */
 .line{
@@ -164,8 +165,13 @@ kbd{
 }
 .line:hover{background:var(--pane); border-color:var(--border)}
 .line .lt{color:var(--accent); font-weight:700; flex:none; min-width:46px; text-align:right}
-.line .lx{color:var(--dim); flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis}
-.line .ll{color:var(--purple); flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis}
+.line .lx{color:var(--dim); flex:none; max-width:34%; overflow:hidden; text-overflow:ellipsis}
+.line .ll{color:var(--purple); flex:none; max-width:34%; overflow:hidden; text-overflow:ellipsis}
+.line .ldice{
+  --dsz:17px; flex:1 1 auto; min-width:0; overflow:hidden; white-space:nowrap;
+  line-height:1; opacity:.9;
+}
+.line .ldice .r-plus, .line .ldice .r-op, .line .ldice .r-brk{font-size:10px}
 .line .lm{color:var(--dimmer); font-size:11px; flex:none; margin-left:auto; padding-left:8px}
 .card .rows{
   margin-top:9px; padding-top:9px; border-top:1px dashed var(--border);
@@ -243,10 +249,31 @@ kbd{
 .chip-die sup{color:var(--dimmer); font-size:9px}
 .r-op{color:var(--dimmer); padding:0 5px}
 .r-plus{color:var(--dimmer); padding:0 1px; font-size:11px; vertical-align:middle}
-.subsum{color:var(--accent); font-size:11.5px; padding:0 2px 0 5px; white-space:nowrap; vertical-align:middle}
-.r-grp > .subsum{color:var(--blue)}
 .r-term, .r-grp{border-radius:5px; padding:0 1px}
 .r-brk{color:var(--pink)}
+
+/* past 3 dice the individual faces stop mattering, so overlap them and let
+   the subtotal below speak for the term */
+.r-term.squeezed .die{margin:0}   /* the overlap formula assumes no gaps */
+.r-term.squeezed .die + .die{margin-left:calc(var(--dsz) * var(--sq))}
+.r-term.squeezed .die{box-shadow:-2px 0 0 -1px var(--pane)}
+.card.live .r-term.squeezed .die{box-shadow:-2px 0 0 -1px var(--pane-2)}
+
+/* subtotal tree drawn under the dice, innermost bracket nearest them */
+.setrow .body{display:block; position:relative}
+.sumtree{position:relative; margin-top:2px}
+.sumbar{position:absolute; height:15px; border-top:1px solid #3a4152}
+.sumbar::before, .sumbar::after{
+  content:''; position:absolute; top:0; width:1px; height:4px; background:#3a4152;
+}
+.sumbar::before{left:0}
+.sumbar::after{right:0}
+.sumval{
+  position:absolute; left:50%; top:-1px; transform:translateX(-50%);
+  font-size:11px; line-height:1.4; color:var(--accent); background:var(--pane);
+  padding:0 5px; white-space:nowrap;
+}
+.card.live .sumval{background:var(--pane-2)}
 
 /* hovering the expression, the Explain list or a rolled die lights up all three */
 .r-term.hot, .r-grp.hot{background:rgba(240,180,41,.13); box-shadow:0 0 0 1px rgba(240,180,41,.4)}
@@ -329,6 +356,8 @@ kbd{
   border:1px solid var(--border); border-radius:4px; padding:1px 6px; cursor:pointer; white-space:nowrap;
 }
 .refrow code:hover{color:#ffd469; border-color:var(--accent)}
+.refrow code.inert{color:var(--dim); cursor:default}
+.refrow code.inert:hover{color:var(--dim); border-color:var(--border)}
 .refrow span{font-size:12px; color:var(--dim)}
 
 /* the dice gallery at the top of the reference */

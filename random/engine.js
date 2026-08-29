@@ -63,7 +63,7 @@
   /* Application order of dice modifiers — lower runs first. */
   const ORDER = {
     min: 1, max: 2, explode: 3, reroll: 4, unique: 5, keep: 6, drop: 7,
-    target: 8, failure: 8.5, critSuccess: 9, critFail: 10, sort: 11
+    target: 8, failure: 8.5, critSuccess: 9, critFail: 10
   };
 
   class DiceError extends Error {
@@ -281,6 +281,11 @@
       for (;;) {
         const m = this.modifier();
         if (!m) return mods;
+        // `!!` used to mean compounding. It is gone, and left unguarded it now
+        // parses as two explode passes and quietly doubles the dice.
+        if (m.t === 'explode' && mods.some((p) => p.t === 'explode')) {
+          this.fail('a die can only explode once — "!!" is no longer a modifier');
+        }
         mods.push(m);
       }
     }
@@ -302,19 +307,17 @@
       }
 
       // -- exploding --------------------------------------------------------
-      if (this.lit('!!p')) return this.fin(start, { t: 'explode', compound: true, pen: true, cp: this.cpAny() });
-      if (this.lit('!p')) return this.fin(start, { t: 'explode', compound: false, pen: true, cp: this.cpAny() });
-      if (this.lit('!!')) return this.fin(start, { t: 'explode', compound: true, pen: false, cp: this.cpAny() });
-      if (this.lit('!')) return this.fin(start, { t: 'explode', compound: false, pen: false, cp: this.cpAny() });
+      if (this.lit('!p')) return this.fin(start, { t: 'explode', pen: true, cp: this.cpAny() });
+      if (this.lit('!')) return this.fin(start, { t: 'explode', pen: false, cp: this.cpAny() });
 
       // Dice Maiden aliases: ie6 explodes indefinitely on >=6, e6 explodes once
       if (this.lit('ie')) {
         const n = this.digits();
-        return n === null ? back() : this.fin(start, { t: 'explode', compound: false, pen: false, alias: true, cp: { op: '>=', v: n } });
+        return n === null ? back() : this.fin(start, { t: 'explode', pen: false, alias: true, cp: { op: '>=', v: n } });
       }
       if (this.lit('e')) {
         const n = this.digits();
-        return n === null ? back() : this.fin(start, { t: 'explode', compound: false, pen: false, once: true, alias: true, cp: { op: '>=', v: n } });
+        return n === null ? back() : this.fin(start, { t: 'explode', pen: false, once: true, alias: true, cp: { op: '>=', v: n } });
       }
 
       // -- reroll -----------------------------------------------------------
@@ -354,11 +357,6 @@
         const n = this.digits();
         return n === null ? back() : this.fin(start, { t: 'target', alias: true, cp: { op: '>=', v: n } });
       }
-
-      // -- sorting ----------------------------------------------------------
-      if (this.word('sa')) return this.fin(start, { t: 'sort', dir: 'a' });
-      if (this.word('sd')) return this.fin(start, { t: 'sort', dir: 'd' });
-      if (this.word('s')) return this.fin(start, { t: 'sort', dir: 'a' });
 
       // -- bare comparison = target success ---------------------------------
       const cp = this.comparePoint();
@@ -444,7 +442,17 @@
   }
 
   const PLUS = '<span class="r-plus">+</span>';
-  const subSum = (v) => '<span class="subsum">= ' + esc(fmt(v)) + '</span>';
+
+  /* Subtotals are not written inline any more: each summing node just carries
+     its value, and the UI draws them as a tree underneath the dice. A term of
+     more than SQUEEZE_AT dice overlaps them so it never takes more room than
+     that many — the individual faces stop mattering at that point. */
+  const SQUEEZE_AT = 3;
+  function squeezeStyle(n) {
+    if (n <= SQUEEZE_AT) return '';
+    // n dice with margin m must span SQUEEZE_AT dice: m = (SQUEEZE_AT - n)/(n - 1)
+    return ' style="--sq:' + ((SQUEEZE_AT - n) / (n - 1)).toFixed(4) + '"';
+  }
 
   /* -------------------------------------------------------- result nodes */
   const NumResult = (v) => ({
@@ -477,8 +485,8 @@
   const ParenResult = (v) => ({
     k: 'paren', inner: v, children: [v], total: () => v.total(),
     html(o) {
-      return '<span class="r-grp"><span class="r-brk">(</span>' + v.html(o) +
-        '<span class="r-brk">)</span>' + subSum(this.total()) + '</span>';
+      return '<span class="r-grp" data-sum="' + esc(fmt(this.total())) + '">' +
+        '<span class="r-brk">(</span>' + v.html(o) + '<span class="r-brk">)</span></span>';
     }
   });
 
@@ -534,8 +542,7 @@
               const raw = makeDie(sides);
               last = raw;
               const val = m.pen ? raw - 1 : raw;
-              if (m.compound) { r.v += val; tag(r, 'exploded'); }
-              else out.push({ v: val, tags: ['exploded'], from: null });
+              out.push({ v: val, tags: ['exploded'], from: null });
               if (m.once) break;
             }
             if (n > 0) tag(r, 'exploded');
@@ -605,9 +612,6 @@
           break;
         }
 
-        case 'sort':
-          rolls.sort((a, b) => m.dir === 'd' ? b.v - a.v : a.v - b.v);
-          break;
       }
     }
 
@@ -638,10 +642,13 @@
         const shape = shapeFor(this.sides);
         const tag = this.uid ? ' data-x="d' + this.uid + '"' : '';
         const parts = rolls.map((r) => (o && o.plain) ? chipHTML(r, tag) : dieHTML(r, shape, tag));
-        // several dice in one term are summed, so show the operator and the sum
-        const body = parts.join(PLUS);
-        return '<span class="r-term"' + tag + '>' + body +
-          (rolls.length > 1 ? subSum(this.total()) : '') + '</span>';
+        const many = rolls.length > 1;
+        const squeezed = rolls.length > SQUEEZE_AT;
+        // the + between dice in a term is what the notation actually means
+        const body = squeezed ? parts.join('') : parts.join(PLUS);
+        return '<span class="r-term' + (squeezed ? ' squeezed' : '') + '"' + tag +
+          (many ? ' data-sum="' + esc(fmt(this.total())) + '"' : '') +
+          squeezeStyle(rolls.length) + '>' + body + '</span>';
       }
     };
   }
@@ -672,7 +679,6 @@
         }
         case 'target': successCp = m.cp; break;
         case 'failure': failureCp = m.cp; break;
-        case 'sort': dice.sort((x, y) => m.dir === 'd' ? y.v - x.v : x.v - y.v); break;
       }
     }
     if (successCp || failureCp) {
@@ -693,8 +699,8 @@
       },
       html(o) {
         const tag = this.uid ? ' data-x="g' + this.uid + '"' : '';
-        return '<span class="r-grp"' + tag + '><span class="r-brk">(</span>' +
-          sub.html(o) + '<span class="r-brk">)</span>' + subSum(this.total()) + '</span>';
+        return '<span class="r-grp"' + tag + ' data-sum="' + esc(fmt(this.total())) + '">' +
+          '<span class="r-brk">(</span>' + sub.html(o) + '<span class="r-brk">)</span></span>';
       }
     };
   }
@@ -734,7 +740,7 @@
       case 'max': return 'max' + m.n;
       case 'explode':
         if (m.alias) return (m.once ? 'e' : 'ie') + m.cp.v;
-        return (m.compound ? '!!' : '!') + (m.pen ? 'p' : '') + cpText(m.cp);
+        return '!' + (m.pen ? 'p' : '') + cpText(m.cp);
       case 'reroll': return (m.once ? 'ro' : 'r') + cpText(m.cp);
       case 'unique': return (m.once ? 'uo' : 'u') + cpText(m.cp);
       case 'keep': return 'k' + m.end + m.n;
@@ -743,7 +749,6 @@
       case 'failure': return m.alias ? 'f' + m.cp.v : 'f' + cpText(m.cp);
       case 'critSuccess': return 'cs' + cpText(m.cp);
       case 'critFail': return 'cf' + cpText(m.cp);
-      case 'sort': return 's' + m.dir;
     }
     return '';
   }
@@ -787,12 +792,10 @@
       case 'max': return ['Maximum', 'Any roll above ' + m.n + ' counts as ' + m.n + '.'];
       case 'explode': {
         const on = m.cp ? cpPhrase(m.cp) : 'its highest face';
-        let how = m.compound
-          ? 'roll again and fold the result into the same die'
-          : 'roll an extra ' + d + ' and add it alongside';
+        let how = 'roll an extra ' + d + ' and add it alongside';
         if (m.pen) how += ', subtracting 1 from every extra roll';
         const times = m.once ? ' Only one extra roll per die.' : ' Repeats as long as it keeps happening.';
-        return [m.compound ? 'Compounding explode' : (m.pen ? 'Penetrating explode' : 'Exploding'),
+        return [m.pen ? 'Penetrating explode' : 'Exploding',
                 'When a ' + d + ' rolls ' + on + ', ' + how + '.' + times];
       }
       case 'reroll': return ['Re-roll',
@@ -813,7 +816,6 @@
         'Flag any ' + d + ' showing ' + cpPhrase(m.cp, 'its highest face') + ' as a critical success (display only).'];
       case 'critFail': return ['Critical failure',
         'Flag any ' + d + ' showing ' + cpPhrase(m.cp, 'its lowest face') + ' as a critical failure (display only).'];
-      case 'sort': return ['Sort', 'Show the dice in ' + (m.dir === 'd' ? 'descending' : 'ascending') + ' order.'];
     }
     return ['Modifier', ''];
   }
