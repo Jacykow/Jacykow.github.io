@@ -1,15 +1,16 @@
 /* ============================================================================
    Dice sprite generator  —  node tools/gen-dice.js
    ----------------------------------------------------------------------------
-   Builds the real polyhedron for each die, rotates it so one face sits up and
-   toward the camera, orthographically projects it, culls back faces and shades
-   the rest with a Lambert term. The output is a static SVG sprite: no runtime
-   3D, just baked paths.
+   Builds the real polyhedron for each die, lays it to rest on a face, views it
+   through one shared camera, culls back faces and shades the rest with a
+   Lambert term. The output is a static SVG sprite: no runtime 3D, just baked
+   paths.
 
    Faces are painted with `currentColor` at varying opacity over an opaque body,
-   so a single CSS colour still drives every state (dropped, success, ...).
+   so a single CSS colour still drives every state (dropped, success, ...). The
+   value is drawn centred at a constant size, so nothing per-shape is emitted.
 
-   Prints the <symbol> block for index.html and the matching CSS block.
+   Prints the <symbol> block for index.html; run tools/splice.js to install it.
    ========================================================================== */
 'use strict';
 
@@ -156,12 +157,25 @@ function trapezohedron(squash) {
   return dual(antiprism(5)).map((v) => [v[0], v[1] * k, v[2]]);
 }
 
-/** n-gonal prism of the given half-height — coins and barrel dice */
+/** n-gonal prism of the given half-height — the coin, and the odd-sided
+    barrels. Made long enough that it can only come to rest on a side. */
 function prism(n, h, r = 1) {
   const v = [];
   for (let i = 0; i < n; i++) {
     const t = (i / n) * Math.PI * 2;
     v.push([Math.cos(t) * r, h, Math.sin(t) * r], [Math.cos(t) * r, -h, Math.sin(t) * r]);
+  }
+  return v;
+}
+
+/** n-gonal bipyramid: an n-gon equator with an apex above and below, giving
+    2n triangular faces. This is how even-sided dice without a Platonic solid
+    are actually made (d14, d16, d18). */
+function bipyramid(n, h) {
+  const v = [[0, h, 0], [0, -h, 0]];
+  for (let i = 0; i < n; i++) {
+    const t = (i / n) * Math.PI * 2;
+    v.push([Math.cos(t), 0, Math.sin(t)]);
   }
   return v;
 }
@@ -250,7 +264,13 @@ function build(name, verts, opts) {
   //    symmetric on screen. This keeps the die flat on the floor while
   //    stopping it from looking randomly slewed.
   let bestSpin = 0;
-  if (opts.spinSearch !== false) {
+  if (opts.axisAlongX) {
+    // A barrel lying on a side face can still point anywhere in the ground
+    // plane, and both the across-view and end-on orientations are symmetric.
+    // Aim its long axis across the view directly so every odd die matches.
+    const ax = align([0, 1, 0], faces[rest].normal, [0, -1, 0]);
+    bestSpin = Math.atan2(ax[2], ax[0]) * 180 / Math.PI;
+  } else if (opts.spinSearch !== false) {
     let bestScore = Infinity;
     for (let deg = 0; deg < 360; deg += 0.5) {
       const t = deg * Math.PI / 180;
@@ -259,6 +279,13 @@ function build(name, verts, opts) {
       const pts = [].concat.apply([], F.filter((f) => f.nr[2] > 0.001).map((f) => f.pts))
         .map((p) => [p[0], -p[1]]);
       const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+      // A barrel is symmetric both across the view and end-on. Keep only the
+      // across-the-view answer so every odd die lies the same way.
+      if (opts.preferWide) {
+        const xr = Math.max.apply(null, pts.map((p) => p[0])) - Math.min.apply(null, pts.map((p) => p[0]));
+        const yr = Math.max.apply(null, pts.map((p) => p[1])) - Math.min.apply(null, pts.map((p) => p[1]));
+        if (yr > xr) continue;
+      }
       let asym = 0;
       for (const p of pts) {
         let m = Infinity;
@@ -297,59 +324,11 @@ function build(name, verts, opts) {
   const body = '      <path d="' + pathOf(hull) + '"/>\n';
   const outline = '      <path d="' + pathOf(hull) + '" fill="none" stroke-width="2.6"/>\n';
 
-  /* 5. where the value goes.
-        Most solids have a face lying flat on top, opposite the one they rest
-        on — that is the face you read. A tetrahedron has no such face: the
-        element opposite its resting face is a single vertex. Real d4s solve
-        this by printing the value beside that tip on each surrounding face,
-        so that is what we do. */
-  // "flat on top" has to be judged before the camera tilt, in world space,
-  // where up really is +Y. After tilting, a horizontal face's normal only has
-  // y = cos(PITCH) and no face ever looks flat.
-  const laidSpun = laid.map((v) => spinY(v, spin));
-  const worldF = facesOf(laidSpun);
-  let topIdx = 0;
-  worldF.forEach((f, i) => { if (f.nr[1] > worldF[topIdx].nr[1]) topIdx = i; });
-  const flatTop = worldF[topIdx].nr[1] > 0.85;
-  const front = visible.reduce((a, f) => (!a || f.nr[2] > a.nr[2]) ? f : a, null);
-
-  let vc, ext, mode;
-  if (opts.centreValue) {
-    vc = [BOX / 2, BOX / 2];
-    ext = (BOX - MARGIN * 2) / 2;
-    mode = 'centre';
-  } else if (flatTop) {
-    const top = F[topIdx];
-    vc = proj(top.c);
-    // inradius, not circumradius: the top face is foreshortened, so the
-    // distance to the nearest edge is what actually limits the digit
-    const q = top.pts.map(proj);
-    ext = Math.min.apply(null, q.map((p, i) => {
-      const r = q[(i + 1) % q.length];
-      const dx = r[0] - p[0], dy = r[1] - p[1];
-      const L = Math.hypot(dx, dy) || 1;
-      return Math.abs((vc[0] - p[0]) * dy - (vc[1] - p[1]) * dx) / L;
-    }));
-    mode = 'top face';
-  } else {
-    // Tetrahedron: nothing lies flat on top, the opposite element is a single
-    // vertex. Real d4s print the value beside that tip on each face round it.
-    let apexI = 0;
-    laidSpun.forEach((v, i) => { if (v[1] > laidSpun[apexI][1]) apexI = i; });
-    const ap = proj(V[apexI]), fc = proj(front.c);
-    const k = opts.tipBias == null ? 0.34 : opts.tipBias;
-    vc = [ap[0] + (fc[0] - ap[0]) * k, ap[1] + (fc[1] - ap[1]) * k];
-    ext = Math.hypot(fc[0] - ap[0], fc[1] - ap[1]) * 0.46;
-    mode = 'beside tip';
-  }
-
+  // The value is drawn centred at a constant size for every die, so there is
+  // no per-shape face fitting to do here.
   return {
     name,
     svg: '    <symbol id="sh-' + name + '">\n' + body + cells + outline + '    </symbol>',
-    nx: +vc[0].toFixed(1),
-    ny: +vc[1].toFixed(1),
-    ext: +ext.toFixed(1),
-    mode,
     spin: bestSpin,
     aspect: +((maxY - minY) / (maxX - minX)).toFixed(2),
     faces: faces.length,
@@ -358,32 +337,34 @@ function build(name, verts, opts) {
 }
 
 /* ------------------------------------------------------------------ shapes */
+/* Odd-sided dice are long n-gonal barrels resting on a side face; even-sided
+   ones without a Platonic solid are n/2-gon bipyramids. */
+const BARREL = 1.35;   // half-length: long enough never to land on an end
+const BIPY = 1.18;     // apex height above the equator
+
 const SHAPES = [
   build('d2', prism(28, 0.16), { restSides: 28, spinSearch: false }),
   build('d4', tetrahedron(), { spin: 60 }),
+  build('d5', prism(5, BARREL), { restSides: 4, axisAlongX: true }),
   build('d6', cube(), {}),
+  build('d7', prism(7, BARREL), { restSides: 4, axisAlongX: true }),
   build('d8', octahedron(), {}),
+  build('d9', prism(9, BARREL), { restSides: 4, axisAlongX: true }),
   build('d10', trapezohedron(), {}),
+  build('d11', prism(11, BARREL), { restSides: 4, axisAlongX: true }),
   build('d12', dodecahedron(), {}),
+  build('d14', bipyramid(7, BIPY), {}),
+  build('d16', bipyramid(8, BIPY), {}),
+  build('d18', bipyramid(9, BIPY), {}),
   build('d20', icosahedron(), {}),
-  build('d100', icosphere(), { centreValue: true, spinSearch: false })
+  build('d100', icosphere(), { spinSearch: false })
 ];
 
 /* ------------------------------------------------------------------ output */
-const svg = SHAPES.map((s) => s.svg).join('\n');
-// ext is the room the digit has (the face's projected inradius); a single digit
-// sits comfortably at about 1.5x that.
-const css = SHAPES.map((s) =>
-  '.s-' + s.name + '{--nx:' + s.nx + '; --ny:' + s.ny + '; --nsz:' +
-  Math.max(0.27, Math.min(0.42, (s.ext * 1.7) / 64)).toFixed(3) + '}'
-).join('\n');
-
 console.log('<!-- generated by tools/gen-dice.js -->');
-console.log(svg);
-console.log('\n/* generated by tools/gen-dice.js */');
-console.log(css);
-console.error('\n  shape  faces   value        at          ext    aspect  spin');
-for (const s of SHAPES) console.error('  ' + s.name.padEnd(7) +
-  (s.drawn + '/' + s.faces).padEnd(8) + s.mode.padEnd(13) +
-  ('(' + s.nx + ',' + s.ny + ')').padEnd(12) + String(s.ext).padEnd(7) +
-  String(s.aspect).padEnd(8) + Math.round(s.spin) + '°');
+console.log(SHAPES.map((s) => s.svg).join('\n'));
+
+console.error('\n  shape   faces drawn   aspect   spin');
+for (const s of SHAPES) console.error('  ' + s.name.padEnd(8) +
+  (s.drawn + '/' + s.faces).padEnd(13) + String(s.aspect).padEnd(9) +
+  Math.round(s.spin) + '°');

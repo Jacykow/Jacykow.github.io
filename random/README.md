@@ -105,11 +105,22 @@ pow round sign sin sqrt tan`. `round()` rounds half away from zero.
   again, building a log. Dropped dice are struck out, exploded dice are amber, re-rolled
   dice show their original value, successes and criticals are colour-coded.
 
-  Each die is a 3D render of its actual solid: tetrahedron, cube, octahedron, pentagonal
-  trapezohedron, dodecahedron, icosahedron, a coin for `d2` and a zocchihedron for `d%`.
-  Only those sizes have a standard shape, so Fudge dice and everything else (`d3`, `d7`,
-  …) show a plain value instead of inventing a solid. The shapes are one inline SVG
-  sprite referenced with `<use>`, so they cost no extra requests and recolour from CSS.
+  Each die is a 3D render of a real solid, drawn from one inline SVG sprite referenced
+  with `<use>`, so the shapes cost no extra requests and recolour from CSS:
+
+  | Sides | Solid |
+  |---|---|
+  | 4, 6, 8, 12, 20 | the Platonic solids |
+  | 10 | pentagonal trapezohedron |
+  | 2 | coin |
+  | 100 | zocchihedron |
+  | 5, 7, 9, 11 | n-gon barrels, long enough that they cannot land on an end |
+  | 14, 16, 18 | n/2-gon bipyramids |
+  | 3 | borrows the cube |
+  | 1, 13, 15, 17, 19 | borrow the d20 |
+  | anything above 20 | borrows the d100 |
+
+  Fudge dice have no die to draw, so they show a plain `−` / `0` / `+` chip.
 
   Dice shrink as the count grows — 34px, then 26px past 18 dice, then 19px past 60 — and
   past 240 dice they fall back to plain text chips so typing never stalls. Those
@@ -148,10 +159,8 @@ the whole set and every die has a surface flat on the ground. Back faces are cul
 the rest shaded with a Lambert term. The result is baked into the SVG sprite; there is
 no 3D at runtime, just static paths.
 
-The value goes on the face lying flat on top — except the tetrahedron, which has no such
-face: the element opposite its resting face is a single vertex. Real d4s solve this by
-printing the value beside that tip on each surrounding face, and the generator does the
-same.
+The value is drawn centred on the die at one constant size, the same for every shape and
+every value, so the generator emits no per-shape CSS.
 
 Faces are painted with `currentColor` at a baked opacity over an opaque body, which is
 why one CSS colour still drives every roll state. The generator also emits each shape's

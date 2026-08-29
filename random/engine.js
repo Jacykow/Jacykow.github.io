@@ -419,12 +419,22 @@
 
   const cpText = (cp) => cp ? cp.op + cp.v : '';
 
-  /* Only these sizes have a standard solid: d4/d6/d8/d12/d20 are the Platonic
-     solids, d10 is a pentagonal trapezohedron, d100 a zocchihedron, d2 a coin.
-     Fudge dice and any other size have no die to draw, so they fall back to a
-     plain value chip rather than inventing a shape. */
-  const SOLIDS = { 2: 'd2', 4: 'd4', 6: 'd6', 8: 'd8', 10: 'd10', 12: 'd12', 20: 'd20', 100: 'd100' };
-  const shapeFor = (sides, fudge) => fudge ? null : (SOLIDS[sides] || null);
+  /* Which solid to draw for a given number of sides.
+     d4/d6/d8/d12/d20 are the Platonic solids, d10 a pentagonal trapezohedron,
+     d100 a zocchihedron, d2 a coin. Even sizes without a Platonic solid are
+     n/2-gon bipyramids; odd ones are long n-gon barrels that cannot land on an
+     end. d3 borrows the cube, anything else at or under 20 borrows the d20,
+     and anything larger borrows the d100. Fudge dice have no die to draw. */
+  const SOLIDS = {
+    2: 'd2', 3: 'd6', 4: 'd4', 5: 'd5', 6: 'd6', 7: 'd7', 8: 'd8', 9: 'd9',
+    10: 'd10', 11: 'd11', 12: 'd12', 14: 'd14', 16: 'd16', 18: 'd18',
+    20: 'd20', 100: 'd100'
+  };
+  function shapeFor(sides, fudge) {
+    if (fudge) return null;
+    if (SOLIDS[sides]) return SOLIDS[sides];
+    return sides > 20 ? 'd100' : 'd20';
+  }
 
   /** the digits shown on the face; Fudge dice read as -, 0, + */
   function faceText(v, fudge) {
