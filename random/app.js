@@ -15,7 +15,7 @@
     ta: $('expr'), hl: $('hl'), wrap: $('editorWrap'), status: $('status'),
     notation: $('notation'), result: $('result'), rollBtn: $('rollBtn'),
     tabs: $('tabs'), explain: $('tab-explain'), details: $('tab-details'),
-    reference: $('tab-reference'), saved: $('tab-saved'), toast: $('toast'),
+    reference: $('tab-reference'), saved: $('tab-saved'), vars: $('tab-vars'), toast: $('toast'),
     paneTools: $('paneTools'), drawer: $('drawerToggle'), refSide: $('refSide'),
     preview: $('preview')
   };
@@ -31,6 +31,7 @@
   const LS_SAVED = 're.saved.v1';
   const LS_LAST = 're.last.v1';
   const LS_DRAWER = 're.drawer.v1';
+  const LS_VARS = 're.vars.v1';
 
   let state = {
     inspect: null,     // last successful DiceEngine.inspect()
@@ -107,6 +108,18 @@
       ['2d6~^2', 'raise to a power', 'suffix'],
       ['~max(~d20,10~)', 'the largest value', 'wrap'],
       ['~min(~d20,10~)', 'the smallest value', 'wrap']
+    ]],
+    ['Words & choices', [
+      ['d20>=15~?hit:miss', 'pick between two results', 'suffix'],
+      ['~\"a long word\"', 'a quoted word, spaces allowed', 'atom'],
+      ['~hit', 'a bare word — a variable if one is set', 'atom'],
+      ['~{atk}', 'always the variable, never a word', 'atom']
+    ]],
+    ['Custom dice', [
+      ['~[1,1,1,1,1,6]', 'six faces, mostly ones', 'atom'],
+      ['~[hit,hit,miss]', 'faces can be words', 'atom'],
+      ['~[d6,d10]', 'a face can be another roll', 'atom'],
+      ['~3[a,b]', 'roll a custom die three times', 'atom']
     ]],
     ['Whole roll', [
       ['~6x~4d6dl1', 'repeat the whole expression 6 times', 'prefix'],
@@ -716,12 +729,82 @@
     store.write(LS_DRAWER, collapsed);
   }
 
+  /* ============================================================ variables
+     A variable is just an expression stored under a name. It is worked out
+     afresh at every occurrence, so `2atk` rolls twice. */
+  function loadVars() {
+    const v = store.read(LS_VARS, null);
+    return Array.isArray(v) ? v : [{ name: 'atk', expr: 'd20+5' }];
+  }
+
+  function pushVars(list) {
+    const map = {};
+    for (const v of list) if (v.name) map[v.name] = v.expr;
+    E.setVars(map);
+    store.write(LS_VARS, list);
+  }
+
+  function renderVars() {
+    const list = loadVars();
+    el.vars.innerHTML =
+      '<div class="varhint">A variable holds an expression and is worked out again at every ' +
+      'occurrence. Use the bare name, or <code>{name}</code> when a plain word would be ambiguous.</div>' +
+      list.map((v, i) =>
+        '<div class="varrow" data-i="' + i + '">' +
+          '<input class="vname" value="' + esc(v.name) + '" spellcheck="false" placeholder="name">' +
+          '<input class="vexpr" value="' + esc(v.expr) + '" spellcheck="false" placeholder="expression">' +
+          '<button class="del" title="remove">&times;</button>' +
+        '</div>' +
+        (varError(v.expr) ? '<div class="varerr">' + esc(varError(v.expr)) + '</div>' : '')
+      ).join('') +
+      '<button class="varadd">+ add a variable</button>';
+
+    const commit = () => {
+      const next = [];
+      el.vars.querySelectorAll('.varrow').forEach((row) => {
+        next.push({
+          name: row.querySelector('.vname').value.replace(/[^a-zA-Z_]/g, ''),
+          expr: row.querySelector('.vexpr').value
+        });
+      });
+      pushVars(next);
+      renderVars();
+      onInput();               // the expression may now mean something different
+    };
+
+    el.vars.querySelectorAll('input').forEach((inp) => {
+      inp.addEventListener('change', commit);
+      inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') inp.blur(); });
+    });
+    el.vars.querySelectorAll('.del').forEach((b) => {
+      b.addEventListener('click', () => {
+        const list2 = loadVars();
+        list2.splice(+b.parentElement.getAttribute('data-i'), 1);
+        pushVars(list2);
+        renderVars();
+        onInput();
+      });
+    });
+    const add = el.vars.querySelector('.varadd');
+    if (add) add.addEventListener('click', () => {
+      const list2 = loadVars();
+      list2.push({ name: '', expr: '' });
+      pushVars(list2);
+      renderVars();
+    });
+  }
+
+  function varError(expr) {
+    if (!String(expr || '').trim()) return null;
+    try { E.parse(expr); return null; } catch (e) { return e.message; }
+  }
+
   /* ================================================================= tabs */
   function switchTab(name) {
     state.activeTab = name;
     el.tabs.querySelectorAll('button').forEach((b) =>
       b.classList.toggle('on', b.getAttribute('data-tab') === name));
-    ['explain', 'details', 'reference', 'saved'].forEach((n) =>
+    ['explain', 'details', 'reference', 'vars', 'saved'].forEach((n) =>
       $('tab-' + n).classList.toggle('on', n === name));
     if (name === 'details') renderDetails();
   }
@@ -808,6 +891,8 @@
   function init() {
     renderReference();
     renderSaved();
+    pushVars(loadVars());
+    renderVars();
 
     const hash = decodeURIComponent(location.hash.replace(/^#/, ''));
     el.ta.value = hash || store.read(LS_LAST, '') || DEFAULT_EXPR;

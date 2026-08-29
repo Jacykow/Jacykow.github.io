@@ -93,6 +93,50 @@ several values down to one. The scalar helpers (`floor`, `sqrt`, `abs`, …) are
 (1d6+2)*3        max(d20,10)        min(2d6,7)
 ```
 
+### Words and choices
+
+Alongside numbers there are **words**. A check produces one — `d6>4` reads as `success`
+or `failure` — and you can write your own, bare when it is unambiguous or quoted when it
+is not. Words carry no number, so a word can only ever be a result.
+
+```
+hit                     a bare word (characters a-z, A-Z and _)
+"a long word"           quoted, so spaces are allowed
+d20>=15 ? hit : miss    C-style choice; the condition must read success or failure
+```
+
+Only the success check casts to a number — `success` is 1 and `failure` is 0, so
+`3d6s5+1` works. The failure, critical-success and critical-failure checks are terminal:
+using one in a calculation is rejected before the roll happens.
+
+### Custom dice
+
+Square brackets are a die whose faces you write out. One face is picked, then whatever is
+on it is worked out — so a face can be a number, a word, or another roll. The die is drawn
+with the shape matching its face count.
+
+```
+[1,1,1,1,1,6]           six faces, mostly ones — drawn as a d6
+[hit,hit,miss]          faces can be words
+[d6,d10]                a face can be another roll
+3[a,b]                  roll a custom die three times, into a set
+```
+
+### Variables
+
+A variable holds an expression and is worked out **afresh at every occurrence**, so `2atk`
+really is two separate rolls. Set them in the **Vars** panel. A bare word becomes a
+variable when one of that name exists, and stays a word otherwise; `{name}` insists on the
+variable and errors when it is missing.
+
+```
+atk = d20+5             set in the Vars panel
+2atk>13                 the same as atk>13, atk>13
+{atk}                   never mistaken for the word "atk"
+```
+
+A variable that refers back to itself is caught at a fixed depth rather than hanging.
+
 ### Whole-roll extras
 
 ```

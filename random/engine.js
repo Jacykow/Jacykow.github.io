@@ -36,7 +36,7 @@
 
   const LIMIT = {
     qty: 5000, sides: 1000000, explode: 500, reroll: 500,
-    totalDice: 20000, repeat: 1000
+    totalDice: 20000, repeat: 1000, varDepth: 24
   };
 
   /* ------------------------------------------------------------------- rng */
@@ -140,7 +140,22 @@
       return node;
     }
 
+    /** cond ? a : b — the condition has to read as success or failure */
     expr() {
+      const cond = this.sum();
+      const q = this.mark();
+      if (!this.lit('?')) return cond;
+      const yes = this.expr();
+      const cA = this.mark();
+      if (!this.lit(':')) this.fail('expected ":" to finish the ? : choice');
+      const no = this.expr();
+      return {
+        t: 'ternary', cond, yes, no, uid: ++this.uid,
+        qSp: [q, q + 1], cSp: [cA, cA + 1], sp: [cond.sp ? cond.sp[0] : q, this.i]
+      };
+    }
+
+    sum() {
       let l = this.term();
       for (;;) {
         const a = this.mark();
@@ -221,17 +236,78 @@
       }
 
       if (this.peek() === '(') return this.bracket(a, null);
+      if (this.peek() === '[') return this.custom(a);
+      if (this.peek() === '{') return this.varRef(a);
+      if (this.peek() === '"') return this.quoted(a);
 
       const nA = this.mark();
       const n = this.number();
       if (n !== null) {
         const numNode = { t: 'num', v: n, sp: [nA, this.i] };
         if (this.atDice()) return this.dice(numNode, a);
-        if (this.peek() === '(') return this.bracket(a, numNode);   // 4(...) repeats
+        // a count in front of anything repeatable builds a set: 4(...), 2int, 3[a,b]
+        const c = this.peek();
+        if (c === '(') return this.bracket(a, numNode);
+        if (c === '[' || c === '{' || /[a-zA-Z_]/.test(c || '')) {
+          const one = this.primary();
+          return {
+            t: 'rep', count: numNode, items: [one], commas: [], mods: this.modifiers(),
+            brk: [[nA, nA], [this.i, this.i]], core: [a, this.i], sp: [a, this.i], uid: ++this.uid
+          };
+        }
         return numNode;
       }
 
+      const word = this.word();
+      if (word) return word;
+
       this.fail('unexpected "' + this.s[this.i] + '"');
+    }
+
+    /** a bare word: a variable if one is defined, otherwise just a word */
+    word() {
+      this.ws();
+      const m = /^[a-zA-Z_]+/.exec(this.s.slice(this.i));
+      if (!m) return null;
+      const a = this.i;
+      this.i += m[0].length;
+      return { t: 'word', name: m[0], sp: [a, this.i], mods: this.modifiers(), uid: ++this.uid };
+    }
+
+    /** `"anything at all"` — always a word, never a variable */
+    quoted(a) {
+      this.lit('"');
+      const end = this.s.indexOf('"', this.i);
+      if (end < 0) this.fail('unclosed quote');
+      const text = this.s.slice(this.i, end);
+      this.i = end + 1;
+      return { t: 'str', v: text, sp: [a, this.i], mods: this.modifiers(), uid: ++this.uid };
+    }
+
+    /** `{name}` — always a variable, never a word */
+    varRef(a) {
+      this.lit('{');
+      const m = /^[a-zA-Z_]+/.exec(this.s.slice(this.i));
+      if (!m) this.fail('expected a variable name after "{"');
+      this.i += m[0].length;
+      if (!this.lit('}')) this.fail('expected "}" to close the variable name');
+      return {
+        t: 'word', name: m[0], forced: true, sp: [a, this.i],
+        mods: this.modifiers(), uid: ++this.uid
+      };
+    }
+
+    /** `[a,b,c]` — a custom die: one face is picked, then evaluated */
+    custom(a) {
+      const oA = this.mark();
+      this.lit('[');
+      const { items, commas } = this.list();
+      const cA = this.mark();
+      if (!this.lit(']')) this.fail('expected "]" to close the custom die');
+      return {
+        t: 'custom', items, commas, brk: [[oA, oA + 1], [cA, cA + 1]],
+        mods: this.modifiers(), core: [a, cA + 1], sp: [a, this.i], uid: ++this.uid
+      };
     }
 
     /** `( a , b )` with an optional repeat count in front */
@@ -417,7 +493,9 @@
       case 'bin': typeCheck(node.l, true); typeCheck(node.r, true); break;
       case 'neg': typeCheck(node.v, arith); break;
       case 'paren': typeCheck(node.v, arith); break;
-      case 'set': case 'rep': node.items.forEach((i) => typeCheck(i, false)); break;
+      case 'set': case 'rep': case 'custom': node.items.forEach((i) => typeCheck(i, false)); break;
+      case 'ternary':
+        typeCheck(node.cond, false); typeCheck(node.yes, arith); typeCheck(node.no, arith); break;
       case 'func': node.args.forEach((a) => typeCheck(a, true)); break;
       case 'dice':
         if (node.qty) typeCheck(node.qty, true);
@@ -453,6 +531,14 @@
   const squeezeStyle = (n) => n <= SQUEEZE_AT ? ''
     : ' style="--sq:' + ((SQUEEZE_AT - n) / (n - 1)).toFixed(4) + '"';
   const PLUS = '<span class="r-plus">+</span>';
+
+  /* Every check yields a word. Only the success check carries a number
+     through to arithmetic; the other three are terminal result types. */
+  function wordOf(item) {
+    if (!item.check) return item.word || null;
+    const c = CHECKS[item.check.kind];
+    return item.check.hit ? c.hit : c.miss;
+  }
 
   function checkTotal(item) {
     const c = item.check;
@@ -490,6 +576,20 @@
     };
   }
 
+  /** a word: 'success', 'failure', or anything the user quoted */
+  function Str(word, html) {
+    return {
+      set: false, die: false, word, check: null, dropped: false,
+      get value() { return word; },
+      raw() { return 0; },
+      total() {
+        throw new DiceError('"' + word + '" is a word, not a number, ' +
+          'so it cannot be used in a calculation');
+      },
+      html() { return html || '<span class="r-str">' + esc(word) + '</span>'; }
+    };
+  }
+
   function Val(v, html) {
     return {
       set: false, die: false, check: null, dropped: false,
@@ -501,19 +601,73 @@
   }
 
   /** a bracket around a value: still a value, drawn with its own subtotal */
-  function Group(inner, uid) {
+  function Group(inner, uid, prefix) {
     return {
       set: false, die: false, check: null, dropped: false, uid,
-      get value() { return inner.raw(); },
+      get value() { return inner.word !== undefined ? inner.word : inner.raw(); },
+      get word() { return inner.word; },
       raw() { return inner.raw(); },
       total() { const c = checkTotal(this); return c === null ? inner.total() : c; },
       html(o) {
         const tag = uid ? ' data-x="s' + uid + '"' : '';
-        return '<span class="r-grp"' + tag + ' data-sum="' + esc(fmt(safeTotal(inner))) + '">' +
+        const sum = inner.word !== undefined ? '' : ' data-sum="' + esc(fmt(safeTotal(inner))) + '"';
+        return '<span class="r-grp"' + tag + sum + '>' + (prefix || '') +
           '<span class="r-brk"' + tag + '>(</span>' + inner.html(o) +
           '<span class="r-brk"' + tag + '>)</span></span>';
       }
     };
+  }
+
+  /** a face picked off a custom die, drawn as the die it came from */
+  function CustomDie(inner, shape, uid) {
+    return {
+      set: false, die: false, custom: true, check: null, dropped: false, uid,
+      get value() { return inner.word !== undefined ? inner.word : inner.raw(); },
+      get word() { return inner.word; },
+      raw() { return inner.raw(); },
+      total() { const c = checkTotal(this); return c === null ? inner.total() : c; },
+      html(o) {
+        const tag = uid ? ' data-x="c' + uid + '"' : '';
+        const w = wordOf(this);
+        const face = w !== null && w !== undefined ? w
+          : (inner.word !== undefined ? inner.word : fmt(safeTotal(inner)));
+        const cls = ['die', 'custom', 's-' + shape];
+        const mk = markClass(this);
+        if (mk) cls.push(mk.trim());
+        const size = String(face).length >= 3 ? ' v3' : (String(face).length === 2 ? ' v2' : '');
+        return '<span class="' + cls.join(' ') + '"' + tag + ' title="custom die">' +
+          '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
+          '<use href="#sh-' + shape + '"/></svg>' +
+          '<span class="dieval' + size + '">' + esc(String(face)) + '</span></span>';
+      }
+    };
+  }
+
+  /* ------------------------------------------------------------ variables */
+  let VARS = {};
+  const varCache = new Map();
+
+  function varAst(name, src) {
+    const key = name + '::' + src;
+    if (!varCache.has(key)) varCache.set(key, new Parser(String(src)).parse());
+    return varCache.get(key);
+  }
+
+  const varTag = (node) => '<span class="r-var">' + esc(node.name) + '</span>';
+
+  function setVars(map) {
+    VARS = {};
+    for (const k in map) if (/^[a-zA-Z_]+$/.test(k)) VARS[k] = map[k];
+    varCache.clear();
+  }
+
+  /** success is true, failure is false, anything else is not a condition */
+  function truth(v) {
+    const w = v.word !== undefined ? v.word : wordOf(v);
+    if (w === 'success') return true;
+    if (w === 'failure') return false;
+    throw new DiceError('a ? : choice needs a success or failure on the left — ' +
+      'compare something first, like d20>=15 ? hit : miss');
   }
 
   function SetVal(members, opts) {
@@ -744,6 +898,46 @@
     switch (node.t) {
       case 'num': return Val(node.v);
 
+      case 'str': return applyMods(Str(node.v), node.mods || [], null);
+
+      /* a bare word is a variable when one is defined, otherwise just a word */
+      case 'word': {
+        const src = VARS[node.name];
+        if (src === undefined) {
+          if (node.forced) throw new DiceError('no variable named "' + node.name + '" is set');
+          return applyMods(Str(node.name), node.mods || [], null);
+        }
+        if (ctx.depth >= LIMIT.varDepth) {
+          throw new DiceError('variable "' + node.name + '" keeps referring back to itself');
+        }
+        let ast;
+        try { ast = varAst(node.name, src); }
+        catch (e) { throw new DiceError('variable "' + node.name + '": ' + e.message); }
+        ctx.depth++;
+        const v = evalNode(ast, ctx);
+        ctx.depth--;
+        const wrapped = v.set
+          ? SetVal(v.members, { uid: node.uid, brackets: true, prefix: varTag(node) })
+          : Group(v, node.uid, varTag(node));
+        return applyMods(wrapped, node.mods || [], null);
+      }
+
+      /* one face is picked, then whatever is written on it is evaluated */
+      case 'custom': {
+        const pick = node.items[rng.int(0, node.items.length - 1)];
+        const v = evalNode(pick, ctx);
+        const shape = shapeFor(node.items.length);
+        return applyMods(CustomDie(v, shape, node.uid), node.mods || [], null);
+      }
+
+      case 'ternary': {
+        const c = evalNode(node.cond, ctx);
+        const branch = truth(c) ? node.yes : node.no;
+        const v = evalNode(branch, ctx);
+        const tag = node.uid ? ' data-x="t' + node.uid + '"' : '';
+        return Group(v, node.uid, '<span class="r-cond"' + tag + '>' + c.html() + '<span class="r-op">?</span></span>');
+      }
+
       case 'neg': {
         const v = evalNode(node.v, ctx);
         if (v.set) {
@@ -827,6 +1021,10 @@
     const mods = (node.mods || []).map(modText).join('');
     switch (node.t) {
       case 'num': return fmt(node.v);
+      case 'str': return '"' + node.v + '"' + mods;
+      case 'word': return (node.forced ? '{' + node.name + '}' : node.name) + mods;
+      case 'custom': return '[' + node.items.map(plain).join(',') + ']' + mods;
+      case 'ternary': return plain(node.cond) + '?' + plain(node.yes) + ':' + plain(node.no);
       case 'neg': return '-' + plain(node.v);
       case 'bin': return plain(node.l) + node.op + plain(node.r);
       case 'func': return node.name + '(' + node.args.map(plain).join(',') + ')';
@@ -922,6 +1120,55 @@
         case 'num':
           push(node.sp, 't-num', { title: 'Constant', desc: 'The flat value ' + fmt(node.v) + '.', depth });
           break;
+        case 'str':
+          push(node.sp, 't-str', {
+            title: 'Word',
+            desc: 'The literal word ' + node.v + '. Words carry no number, so a word can only be a result.',
+            depth
+          }, 'w' + node.uid);
+          mods(node, depth);
+          break;
+        case 'word':
+          push(node.sp, node.forced ? 't-var' : 't-str', {
+            title: node.forced ? 'Variable' : 'Word or variable',
+            desc: node.forced
+              ? 'Always the variable ' + node.name + ', worked out afresh wherever it appears.'
+              : 'If a variable named ' + node.name + ' is set it is used here and worked out afresh; ' +
+                'otherwise this is just the word ' + node.name + '. Write {' + node.name +
+                '} to insist on the variable.',
+            depth
+          }, 'w' + node.uid);
+          mods(node, depth);
+          break;
+        case 'custom': {
+          const cid = 'c' + node.uid;
+          push(node.brk[0], 't-brk', {
+            title: 'Custom die',
+            desc: 'A die with ' + node.items.length + ' faces. One is picked at random, then whatever ' +
+              'is written on it is worked out.',
+            depth
+          }, cid);
+          node.items.forEach((it, i) => {
+            walk(it, depth + 1);
+            if (node.commas[i]) push(node.commas[i], 't-op', null, cid);
+          });
+          push(node.brk[1], 't-brk', null, cid);
+          mods(node, depth);
+          break;
+        }
+        case 'ternary': {
+          const tid = 't' + node.uid;
+          walk(node.cond, depth + 1);
+          push(node.qSp, 't-op', {
+            title: 'Choice',
+            desc: 'If the left side reads success, take what follows the ?; if failure, take what follows the :.',
+            depth
+          }, tid);
+          walk(node.yes, depth + 1);
+          push(node.cSp, 't-op', null, tid);
+          walk(node.no, depth + 1);
+          break;
+        }
         case 'neg':
           push(node.opSp, 't-op', { title: 'Negate', desc: 'Flip the sign. Over a set, every member flips.', depth });
           walk(node.v, depth + 1);
@@ -1034,6 +1281,19 @@
   function previewNode(node) {
     switch (node.t) {
       case 'num': return '<span class="r-num">' + fmt(node.v) + '</span>';
+      case 'str': return '<span class="r-str">' + esc(node.v) + '</span>';
+      case 'word': return '<span class="r-var" data-x="w' + node.uid + '">' + esc(node.name) + '</span>';
+      case 'ternary':
+        return previewNode(node.cond) + '<span class="r-op" data-x="t' + node.uid + '">?</span>' +
+          previewNode(node.yes) + '<span class="r-op" data-x="t' + node.uid + '">:</span>' +
+          previewNode(node.no);
+      case 'custom': {
+        const shape = shapeFor(node.items.length);
+        return '<span class="die ghost custom s-' + shape + '" data-x="c' + node.uid + '">' +
+          '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true"><use href="#sh-' + shape + '"/></svg>' +
+          '<span class="dieval' + (String(node.items.length).length === 2 ? ' v2' : '') + '">' +
+          node.items.length + '</span></span>';
+      }
       case 'neg': return '<span class="r-op">-</span>' + previewNode(node.v);
       case 'bin':
         return previewNode(node.l) +
@@ -1080,8 +1340,8 @@
     let depth = 0, start = 0;
     for (let i = 0; i < src.length; i++) {
       const c = src[i];
-      if (c === '(') depth++;
-      else if (c === ')') depth--;
+      if (c === '(' || c === '[') depth++;
+      else if (c === ')' || c === ']') depth--;
       else if (c === ',' && depth === 0) { out.push({ text: src.slice(start, i), a: start }); start = i + 1; }
     }
     out.push({ text: src.slice(start), a: start });
@@ -1170,7 +1430,7 @@
     return { parsed: p, spans, rows, notation: p.notation };
   }
 
-  const evaluate = (ast) => evalNode(ast, { dice: 0 });
+  const evaluate = (ast) => evalNode(ast, { dice: 0, depth: 0 });
 
   function countDice(v) {
     if (!v) return 0;
@@ -1246,7 +1506,7 @@
   }
 
   global.DiceEngine = {
-    parse, inspect, evaluate, roll, analyse, preview, fmt, esc, shapeFor,
+    parse, inspect, evaluate, roll, analyse, preview, setVars, fmt, esc, shapeFor,
     DiceError, LIMIT, FUNCS, CHECKS
   };
 }(window));
