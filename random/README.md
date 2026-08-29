@@ -107,9 +107,9 @@ pow round sign sin sqrt tan`. `round()` rounds half away from zero.
 
   Each die is a 3D render of its actual solid: tetrahedron, cube, octahedron, pentagonal
   trapezohedron, dodecahedron, icosahedron, a coin for `d2` and a zocchihedron for `d%`.
-  Sizes with no standard solid (`d3`, `d7`, …) get a barrel, and Fudge dice are cubes
-  reading `−` / `0` / `+`. The shapes are one inline SVG sprite referenced with `<use>`,
-  so they cost no extra requests and recolour from CSS.
+  Only those sizes have a standard shape, so Fudge dice and everything else (`d3`, `d7`,
+  …) show a plain value instead of inventing a solid. The shapes are one inline SVG
+  sprite referenced with `<use>`, so they cost no extra requests and recolour from CSS.
 
   Dice shrink as the count grows — 34px, then 26px past 18 dice, then 19px past 60 — and
   past 240 dice they fall back to plain text chips so typing never stalls. Those
@@ -140,11 +140,18 @@ don't clip it.
 
 ### The dice art
 
-`tools/gen-dice.js` builds each die's real polyhedron from its vertices, derives the
-faces as a convex hull, rotates the solid so one face points at the camera, stands it
-upright on that face's mirror axis, projects it orthographically, culls back faces and
-shades the rest with a Lambert term. The result is baked into the SVG sprite — there is
+`tools/gen-dice.js` builds each die's real polyhedron from its vertices and derives the
+faces as a convex hull. Every solid is then laid to rest on a face — that face's normal
+points at the floor — spun about the vertical until its silhouette is symmetric, and
+viewed through **one shared camera** (`PITCH`), so the perspective is identical across
+the whole set and every die has a surface flat on the ground. Back faces are culled and
+the rest shaded with a Lambert term. The result is baked into the SVG sprite; there is
 no 3D at runtime, just static paths.
+
+The value goes on the face lying flat on top — except the tetrahedron, which has no such
+face: the element opposite its resting face is a single vertex. Real d4s solve this by
+printing the value beside that tip on each surrounding face, and the generator does the
+same.
 
 Faces are painted with `currentColor` at a baked opacity over an opaque body, which is
 why one CSS colour still drives every roll state. The generator also emits each shape's

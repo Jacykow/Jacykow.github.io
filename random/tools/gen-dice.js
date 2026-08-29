@@ -45,10 +45,18 @@ function hullFaces(V) {
       if (Math.abs(dt - d) < 1e-4) on.push(t);
     }
     if (!ok || on.length < 3) continue;
-    const key = nr.map((x) => x.toFixed(4)).join(',');
+    // -0 and 0 stringify differently, which silently duplicates faces
+    const key = nr.map((x) => (Math.abs(x) < 5e-4 ? 0 : x).toFixed(3)).join(',');
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ normal: nr, idx: orderAround(V, on, nr) });
+    const idx = orderAround(V, on, nr);
+    // drop slivers: near-duplicate vertices can otherwise fabricate a face
+    let area = 0;
+    for (let t = 1; t + 1 < idx.length; t++) {
+      area += len(cross(sub(V[idx[t]], V[idx[0]]), sub(V[idx[t + 1]], V[idx[0]]))) / 2;
+    }
+    if (area < 1e-3) continue;
+    out.push({ normal: nr, idx, area });
   }
   return out;
 }
@@ -114,10 +122,15 @@ function dodecahedron() {
 
 /** polar dual: every face plane of the input becomes a vertex */
 function dual(V) {
-  return hullFaces(V).map((f) => {
-    const d = dot(f.normal, V[f.idx[0]]);
-    return scl(f.normal, 1 / d);
-  });
+  const out = [], seen = new Set();
+  for (const f of hullFaces(V)) {
+    const p = scl(f.normal, 1 / dot(f.normal, V[f.idx[0]]));
+    const k = p.map((x) => x.toFixed(4)).join(',');
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(p);
+  }
+  return out;
 }
 
 /** n-gonal antiprism: two rings offset by half a step. `h` is set so every
@@ -134,9 +147,13 @@ function antiprism(n) {
   return V;
 }
 
-/** pentagonal trapezohedron — the d10 — is the dual of a pentagonal antiprism */
-function trapezohedron() {
-  return dual(antiprism(5));
+/** Pentagonal trapezohedron — the d10 — is the dual of a pentagonal antiprism.
+    The uniform solid comes out 4 tall by 2.2 wide, far more elongated than any
+    real d10, so squash it down the axis. A linear map keeps every face planar,
+    so the kites stay flat. */
+function trapezohedron(squash) {
+  const k = squash == null ? 0.54 : squash;
+  return dual(antiprism(5)).map((v) => [v[0], v[1] * k, v[2]]);
 }
 
 /** n-gonal prism of the given half-height — coins and barrel dice */
@@ -171,36 +188,6 @@ function icosphere() {
   return out;
 }
 
-/* --------------------------------------------------------------- upright
-   Aligning a face normal to the camera leaves the roll about the view axis
-   undefined, so solids land at arbitrary angles and look knocked over. Find
-   the in-plane rotation that stands the value face on its mirror axis: an
-   edge down for squares/triangles/pentagons, the long axis vertical for the
-   d10 kite. Ties are broken toward the wider end being at the bottom, which
-   reads as resting rather than balancing. */
-function uprightSpin(rel) {
-  const rotate = (p, t) => [p[0] * Math.cos(t) - p[1] * Math.sin(t),
-                            p[0] * Math.sin(t) + p[1] * Math.cos(t)];
-  let best = 0, bestKey = [Infinity, Infinity];
-  for (let deg = 0; deg < 360; deg += 0.5) {
-    const t = deg * Math.PI / 180;
-    const pts = rel.map((p) => rotate(p, t));
-    let asym = 0;
-    for (const p of pts) {                    // distance to the mirrored set
-      let m = Infinity;
-      for (const q of pts) m = Math.min(m, Math.hypot(p[0] + q[0], p[1] - q[1]));
-      asym += m;
-    }
-    asym = Math.round(asym * 1000) / 1000;
-    const lowMass = -pts.reduce((s, p) => s + p[1], 0) / pts.length;  // screen y is down
-    const key = [asym, lowMass];
-    if (key[0] < bestKey[0] - 1e-6 || (Math.abs(key[0] - bestKey[0]) < 1e-6 && key[1] < bestKey[1])) {
-      bestKey = key; best = deg;
-    }
-  }
-  return best;
-}
-
 /* ------------------------------------------------------------- 2D helpers */
 function convexHull2(pts) {
   const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
@@ -221,94 +208,150 @@ const f1 = (x) => (Math.round(x * 10) / 10).toString();
 const pathOf = (pts) => 'M' + pts.map((p) => f1(p[0]) + ' ' + f1(p[1])).join('L') + 'Z';
 
 /* ------------------------------------------------------------------ build */
-const LIGHT = norm([-0.35, 0.72, 0.6]);
-// Where the value face points. Kept close to the camera on purpose: a steeper
-// tilt foreshortens the face until the digit is unreadable at 20px, which is
-// the size that actually matters here.
-const TARGET = norm([0.10, 0.26, 0.96]);
-const BOX = 64, MARGIN = 3.2;
+const LIGHT = norm([-0.34, 0.70, 0.63]);
+
+/* One camera for every die, so the perspective is identical across the set.
+   The solid is first laid to rest on a face (that face's normal points at the
+   floor), then only this fixed tilt is applied. PITCH is the camera's
+   elevation above the table: too low and the top face foreshortens away, too
+   high and the sides vanish and it reads flat again. */
+const PITCH = 63 * Math.PI / 180;
+const BOX = 64, MARGIN = 2.2;
+
+const tilt = (v) => [v[0],
+                     v[1] * Math.cos(PITCH) - v[2] * Math.sin(PITCH),
+                     v[1] * Math.sin(PITCH) + v[2] * Math.cos(PITCH)];
+
+const spinY = (v, t) => [v[0] * Math.cos(t) + v[2] * Math.sin(t), v[1],
+                         -v[0] * Math.sin(t) + v[2] * Math.cos(t)];
+
+const centroid = (pts) => scl(pts.reduce(add, [0, 0, 0]), 1 / pts.length);
 
 function build(name, verts, opts) {
   opts = opts || {};
-  const V0 = verts;
-  const faces = hullFaces(V0);
+  const faces = hullFaces(verts);
 
-  // choose the face that will carry the value, then bring it to `target`.
-  // Solids with widely spaced normals (the tetrahedron) need a steeper tilt
-  // before any second face comes into view, or they project dead flat.
-  const target = opts.target ? norm(opts.target) : TARGET;
-  let pick = 0;
-  if (opts.faceSides) {
-    pick = faces.findIndex((f) => f.idx.length === opts.faceSides);
-    if (pick < 0) pick = 0;
+  // 1. lay it on a face: that face's normal points straight down
+  let rest = opts.restFace || 0;
+  if (opts.restSides) {
+    const i = faces.findIndex((f) => f.idx.length === opts.restSides);
+    if (i >= 0) rest = i;
   }
-  const n0 = faces[pick].normal;
-  let V = V0.map((v) => align(v, n0, target));
+  const laid = verts.map((v) => align(v, faces[rest].normal, [0, -1, 0]));
 
-  // stand it upright, then apply any deliberate offset on top
-  if (opts.upright !== false) {
-    const fp = faces[pick].idx.map((i) => [V[i][0], -V[i][1]]);
-    const cx = fp.reduce((s, p) => s + p[0], 0) / fp.length;
-    const cy = fp.reduce((s, p) => s + p[1], 0) / fp.length;
-    const deg = uprightSpin(fp.map((p) => [p[0] - cx, p[1] - cy]));
-    V = V.map((v) => rot(v, target, -deg * Math.PI / 180));
-  }
-  if (opts.spin) V = V.map((v) => rot(v, target, opts.spin * Math.PI / 180));
-
-  const F = faces.map((f) => {
+  const facesOf = (V) => faces.map((f) => {
     const pts = f.idx.map((i) => V[i]);
-    const c = scl(pts.reduce(add, [0, 0, 0]), 1 / pts.length);
+    const c = centroid(pts);
     const nr = norm(cross(sub(pts[1], pts[0]), sub(pts[2], pts[0])));
-    return { pts, c, nr: dot(nr, c) < 0 ? scl(nr, -1) : nr };
+    return { pts, c, nr: dot(nr, c) < 0 ? scl(nr, -1) : nr, n: f.idx.length };
   });
 
-  // orthographic projection, y flipped for screen space
+  // 2. spin about the (vertical) resting axis until the silhouette is
+  //    symmetric on screen. This keeps the die flat on the floor while
+  //    stopping it from looking randomly slewed.
+  let bestSpin = 0;
+  if (opts.spinSearch !== false) {
+    let bestScore = Infinity;
+    for (let deg = 0; deg < 360; deg += 0.5) {
+      const t = deg * Math.PI / 180;
+      const V = laid.map((v) => tilt(spinY(v, t)));
+      const F = facesOf(V);
+      const pts = [].concat.apply([], F.filter((f) => f.nr[2] > 0.001).map((f) => f.pts))
+        .map((p) => [p[0], -p[1]]);
+      const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+      let asym = 0;
+      for (const p of pts) {
+        let m = Infinity;
+        for (const q of pts) m = Math.min(m, Math.hypot((p[0] - cx) + (q[0] - cx), p[1] - q[1]));
+        asym += m;
+      }
+      if (asym < bestScore - 1e-6) { bestScore = asym; bestSpin = deg; }
+    }
+  }
+  const spin = (bestSpin + (opts.spin || 0)) * Math.PI / 180;
+
+  // 3. apply the shared camera
+  const V = laid.map((v) => tilt(spinY(v, spin)));
+  const F = facesOf(V);
+
+  // 4. orthographic projection, screen y down
   const all = [].concat.apply([], F.map((f) => f.pts));
   const xs = all.map((p) => p[0]), ys = all.map((p) => -p[1]);
-  const spanX = Math.max.apply(null, xs) - Math.min.apply(null, xs);
-  const spanY = Math.max.apply(null, ys) - Math.min.apply(null, ys);
-  const s = (BOX - MARGIN * 2) / Math.max(spanX, spanY);
-  const cx = (Math.max.apply(null, xs) + Math.min.apply(null, xs)) / 2;
-  const cy = (Math.max.apply(null, ys) + Math.min.apply(null, ys)) / 2;
+  const minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
+  const minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+  const s = (BOX - MARGIN * 2) / Math.max(maxX - minX, maxY - minY);
+  const cx = (maxX + minX) / 2, cy = (maxY + minY) / 2;
   const proj = (p) => [BOX / 2 + (p[0] - cx) * s, BOX / 2 + (-p[1] - cy) * s];
 
   const visible = F.filter((f) => f.nr[2] > 0.001);
   visible.sort((a, b) => a.c[2] - b.c[2]);
-
   const hull = convexHull2([].concat.apply([], visible.map((f) => f.pts.map(proj))));
 
-  // Lambert shade -> fill opacity
-  const shade = (nr) => {
-    const l = Math.max(0, dot(nr, LIGHT));
-    return (0.06 + 0.30 * Math.pow(l, 0.8)).toFixed(3);
-  };
+  const shade = (nr) => (0.05 + 0.34 * Math.pow(Math.max(0, dot(nr, LIGHT)), 0.75)).toFixed(3);
 
-  let body = '      <path d="' + pathOf(hull) + '"/>\n';
   let cells = '';
   for (const f of visible) {
     cells += '      <path d="' + pathOf(f.pts.map(proj)) + '" fill="currentColor" fill-opacity="' +
-      shade(f.nr) + '" stroke-opacity=".33" stroke-width="1.1"/>\n';
+      shade(f.nr) + '" stroke-opacity=".30" stroke-width="1"/>\n';
   }
+  const body = '      <path d="' + pathOf(hull) + '"/>\n';
   const outline = '      <path d="' + pathOf(hull) + '" fill="none" stroke-width="2.6"/>\n';
 
-  // where the value goes: centre of the face we aimed at the camera
-  const top = F[pick];
-  let tc = proj(top.c);
-  let ext = Math.max.apply(null, top.pts.map((p) => {
-    const q = proj(p);
-    return Math.hypot(q[0] - tc[0], q[1] - tc[1]);
-  }));
-  if (opts.centreValue) {                        // spheres read the same all over
-    tc = [BOX / 2, BOX / 2];
+  /* 5. where the value goes.
+        Most solids have a face lying flat on top, opposite the one they rest
+        on — that is the face you read. A tetrahedron has no such face: the
+        element opposite its resting face is a single vertex. Real d4s solve
+        this by printing the value beside that tip on each surrounding face,
+        so that is what we do. */
+  // "flat on top" has to be judged before the camera tilt, in world space,
+  // where up really is +Y. After tilting, a horizontal face's normal only has
+  // y = cos(PITCH) and no face ever looks flat.
+  const laidSpun = laid.map((v) => spinY(v, spin));
+  const worldF = facesOf(laidSpun);
+  let topIdx = 0;
+  worldF.forEach((f, i) => { if (f.nr[1] > worldF[topIdx].nr[1]) topIdx = i; });
+  const flatTop = worldF[topIdx].nr[1] > 0.85;
+  const front = visible.reduce((a, f) => (!a || f.nr[2] > a.nr[2]) ? f : a, null);
+
+  let vc, ext, mode;
+  if (opts.centreValue) {
+    vc = [BOX / 2, BOX / 2];
     ext = (BOX - MARGIN * 2) / 2;
+    mode = 'centre';
+  } else if (flatTop) {
+    const top = F[topIdx];
+    vc = proj(top.c);
+    // inradius, not circumradius: the top face is foreshortened, so the
+    // distance to the nearest edge is what actually limits the digit
+    const q = top.pts.map(proj);
+    ext = Math.min.apply(null, q.map((p, i) => {
+      const r = q[(i + 1) % q.length];
+      const dx = r[0] - p[0], dy = r[1] - p[1];
+      const L = Math.hypot(dx, dy) || 1;
+      return Math.abs((vc[0] - p[0]) * dy - (vc[1] - p[1]) * dx) / L;
+    }));
+    mode = 'top face';
+  } else {
+    // Tetrahedron: nothing lies flat on top, the opposite element is a single
+    // vertex. Real d4s print the value beside that tip on each face round it.
+    let apexI = 0;
+    laidSpun.forEach((v, i) => { if (v[1] > laidSpun[apexI][1]) apexI = i; });
+    const ap = proj(V[apexI]), fc = proj(front.c);
+    const k = opts.tipBias == null ? 0.34 : opts.tipBias;
+    vc = [ap[0] + (fc[0] - ap[0]) * k, ap[1] + (fc[1] - ap[1]) * k];
+    ext = Math.hypot(fc[0] - ap[0], fc[1] - ap[1]) * 0.46;
+    mode = 'beside tip';
   }
 
   return {
     name,
     svg: '    <symbol id="sh-' + name + '">\n' + body + cells + outline + '    </symbol>',
-    nx: +tc[0].toFixed(1),
-    ny: +tc[1].toFixed(1),
+    nx: +vc[0].toFixed(1),
+    ny: +vc[1].toFixed(1),
     ext: +ext.toFixed(1),
+    mode,
+    spin: bestSpin,
+    aspect: +((maxY - minY) / (maxX - minX)).toFixed(2),
     faces: faces.length,
     drawn: visible.length
   };
@@ -316,30 +359,31 @@ function build(name, verts, opts) {
 
 /* ------------------------------------------------------------------ shapes */
 const SHAPES = [
-  build('d2', prism(28, 0.17), { faceSides: 28, target: [0, 0.55, 0.84], upright: false }),
-  build('d4', tetrahedron(), { target: [0.10, 0.52, 0.85] }),
-  build('d6', cube(), { faceSides: 4 }),
+  build('d2', prism(28, 0.16), { restSides: 28, spinSearch: false }),
+  build('d4', tetrahedron(), { spin: 60 }),
+  build('d6', cube(), {}),
   build('d8', octahedron(), {}),
-  build('d10', trapezohedron(), { faceSides: 4 }),
-  build('d12', dodecahedron(), { faceSides: 5 }),
+  build('d10', trapezohedron(), {}),
+  build('d12', dodecahedron(), {}),
   build('d20', icosahedron(), {}),
-  build('d100', icosphere(), { centreValue: true, upright: false }),
-  build('gen', prism(7, 0.62), { faceSides: 4 })
+  build('d100', icosphere(), { centreValue: true, spinSearch: false })
 ];
 
 /* ------------------------------------------------------------------ output */
 const svg = SHAPES.map((s) => s.svg).join('\n');
-// ext is the face's circumradius; a digit wants roughly 1.2x its inradius,
-// and a regular face's inradius is about 0.72 of its circumradius.
+// ext is the room the digit has (the face's projected inradius); a single digit
+// sits comfortably at about 1.5x that.
 const css = SHAPES.map((s) =>
   '.s-' + s.name + '{--nx:' + s.nx + '; --ny:' + s.ny + '; --nsz:' +
-  Math.max(0.21, Math.min(0.40, (s.ext * 0.72 * 1.2) / 64)).toFixed(3) + '}'
+  Math.max(0.27, Math.min(0.42, (s.ext * 1.7) / 64)).toFixed(3) + '}'
 ).join('\n');
 
 console.log('<!-- generated by tools/gen-dice.js -->');
 console.log(svg);
 console.log('\n/* generated by tools/gen-dice.js */');
 console.log(css);
-console.error('\nfaces drawn / total:');
-for (const s of SHAPES) console.error('  ' + s.name.padEnd(5) + s.drawn + '/' + s.faces +
-  '  value face at (' + s.nx + ',' + s.ny + ') ext ' + s.ext);
+console.error('\n  shape  faces   value        at          ext    aspect  spin');
+for (const s of SHAPES) console.error('  ' + s.name.padEnd(7) +
+  (s.drawn + '/' + s.faces).padEnd(8) + s.mode.padEnd(13) +
+  ('(' + s.nx + ',' + s.ny + ')').padEnd(12) + String(s.ext).padEnd(7) +
+  String(s.aspect).padEnd(8) + Math.round(s.spin) + '°');

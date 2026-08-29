@@ -419,11 +419,12 @@
 
   const cpText = (cp) => cp ? cp.op + cp.v : '';
 
-  /* Only these sizes have a standard solid; anything else gets a generic token.
-     d4/d6/d8/d12/d20 are the Platonic solids, d10 is a pentagonal trapezohedron,
-     d100 a zocchihedron, d2 a coin. Fudge dice are cubes. */
+  /* Only these sizes have a standard solid: d4/d6/d8/d12/d20 are the Platonic
+     solids, d10 is a pentagonal trapezohedron, d100 a zocchihedron, d2 a coin.
+     Fudge dice and any other size have no die to draw, so they fall back to a
+     plain value chip rather than inventing a shape. */
   const SOLIDS = { 2: 'd2', 4: 'd4', 6: 'd6', 8: 'd8', 10: 'd10', 12: 'd12', 20: 'd20', 100: 'd100' };
-  const shapeFor = (sides, fudge) => fudge ? 'd6' : (SOLIDS[sides] || 'gen');
+  const shapeFor = (sides, fudge) => fudge ? null : (SOLIDS[sides] || null);
 
   /** the digits shown on the face; Fudge dice read as -, 0, + */
   function faceText(v, fudge) {
@@ -655,7 +656,9 @@
 
       html(o) {
         const shape = shapeFor(this.sides, this.fudge);
-        const parts = rolls.map((r) => (o && o.plain) ? chipHTML(r, this.fudge) : dieHTML(r, shape, this.fudge));
+        const parts = rolls.map((r) => (shape && !(o && o.plain))
+          ? dieHTML(r, shape, this.fudge)
+          : chipHTML(r, this.fudge));
         return '<span class="r-notn">' + esc(this.notation) + '</span>' +
           '<span class="r-brk">[</span>' + parts.join('') + '<span class="r-brk">]</span>';
       }
