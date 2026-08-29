@@ -76,7 +76,7 @@
   class Parser {
     // uid tags dice and bracket-group nodes so the editor, the Explain list and
     // the rolled dice can all point at the same thing when hovered
-    constructor(src) { this.s = src; this.i = 0; this.uid = 0; }
+    constructor(src, uidBase) { this.s = src; this.i = 0; this.uid = uidBase || 0; }
 
     fail(msg) { throw new DiceError(msg, this.i); }
     ws() { while (this.i < this.s.length && /\s/.test(this.s[this.i])) this.i++; }
@@ -136,8 +136,8 @@
       let l = this.term();
       for (;;) {
         const a = this.mark();
-        if (this.lit('+')) l = { t: 'bin', op: '+', opSp: [a, this.i], l, r: this.term() };
-        else if (this.lit('-')) l = { t: 'bin', op: '-', opSp: [a, this.i], l, r: this.term() };
+        if (this.lit('+')) l = { t: 'bin', op: '+', opSp: [a, this.i], uid: ++this.uid, l, r: this.term() };
+        else if (this.lit('-')) l = { t: 'bin', op: '-', opSp: [a, this.i], uid: ++this.uid, l, r: this.term() };
         else return l;
       }
     }
@@ -146,10 +146,10 @@
       let l = this.power();
       for (;;) {
         const a = this.mark();
-        if (this.lit('**')) l = { t: 'bin', op: '^', opSp: [a, this.i], l, r: this.power() };
-        else if (this.lit('*')) l = { t: 'bin', op: '*', opSp: [a, this.i], l, r: this.power() };
-        else if (this.lit('/')) l = { t: 'bin', op: '/', opSp: [a, this.i], l, r: this.power() };
-        else if (this.lit('%')) l = { t: 'bin', op: '%', opSp: [a, this.i], l, r: this.power() };
+        if (this.lit('**')) l = { t: 'bin', op: '^', opSp: [a, this.i], uid: ++this.uid, l, r: this.power() };
+        else if (this.lit('*')) l = { t: 'bin', op: '*', opSp: [a, this.i], uid: ++this.uid, l, r: this.power() };
+        else if (this.lit('/')) l = { t: 'bin', op: '/', opSp: [a, this.i], uid: ++this.uid, l, r: this.power() };
+        else if (this.lit('%')) l = { t: 'bin', op: '%', opSp: [a, this.i], uid: ++this.uid, l, r: this.power() };
         else return l;
       }
     }
@@ -158,7 +158,7 @@
       const base = this.unary();
       const a = this.mark();
       if (this.lit('**') || this.lit('^')) {
-        return { t: 'bin', op: '^', opSp: [a, this.i], l: base, r: this.power() };
+        return { t: 'bin', op: '^', opSp: [a, this.i], uid: ++this.uid, l: base, r: this.power() };
       }
       return base;
     }
@@ -459,7 +459,8 @@
     k: 'num', total: () => v, html: () => '<span class="r-num">' + fmt(v) + '</span>'
   });
 
-  function BinResult(op, l, r) {
+  function BinResult(op, l, r, uid) {
+    const tag = uid ? ' data-x="o' + uid + '"' : '';
     return {
       k: 'bin', children: [l, r],
       total() {
@@ -473,7 +474,7 @@
           case '^': return Math.pow(a, b);
         }
       },
-      html: (o) => l.html(o) + '<span class="r-op">' + esc(op) + '</span>' + r.html(o)
+      html: (o) => l.html(o) + '<span class="r-op"' + tag + '>' + esc(op) + '</span>' + r.html(o)
     };
   }
 
@@ -642,7 +643,7 @@
         const shape = shapeFor(this.sides);
         const tag = this.uid ? ' data-x="d' + this.uid + '"' : '';
         const parts = rolls.map((r) => (o && o.plain) ? chipHTML(r, tag) : dieHTML(r, shape, tag));
-        const many = rolls.length > 1;
+        const many = rolls.length > SQUEEZE_AT;
         const squeezed = rolls.length > SQUEEZE_AT;
         // the + between dice in a term is what the notation actually means
         const body = squeezed ? parts.join('') : parts.join(PLUS);
@@ -717,7 +718,7 @@
       case 'num': return NumResult(node.v);
       case 'neg': return NegResult(evalNode(node.v, ctx));
       case 'paren': return ParenResult(evalNode(node.v, ctx));
-      case 'bin': return BinResult(node.op, evalNode(node.l, ctx), evalNode(node.r, ctx));
+      case 'bin': return BinResult(node.op, evalNode(node.l, ctx), evalNode(node.r, ctx), node.uid);
       case 'func': return FuncResult(node.name, node.args.map((a) => evalNode(a, ctx)));
       case 'dice': return rollDice(node, ctx);
       case 'group': return evalGroup(node, ctx);
@@ -879,7 +880,7 @@
         case 'bin': {
           walk(node.l, depth);
           const [title, desc] = OP_NAMES[node.op] || ['Operator', ''];
-          push(node.opSp, 't-op', { title, desc, depth });
+          push(node.opSp, 't-op', { title, desc, depth }, node.uid ? 'o' + node.uid : null);
           walk(node.r, depth);
           break;
         }
@@ -932,7 +933,23 @@
      PUBLIC API
      ========================================================================== */
 
-  /** Split off a `3x` repeat prefix and a `# label` suffix, then parse. */
+  /** commas at bracket depth 0 separate whole rolls; inside a function they
+      are argument separators, so only the top level counts */
+  function splitParts(src) {
+    const out = [];
+    let depth = 0, start = 0;
+    for (let i = 0; i < src.length; i++) {
+      const c = src[i];
+      if (c === '(') depth++;
+      else if (c === ')') depth--;
+      else if (c === ',' && depth === 0) { out.push({ text: src.slice(start, i), a: start }); start = i + 1; }
+    }
+    out.push({ text: src.slice(start), a: start });
+    return out;
+  }
+
+  /** Split off a `3x` repeat prefix, a `# label` suffix and any top-level
+      commas, then parse each part. */
   function parse(input) {
     const raw = String(input == null ? '' : input);
     let src = raw.trim();
@@ -956,22 +973,49 @@
     }
     if (!src.trim()) throw new DiceError('nothing to roll', offset);
 
-    let ast;
-    try {
-      ast = new Parser(src).parse();
-    } catch (e) {
-      if (e instanceof DiceError && e.pos != null) e.pos += offset;
-      throw e;
+    const parts = [];
+    let uid = 0;
+    for (const piece of splitParts(src)) {
+      if (!piece.text.trim()) {
+        throw new DiceError('empty roll between commas', offset + piece.a);
+      }
+      const p = new Parser(piece.text, uid);
+      let ast;
+      try {
+        ast = p.parse();
+      } catch (e) {
+        if (e instanceof DiceError && e.pos != null) e.pos += offset + piece.a;
+        throw e;
+      }
+      uid = p.uid;
+      parts.push({ ast, a: offset + piece.a, src: piece.text });
     }
-    return { ast, repeat, repeatSp, label, labelSp, offset, src, trimmed: raw.trim(), notation: plain(ast) };
+
+    return {
+      parts, ast: parts[0].ast, repeat, repeatSp, label, labelSp, offset, src,
+      trimmed: raw.trim(),
+      notation: parts.map((p) => plain(p.ast)).join(', ')
+    };
   }
 
   /** Everything the UI needs to highlight + explain an input string. */
   function inspect(input) {
     const p = parse(input);
-    const d = describe(p.ast, p.src);
-    const spans = d.spans.map((s) => ({ a: s.a + p.offset, b: s.b + p.offset, cls: s.cls, id: s.id }));
-    const rows = d.rows.map((r) => Object.assign({}, r));
+    const spans = [], rows = [];
+    p.parts.forEach((part, i) => {
+      const d = describe(part.ast, part.src);
+      for (const s of d.spans) spans.push({ a: s.a + part.a, b: s.b + part.a, cls: s.cls, id: s.id });
+      for (const r of d.rows) rows.push(Object.assign({}, r));
+      if (i < p.parts.length - 1) {
+        const c = p.parts[i + 1].a - 1;                 // the comma between parts
+        spans.push({ a: c, b: c + 1, cls: 't-op', id: 'xc' + i });
+        rows.push({
+          id: 'xc' + i, code: ',', depth: 0, title: 'Next roll',
+          desc: 'A comma starts a separate roll. They are reported together as one entry.'
+        });
+      }
+    });
+    spans.sort((x, y) => x.a - y.a || x.b - y.b);
 
     if (p.repeatSp) {
       spans.unshift({ a: p.repeatSp[0], b: p.repeatSp[1], cls: 't-rep', id: 'xrep' });
@@ -997,7 +1041,15 @@
   function roll(input) {
     const p = parse(input);
     const sets = [];
-    for (let i = 0; i < p.repeat; i++) sets.push(evaluate(p.ast));
+    const multi = p.repeat > 1 || p.parts.length > 1;
+    for (let i = 0; i < p.repeat; i++) {
+      for (const part of p.parts) {
+        const r = evaluate(part.ast);
+        // name each set when there is more than one, so the card can label them
+        if (multi) r.name = p.parts.length > 1 ? plain(part.ast) : null;
+        sets.push(r);
+      }
+    }
     let diceCount = 0;
     for (const s of sets) { const bag = []; collectDice(s, bag); diceCount += bag.length; }
     return {
@@ -1017,7 +1069,7 @@
     let sum = 0, min = Infinity, max = -Infinity;
     for (let i = 0; i < n; i++) {
       let t = 0;
-      for (let r = 0; r < p.repeat; r++) t += evaluate(p.ast).total();
+      for (let r = 0; r < p.repeat; r++) for (const part of p.parts) t += evaluate(part.ast).total();
       totals[i] = t; sum += t;
       if (t < min) min = t;
       if (t > max) max = t;
@@ -1035,7 +1087,80 @@
     };
   }
 
+  /* ==========================================================================
+     PREVIEW — what the expression *would* roll, drawn from the parse alone.
+     The dice carry their die name rather than a face, since nothing has been
+     rolled yet, and no subtotals appear because there is nothing to sum.
+     ========================================================================== */
+  const PREVIEW_MAX = 8;   // squeezed dice stack anyway; drawing more is waste
+
+  function constOf(node) {
+    if (!node) return null;
+    switch (node.t) {
+      case 'num': return node.v;
+      case 'paren': return constOf(node.v);
+      case 'neg': { const v = constOf(node.v); return v === null ? null : -v; }
+      case 'bin': {
+        const a = constOf(node.l), b = constOf(node.r);
+        if (a === null || b === null) return null;
+        switch (node.op) {
+          case '+': return a + b; case '-': return a - b; case '*': return a * b;
+          case '/': return a / b; case '%': return a % b; case '^': return Math.pow(a, b);
+        }
+        return null;
+      }
+    }
+    return null;
+  }
+
+  function previewNode(node) {
+    switch (node.t) {
+      case 'num': return '<span class="r-num">' + fmt(node.v) + '</span>';
+      case 'neg': return '<span class="r-op">-</span>' + previewNode(node.v);
+      case 'paren':
+        return '<span class="r-grp"><span class="r-brk">(</span>' + previewNode(node.v) +
+          '<span class="r-brk">)</span></span>';
+      case 'group':
+        return '<span class="r-grp"' + (node.uid ? ' data-x="g' + node.uid + '"' : '') + '>' +
+          '<span class="r-brk">(</span>' + previewNode(node.sub) + '<span class="r-brk">)</span></span>';
+      case 'bin':
+        return previewNode(node.l) +
+          '<span class="r-op"' + (node.uid ? ' data-x="o' + node.uid + '"' : '') + '>' +
+          esc(node.op) + '</span>' + previewNode(node.r);
+      case 'func':
+        return '<span class="r-fn">' + node.name + '</span><span class="r-brk">(</span>' +
+          node.args.map(previewNode).join('<span class="r-op">,</span>') + '<span class="r-brk">)</span>';
+      case 'dice': {
+        const sides = constOf(node.sides);
+        const qty = node.qty === null ? 1 : constOf(node.qty);
+        const shape = sides === null ? 'd20' : shapeFor(Math.floor(sides));
+        const face = sides === null ? '?' : fmt(Math.floor(sides));
+        const n = (qty === null || !(qty >= 0)) ? 1 : Math.floor(qty);
+        const shown = Math.max(1, Math.min(n, PREVIEW_MAX));
+        const size = face.length >= 3 ? ' v3' : (face.length === 2 ? ' v2' : '');
+        const tag = node.uid ? ' data-x="d' + node.uid + '"' : '';
+        const one = '<span class="die ghost s-' + shape + '"' + tag + '>' +
+          '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
+          '<use href="#sh-' + shape + '"/></svg>' +
+          '<span class="dieval' + size + '">' + esc(face) + '</span></span>';
+        const squeezed = n > SQUEEZE_AT;
+        const parts = new Array(shown).fill(one);
+        return '<span class="r-term' + (squeezed ? ' squeezed' : '') + '"' + tag +
+          squeezeStyle(shown) + '>' + (squeezed ? parts.join('') : parts.join(PLUS)) + '</span>';
+      }
+    }
+    return '';
+  }
+
+  /** HTML for the dice an expression would roll. Never throws on a valid parse. */
+  function preview(input) {
+    const p = parse(input);
+    return p.parts.map((part) => previewNode(part.ast))
+      .join('<span class="r-op">,</span>');
+  }
+
   global.DiceEngine = {
-    parse, inspect, evaluate, roll, analyse, fmt, esc, shapeFor, DiceError, LIMIT, FUNCS
+    parse, inspect, evaluate, roll, analyse, preview, fmt, esc, shapeFor,
+    DiceError, LIMIT, FUNCS
   };
 }(window));

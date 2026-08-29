@@ -257,6 +257,8 @@
       <span class="notation" id="notation"></span>
       <button class="roll" id="rollBtn">Roll<kbd>&crarr;</kbd></button>
     </div>
+    <!-- what the expression would roll, by die name; updates as you type -->
+    <div class="preview" id="preview"></div>
     <div class="editor" id="editorWrap">
       <pre class="hl" id="hl" aria-hidden="true"></pre>
       <textarea id="expr" rows="1" wrap="off" spellcheck="false" enterkeyhint="go"
@@ -270,7 +272,7 @@
   <section class="pane grow" id="paneResult">
     <div class="panehead">
       <span class="ttl">Result</span>
-      <span class="hint">the top card re-rolls as you type &mdash; <kbd>Enter</kbd> keeps it and rolls again</span>
+      <span class="hint"><kbd>Enter</kbd> to roll &mdash; click an entry to open it</span>
       <span class="spacer"></span>
       <button class="mini" id="btnClear">clear</button>
     </div>

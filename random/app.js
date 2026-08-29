@@ -16,7 +16,8 @@
     notation: $('notation'), result: $('result'), rollBtn: $('rollBtn'),
     tabs: $('tabs'), explain: $('tab-explain'), details: $('tab-details'),
     reference: $('tab-reference'), saved: $('tab-saved'), toast: $('toast'),
-    paneTools: $('paneTools'), drawer: $('drawerToggle'), refSide: $('refSide')
+    paneTools: $('paneTools'), drawer: $('drawerToggle'), refSide: $('refSide'),
+    preview: $('preview')
   };
 
   /* the one place the desktop/mobile split is decided */
@@ -36,7 +37,6 @@
     spans: [],         // spans actually painted (overlaps removed)
     error: null,
     log: [],           // [{roll, expanded}] newest first
-    topIsLive: true,
     activeTab: 'explain',
     statsToken: 0,
     curRow: null,      // Explain row the caret last sat on
@@ -200,7 +200,9 @@
     const sel = '[data-x="' + id + '"]';
     el.hl.querySelectorAll(sel).forEach((n) => n.classList.add('hot'));
     el.explain.querySelectorAll('.exrow' + sel).forEach((n) => n.classList.add('hot'));
-    el.result.querySelectorAll('.r-term' + sel + ', .r-grp' + sel).forEach((n) => n.classList.add('hot'));
+    const roll = '.r-term' + sel + ', .r-grp' + sel + ', .r-op' + sel;
+    el.result.querySelectorAll(roll).forEach((n) => n.classList.add('hot'));
+    el.preview.querySelectorAll(roll).forEach((n) => n.classList.add('hot'));
   }
 
   /** the expression is a textarea, so hit-test the highlight layer by hand */
@@ -307,7 +309,7 @@
     let rows;
     if (many) {
       rows = roll.sets.map((s, i) =>
-        '<div class="setrow"><span class="i">#' + (i + 1) + '</span>' +
+        '<div class="setrow"><span class="i">' + esc(s.name || ('#' + (i + 1))) + '</span>' +
           '<span class="body">' + s.html(opts) + '</span>' +
           '<span class="st">' + E.fmt(s.total()) + '</span></div>'
       ).join('');
@@ -350,9 +352,7 @@
     // Only the newest entry keeps the full breakdown; the rest are one-liners
     // until the user opens them.
     el.result.innerHTML = state.log.map((e, i) =>
-      (i === 0 || e.expanded)
-        ? cardHTML(e.roll, i === 0 && state.topIsLive, i)
-        : lineHTML(e.roll, i)
+      e.expanded ? cardHTML(e.roll, false, i) : lineHTML(e.roll, i)
     ).join('');
     drawTrees(el.result);
   }
@@ -365,24 +365,19 @@
     return { roll, expanded: false };
   }
 
-  /** re-roll the live (top) card in place */
-  function refreshLive() {
-    const e = makeRoll();
-    if (!e) return;
-    if (state.topIsLive && state.log.length) state.log[0] = e;
-    else { state.log.unshift(e); state.topIsLive = true; }
-    if (state.log.length > LOG_MAX) state.log.length = LOG_MAX;
-    renderResult();
+  /** the dice this expression would roll, by name — no randomness involved */
+  function renderPreview() {
+    if (state.error || !el.ta.value.trim()) { el.preview.innerHTML = ''; return; }
+    try { el.preview.innerHTML = E.preview(el.ta.value); }
+    catch (e) { el.preview.innerHTML = ''; }
   }
 
-  /** commit: freeze what is on screen and roll a fresh live card on top */
+  /** Rolling only ever happens here: on Enter, or the Roll button. */
   function commitRoll() {
     if (state.error) { flashError(); return; }
-    const frozen = makeRoll();
-    if (!frozen) { flashError(); return; }
-    if (state.topIsLive && state.log.length) state.log.shift();   // drop the preview
-    state.log.unshift(frozen);
-    state.topIsLive = false;
+    const entry = makeRoll();
+    if (!entry) { flashError(); return; }
+    state.log.unshift(entry);
     if (state.log.length > LOG_MAX) state.log.length = LOG_MAX;
     renderResult();
     el.result.scrollTop = 0;
@@ -531,7 +526,7 @@
       }
       for (const k of ['l', 'r', 'v', 'sub', 'qty', 'sides']) walk(n[k]);
       if (n.args) n.args.forEach(walk);
-    }(p.ast));
+    }({ args: p.parts.map((x) => x.ast) }));
 
     const node = best || last;
     // nothing dice-like to hang off: treat the whole expression as the target
@@ -700,7 +695,7 @@
       el.status.classList.remove('err');
       el.notation.textContent = '';
       el.wrap.classList.remove('bad', 'ok');
-      paint(); renderExplain();
+      paint(); renderExplain(); renderPreview();
       if (state.activeTab === 'details') renderDetails();
       return;
     }
@@ -728,7 +723,7 @@
     renderExplain();
     syncCaret(true);
 
-    if (!state.error) refreshLive();
+    renderPreview();
     if (submitted) commitRoll();
 
     clearTimeout(detailsTimer);
@@ -777,6 +772,11 @@
       setHot(n ? n.getAttribute('data-x') : null);
     });
     el.result.addEventListener('mouseleave', () => setHot(null));
+    el.preview.addEventListener('mouseover', (ev) => {
+      const n = ev.target.closest('[data-x]');
+      setHot(n ? n.getAttribute('data-x') : null);
+    });
+    el.preview.addEventListener('mouseleave', () => setHot(null));
 
     wide.addEventListener('change', () => {
       renderReference();
@@ -805,7 +805,7 @@
       }
     });
     $('btnClear').addEventListener('click', () => {
-      state.log = []; state.topIsLive = true; renderResult(); refreshLive();
+      state.log = []; renderResult();
     });
     $('btnSave').addEventListener('click', saveCurrent);
     $('btnLink').addEventListener('click', () => {

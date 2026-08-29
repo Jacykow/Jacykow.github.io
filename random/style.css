@@ -90,6 +90,19 @@ kbd{
   border-bottom-width:2px; border-radius:4px; padding:1px 5px; color:var(--dim);
 }
 
+/* ---------------------------------------------------------- roll preview */
+.preview{
+  --dsz:30px; background:#0a0c11; border-bottom:1px solid var(--border);
+  padding:10px 18px; min-height:52px; display:flex; align-items:center;
+  font-family:var(--mono); font-size:13px; color:var(--dim);
+  overflow-x:auto; overflow-y:hidden; white-space:nowrap;
+}
+.preview:empty::before{content:'nothing to roll yet'; color:#39404f; font-size:12.5px}
+/* the dice have no result yet, so they read as outlines */
+.die.ghost{opacity:.72}
+.die.ghost .dieshape{fill:none}
+.die.ghost .dieval{color:var(--dim); font-weight:600}
+
 /* ------------------------------------------------------------- editor */
 .editor{position:relative; background:#0a0c11; flex:none; overflow:hidden}
 .editor .hl, .editor textarea{
@@ -180,7 +193,12 @@ kbd{
 }
 .card .rows.plain{line-height:2.1}
 .setrow{display:flex; gap:10px; align-items:baseline; padding:1px 0}
-.setrow .i{color:var(--dimmer); font-size:11px; min-width:22px; flex:none}
+.setrow{align-items:flex-start}
+.setrow .i{
+  color:var(--dimmer); font-size:11px; min-width:22px; max-width:110px; flex:none;
+  font-family:var(--mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  padding-top:calc(var(--dsz) * .35);
+}
 .setrow .body{flex:1; min-width:0}
 .setrow .st{color:var(--accent); font-weight:700; flex:none; min-width:34px; text-align:right}
 .tally{font-size:12px; margin-top:7px; font-family:var(--mono); color:var(--dim)}
@@ -256,15 +274,13 @@ kbd{
    the subtotal below speak for the term */
 .r-term.squeezed .die{margin:0}   /* the overlap formula assumes no gaps */
 .r-term.squeezed .die + .die{margin-left:calc(var(--dsz) * var(--sq))}
-.r-term.squeezed .die{box-shadow:-2px 0 0 -1px var(--pane)}
-.card.live .r-term.squeezed .die{box-shadow:-2px 0 0 -1px var(--pane-2)}
 
 /* subtotal tree drawn under the dice, innermost bracket nearest them */
 .setrow .body{display:block; position:relative}
 .sumtree{position:relative; margin-top:2px}
 .sumbar{position:absolute; height:15px; border-top:1px solid #3a4152}
 .sumbar::before, .sumbar::after{
-  content:''; position:absolute; top:0; width:1px; height:4px; background:#3a4152;
+  content:''; position:absolute; top:-4px; width:1px; height:4px; background:#3a4152;
 }
 .sumbar::before{left:0}
 .sumbar::after{right:0}
@@ -277,6 +293,7 @@ kbd{
 
 /* hovering the expression, the Explain list or a rolled die lights up all three */
 .r-term.hot, .r-grp.hot{background:rgba(240,180,41,.13); box-shadow:0 0 0 1px rgba(240,180,41,.4)}
+.r-op.hot{background:rgba(240,180,41,.2); border-radius:3px; color:var(--accent)}
 .exrow.hot{background:rgba(240,180,41,.13)}
 .hl .hot{background:rgba(240,180,41,.22); border-radius:3px; box-shadow:0 0 0 1px rgba(240,180,41,.35)}
 .r-fn{color:var(--purple)}

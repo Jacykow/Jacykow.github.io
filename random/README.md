@@ -3,7 +3,7 @@
 A lightweight, dependency-free web console for advanced dice notation — with the UX of
 [regexr.com](https://regexr.com): you type an expression, it is syntax-highlighted live,
 broken down token-by-token in an **Explain** panel that stays linked to your caret, and
-rolled as you type.
+previewed as the dice it would throw.
 
 No build step, no dependencies, no network calls. Four files and a 25-line dev server.
 Designed for phones as much as desktop.
@@ -92,6 +92,7 @@ pow round sign sin sqrt tan`. `round()` rounds half away from zero.
 
 ```
 6x 4d6dl1               roll the entire expression 6 times and report each set
+2d6, 3d8, d20           comma: separate rolls, reported as one entry
 2d20kh1+5 # attack      everything after # is a label, ignored by the maths
 ```
 
@@ -99,9 +100,13 @@ pow round sign sin sqrt tan`. `round()` rounds half away from zero.
 
 * **Expression** — live syntax highlighting. Errors underline the field and the status
   line names the position.
-* **Result** — the top card re-rolls as you type; <kbd>Enter</kbd> freezes it and rolls
-  again, building a log. Dropped dice are struck out, exploded dice are amber, re-rolled
-  dice show their original value, successes and criticals are colour-coded.
+* **Preview** — above the expression, the dice it *would* throw, drawn from the parse
+  alone and carrying their die name rather than a face, since nothing has been rolled.
+  It updates as you type and never involves randomness.
+* **Result** — nothing rolls until you ask: <kbd>Enter</kbd> or the Roll button. Each roll
+  lands in the log collapsed; click it to open. Dropped dice are struck out, exploded dice
+  are amber, re-rolled dice show their original value, successes and criticals are
+  colour-coded.
 
   Dice within a term are joined by the `+` they stand for, and every subtotal is drawn as
   a bracket in a tree beneath them, innermost nearest the dice — so `((2d6+d6)*d6)+8d10`
@@ -109,9 +114,9 @@ pow round sign sin sqrt tan`. `round()` rounds half away from zero.
   its own dice so it never takes more room than three; the individual faces stop mattering
   there and the subtotal speaks for the term.
 
-  Each card carries a **roll again** button, and clicking an opened history entry anywhere
-  inert folds it back up. Collapsed entries show their dice, and their label if they have
-  one, otherwise the expression — never both.
+  Each card carries a **roll again** button, and clicking an opened entry anywhere inert
+  folds it back up. Collapsed entries show their dice, and their label if they have one,
+  otherwise the expression — never both.
 
   Each die is a 3D render of a real solid, drawn from one inline SVG sprite referenced
   with `<use>`, so the shapes cost no extra requests and recolour from CSS:
@@ -133,8 +138,9 @@ pow round sign sin sqrt tan`. `round()` rounds half away from zero.
   past 240 dice they fall back to plain text chips so typing never stalls. Those
   thresholds live in `DENSITY` at the top of `app.js`.
 * **Explain** — one row per token. Click a row to select that token in the field; moving
-  the caret highlights the matching row. Hovering the expression, a row, or a rolled die
-  lights up all three — they share a `data-x` tag assigned at parse time.
+  the caret highlights the matching row. Hovering the expression, a row, an operator, a
+  previewed die or a rolled one lights up every copy — they share a `data-x` tag assigned
+  at parse time.
 * **Details** — Monte-Carlo distribution of the total (min / mean / median / max / std dev
   / percentiles) with a histogram. Sample size adapts to keep it responsive.
 * **Reference** — a gallery of every die that has a solid of its own, plus the full cheat
