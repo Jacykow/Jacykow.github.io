@@ -16,8 +16,11 @@
     notation: $('notation'), result: $('result'), rollBtn: $('rollBtn'),
     tabs: $('tabs'), explain: $('tab-explain'), details: $('tab-details'),
     reference: $('tab-reference'), saved: $('tab-saved'), toast: $('toast'),
-    paneTools: $('paneTools'), drawer: $('drawerToggle')
+    paneTools: $('paneTools'), drawer: $('drawerToggle'), refSide: $('refSide')
   };
+
+  /* the one place the desktop/mobile split is decided */
+  const wide = window.matchMedia('(min-width: 1000px)');
 
   /* dice-count thresholds where the result display steps down a size */
   const DENSITY = { dense: 18, denser: 60, plain: 240 };
@@ -36,16 +39,18 @@
     topIsLive: true,
     activeTab: 'explain',
     statsToken: 0,
-    curRow: null       // Explain row the caret last sat on
+    curRow: null,      // Explain row the caret last sat on
+    hot: null          // token currently hovered, on any of the three surfaces
   };
 
   /* ======================================================== reference data */
+  /* every size that has a solid of its own, for the gallery */
+  const DICE_GALLERY = [2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 100];
+
   const REFERENCE = [
     ['Dice', [
       ['d20', 'one twenty-sided die'],
       ['4d6', 'four six-sided dice, summed'],
-      ['d%', 'percentile die (1-100)'],
-      ['dF', 'Fudge / FATE die: -1, 0 or +1'],
       ['(2+2)d6', 'computed quantity'],
       ['3d(2*6)', 'computed number of sides']
     ]],
@@ -60,7 +65,6 @@
     ['Keep & drop', [
       ['kh3', 'keep the highest 3'],
       ['kl1', 'keep the lowest 1 (disadvantage)'],
-      ['k3', 'same as kh3'],
       ['dl1', 'drop the lowest 1'],
       ['dh1', 'drop the highest 1']
     ]],
@@ -84,11 +88,11 @@
       ['sa', 'sort dice ascending'],
       ['sd', 'sort dice descending']
     ]],
-    ['Groups', [
-      ['{2d6, 3d8}', 'roll both, sum the totals'],
-      ['{4d6, 2d10}kh1', 'keep the best sub-roll'],
-      ['{3d6+2d8}kh3', 'keep the best 3 dice overall'],
-      ['{2d6, 3d8}>=9', 'count sub-rolls of 9 or more']
+    ['Bracket groups', [
+      ['(3d6+2d8)kh3', 'keep the best 3 dice across the group'],
+      ['(4d6+2d10)dl2', 'drop the worst 2 overall'],
+      ['(2d6+3d8)>=5', 'count every die of 5 or more'],
+      ['(2d20+2d12)sd', 'sort every die in the group']
     ]],
     ['Maths', [
       ['+ - * / % ^', 'the usual operators'],
@@ -165,6 +169,32 @@
     if (n) n.classList.add('lit');
   }
 
+  /* ---------------------------------------------------------- hover link
+     The expression, the Explain list and the rolled dice all tag their pieces
+     with the same data-x, so lighting one lights the other two. */
+  function setHot(id) {
+    if (state.hot === id) return;
+    state.hot = id;
+    document.querySelectorAll('.hot').forEach((n) => n.classList.remove('hot'));
+    if (!id) return;
+    const sel = '[data-x="' + id + '"]';
+    el.hl.querySelectorAll(sel).forEach((n) => n.classList.add('hot'));
+    el.explain.querySelectorAll('.exrow' + sel).forEach((n) => n.classList.add('hot'));
+    el.result.querySelectorAll('.r-term' + sel + ', .r-grp' + sel).forEach((n) => n.classList.add('hot'));
+  }
+
+  /** the expression is a textarea, so hit-test the highlight layer by hand */
+  function spanAtPoint(x, y) {
+    let best = null;
+    el.hl.querySelectorAll('[data-x]').forEach((n) => {
+      const r = n.getBoundingClientRect();
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+        if (!best || r.width < best.w) best = { id: n.getAttribute('data-x'), w: r.width };
+      }
+    });
+    return best ? best.id : null;
+  }
+
   /**
    * Mark the token under the caret, in the editor and in the Explain list.
    * `chase` scrolls the list to that row — only ever from a real caret move, and
@@ -211,9 +241,8 @@
     state.curRow = null;
     el.explain.querySelectorAll('.exrow').forEach((row) => {
       const id = row.getAttribute('data-x');
-      row.addEventListener('mouseenter', () => highlightSpan(id));
-      // restore the caret's highlight without touching the scroll position
-      row.addEventListener('mouseleave', () => syncCaret(false));
+      row.addEventListener('mouseenter', () => setHot(id));
+      row.addEventListener('mouseleave', () => setHot(null));
       row.addEventListener('click', () => {
         const s = state.spans.find((x) => x.id === id);
         if (!s) return;
@@ -405,14 +434,34 @@
   }
 
   /* ============================================================ reference */
+  /** the dice gallery: every size that has a solid of its own, drawn */
+  function galleryHTML() {
+    const dice = DICE_GALLERY.map((n) => {
+      const shape = E.shapeFor(n);
+      return '<div class="refdie" data-ins="d' + n + '" title="click to insert d' + n + '">' +
+        '<span class="die s-' + shape + '">' +
+          '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true"><use href="#sh-' + shape + '"/></svg>' +
+          '<span class="dieval">' + n + '</span>' +
+        '</span><code>d' + n + '</code></div>';
+    }).join('');
+    return '<div class="refgroup"><h3>The dice</h3><div class="refdice">' + dice + '</div>' +
+      '<div class="refrow"><span>Sizes without a solid of their own borrow the nearest one.</span></div></div>';
+  }
+
   function renderReference() {
-    el.reference.innerHTML = '<div class="refgrid">' + REFERENCE.map(([name, items]) =>
+    const html = '<div class="refgrid">' + galleryHTML() + REFERENCE.map(([name, items]) =>
       '<div class="refgroup"><h3>' + esc(name) + '</h3>' + items.map(([code, desc]) =>
         '<div class="refrow"><code data-ins="' + esc(code) + '">' + esc(code) + '</code>' +
         '<span>' + esc(desc) + '</span></div>').join('') + '</div>').join('') + '</div>';
 
-    el.reference.querySelectorAll('code[data-ins]').forEach((c) => {
-      c.title = 'click to insert at the caret';
+    // wide screens get the permanent left rail, narrow ones the drawer tab
+    const host = wide.matches ? el.refSide : el.reference;
+    const other = wide.matches ? el.reference : el.refSide;
+    other.innerHTML = '';
+    host.innerHTML = html;
+
+    host.querySelectorAll('[data-ins]').forEach((c) => {
+      if (c.tagName === 'CODE') c.title = 'click to insert at the caret';
       c.addEventListener('click', () => insertAtCaret(c.getAttribute('data-ins')));
     });
   }
@@ -582,6 +631,20 @@
     });
 
     el.rollBtn.addEventListener('click', () => { commitRoll(); el.ta.focus(); });
+
+    el.wrap.addEventListener('mousemove', (ev) => setHot(spanAtPoint(ev.clientX, ev.clientY)));
+    el.wrap.addEventListener('mouseleave', () => setHot(null));
+    el.result.addEventListener('mouseover', (ev) => {
+      const n = ev.target.closest('[data-x]');
+      setHot(n ? n.getAttribute('data-x') : null);
+    });
+    el.result.addEventListener('mouseleave', () => setHot(null));
+
+    wide.addEventListener('change', () => {
+      renderReference();
+      if (!wide.matches && state.activeTab === 'reference') switchTab('explain');
+      else if (wide.matches && state.activeTab === 'reference') switchTab('explain');
+    });
 
     el.result.addEventListener('click', (ev) => {
       const open = ev.target.closest('[data-open]');

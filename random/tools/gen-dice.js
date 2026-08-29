@@ -351,7 +351,7 @@ function build(name, rawVerts, opts) {
 /* Odd-sided dice are long n-gonal barrels resting on a side face; even-sided
    ones without a Platonic solid are n/2-gon bipyramids. */
 const BARREL = 2.7;    // half-length: twice as long as it is wide, so it lands on a side
-const BIPY = 1.18;     // apex height above the equator
+const BIPY = 1.75;    // apex height above the equator; higher is narrower
 
 const SHAPES = [
   build('d2', prism(28, 0.16), { restSides: 28 }),
@@ -366,9 +366,9 @@ const SHAPES = [
   build('d10', trapezohedron(), {}),
   build('d11', prism(11, BARREL), { restSides: 4 }),
   build('d12', dodecahedron(), {}),
-  build('d14', bipyramid(7, BIPY), {}),
-  build('d16', bipyramid(8, BIPY), {}),
-  build('d18', bipyramid(9, BIPY), {}),
+  build('d14', bipyramid(7, BIPY), { size: 1.65 }),
+  build('d16', bipyramid(8, BIPY), { size: 1.65 }),
+  build('d18', bipyramid(9, BIPY), { size: 1.65 }),
   build('d20', icosahedron(), {}),
   build('d100', icosphere(), {})
 ];

@@ -34,8 +34,6 @@ complete and least ambiguous version of that family. A few Dice Maiden shorthand
 |---|---|
 | `d20` | one twenty-sided die |
 | `4d6` | four six-sided dice, summed |
-| `d%` | percentile die (1–100) |
-| `dF`, `dF.1` | Fudge / FATE die: −1, 0 or +1 |
 | `(2+2)d6` | computed quantity |
 | `3d(2*6)` | computed number of sides |
 
@@ -56,7 +54,7 @@ fixed order below, so `4d6kh3!` and `4d6!kh3` mean the same thing.
 | 4 | `r`, `r<3`, `r1` | re-roll until the die no longer qualifies |
 | 4 | `ro`, `ro1` | re-roll at most once |
 | 5 | `u`, `uo` | force unique results (`uo` re-rolls duplicates once) |
-| 6 | `kh3`, `k3`, `kl1` | keep the highest / lowest N |
+| 6 | `kh3`, `kl1` | keep the highest / lowest N |
 | 7 | `dl1`, `dh1` | drop the lowest / highest N |
 | 8 | `>=8`, `t8` | stop summing; count each qualifying die as a success |
 | 8 | `f<=1`, `f1` | each qualifying die cancels one success |
@@ -68,18 +66,19 @@ Comparison points are `=`, `!=`, `<`, `>`, `<=`, `>=`. A bare number after `!`, 
 `u`, `uo`, `cs` or `cf` means "equal to" (`r1` == `r=1`); after `f` it means "or less"
 (`f1` == `f<=1`), matching Dice Maiden.
 
-### Groups
+### Bracket groups
+
+Modifiers written after a closing bracket act on every die inside it, rather than on a
+single term:
 
 ```
-{2d6, 3d8}            roll both, sum the totals
-{4d6, 2d10, d4}kh1    keep only the best sub-roll
-{3d6+2d8}kh3          one sub-roll: keep the best 3 dice across the whole group
-{2d6, 3d8}>=9         count sub-rolls of 9 or more as successes
+(3d6+2d8)kh3      keep the best 3 dice across the whole group
+(4d6+2d10)dl2     drop the worst 2 overall
+(2d6+3d8)>=5      count every die of 5 or more as a success
+(2d20+2d12)sd     sort every die in the group
 ```
 
-Group modifiers are `kh`/`kl`/`dh`/`dl`, target success/failure, and sorting. With several
-sub-rolls they act on whole sub-roll totals; with a single sub-roll they act on the
-individual dice inside it.
+Keep, drop, target success/failure and sorting are the modifiers that make sense here.
 
 ### Maths
 
@@ -105,6 +104,10 @@ pow round sign sin sqrt tan`. `round()` rounds half away from zero.
   again, building a log. Dropped dice are struck out, exploded dice are amber, re-rolled
   dice show their original value, successes and criticals are colour-coded.
 
+  Dice within a term are joined by the `+` they stand for, and anything that adds up —
+  a term of several dice, a bracket group — carries its own running subtotal, so
+  `((d6e2+d6)*d6)+d6e3` shows what each piece came to on the way to the total.
+
   Each die is a 3D render of a real solid, drawn from one inline SVG sprite referenced
   with `<use>`, so the shapes cost no extra requests and recolour from CSS:
 
@@ -120,16 +123,19 @@ pow round sign sin sqrt tan`. `round()` rounds half away from zero.
   | 1, 13, 15, 17, 19 | borrow the d20 |
   | anything above 20 | borrows the d100 |
 
-  Fudge dice have no die to draw, so they show a plain `−` / `0` / `+` chip.
 
   Dice shrink as the count grows — 34px, then 26px past 18 dice, then 19px past 60 — and
   past 240 dice they fall back to plain text chips so typing never stalls. Those
   thresholds live in `DENSITY` at the top of `app.js`.
 * **Explain** — one row per token. Click a row to select that token in the field; moving
-  the caret highlights the matching row.
+  the caret highlights the matching row. Hovering the expression, a row, or a rolled die
+  lights up all three — they share a `data-x` tag assigned at parse time.
 * **Details** — Monte-Carlo distribution of the total (min / mean / median / max / std dev
   / percentiles) with a histogram. Sample size adapts to keep it responsive.
-* **Reference** — the full cheat sheet; click any snippet to insert it at the caret.
+* **Reference** — a gallery of every die that has a solid of its own, plus the full cheat
+  sheet; click any die or snippet to insert it at the caret. From 1000px up it sits in a
+  permanent rail on the left; below that it folds back into the drawer as a tab. That
+  breakpoint is the single `wide` media query in `app.js`.
 * **Saved** — expressions kept in `localStorage`. <kbd>Ctrl</kbd>+<kbd>S</kbd> to save.
 * **Copy link** — puts the expression in the URL hash so it can be shared.
 
@@ -170,10 +176,12 @@ their equatorial edge — while on the Platonic solids the resting face is regul
 every edge is equivalent and the choice is free.
 
 The d4 adds a further 60°, putting a base corner toward the camera so all three ground
-vertices sit along the bottom with the apex clear above them. Every solid is normalised to a circumradius of 1,
-so apparent size falls out of the geometry itself rather than a per-shape fit; a die
-that is genuinely squatter renders smaller. To resize one deliberately, give it a `size`
-in the shape list, which scales the solid in 3D before the camera ever sees it.
+vertices sit along the bottom with the apex clear above them.
+
+Every solid is normalised to a circumradius of 1, so apparent size falls out of the
+geometry itself rather than a per-shape fit; a die that is genuinely squatter renders
+smaller. To resize one deliberately, give it a `size` in the shape list, which scales the
+solid in 3D before the camera ever sees it.
 
 The value is drawn centred on the die at one constant size, the same for every shape and
 every value, so the generator emits no per-shape CSS.

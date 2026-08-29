@@ -44,9 +44,20 @@ button.tb:hover{color:var(--text); border-color:#3b4356}
 #app{
   height:calc(100vh - var(--head-h));
   height:calc(100dvh - var(--head-h));   /* survives mobile browser chrome + keyboard */
-  display:flex; flex-direction:column; gap:1px; background:var(--border);
+  display:flex; gap:1px; background:var(--border);
   padding-bottom:var(--safe-b);
 }
+#main{flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; background:var(--border)}
+
+/* desktop-only reference rail; hidden below --wide, where it becomes a tab */
+#sidebar{
+  width:300px; flex:none; background:var(--bg); display:flex; flex-direction:column; min-height:0;
+}
+#sidebar .sidebody{
+  flex:1; min-height:0; overflow-y:auto; padding:10px 12px; overscroll-behavior:contain;
+}
+@media(max-width:999px){ #sidebar{display:none} }
+@media(min-width:1000px){ .tabs button[data-tab="reference"]{display:none} }
 .pane{background:var(--bg); display:flex; flex-direction:column; min-height:0}
 .pane.grow{flex:1; min-height:88px}   /* never let the result pane clip its own header */
 .panehead{
@@ -230,8 +241,17 @@ kbd{
 .chip-die.failure{background:rgba(245,120,111,.15); border-color:rgba(245,120,111,.5); color:var(--red)}
 .chip-die s{color:var(--dimmer); margin-right:4px; font-size:11px}
 .chip-die sup{color:var(--dimmer); font-size:9px}
-.r-op{color:var(--dimmer); padding:0 4px}
+.r-op{color:var(--dimmer); padding:0 5px}
+.r-plus{color:var(--dimmer); padding:0 1px; font-size:11px; vertical-align:middle}
+.subsum{color:var(--accent); font-size:11.5px; padding:0 2px 0 5px; white-space:nowrap; vertical-align:middle}
+.r-grp > .subsum{color:var(--blue)}
+.r-term, .r-grp{border-radius:5px; padding:0 1px}
 .r-brk{color:var(--pink)}
+
+/* hovering the expression, the Explain list or a rolled die lights up all three */
+.r-term.hot, .r-grp.hot{background:rgba(240,180,41,.13); box-shadow:0 0 0 1px rgba(240,180,41,.4)}
+.exrow.hot{background:rgba(240,180,41,.13)}
+.hl .hot{background:rgba(240,180,41,.22); border-radius:3px; box-shadow:0 0 0 1px rgba(240,180,41,.35)}
 .r-fn{color:var(--purple)}
 .r-notn{color:var(--dimmer); margin-right:4px}
 .r-num{color:var(--text)}
@@ -297,6 +317,7 @@ kbd{
 /* reference */
 .refgrid{columns:2; column-gap:22px}
 @media(max-width:760px){ .refgrid{columns:1} }
+#sidebar .refgrid{columns:1}          /* the rail is one column wide */
 .refgroup{break-inside:avoid; margin-bottom:12px}
 .refgroup h3{
   font-size:10.5px; text-transform:uppercase; letter-spacing:.12em; color:var(--dim);
@@ -309,6 +330,19 @@ kbd{
 }
 .refrow code:hover{color:#ffd469; border-color:var(--accent)}
 .refrow span{font-size:12px; color:var(--dim)}
+
+/* the dice gallery at the top of the reference */
+.refdice{display:grid; grid-template-columns:repeat(auto-fill,minmax(52px,1fr)); gap:4px; margin-bottom:4px}
+.refdie{
+  display:flex; flex-direction:column; align-items:center; gap:1px; padding:5px 2px;
+  border:1px solid transparent; border-radius:7px; cursor:pointer; --dsz:32px;
+}
+.refdie:hover{background:var(--pane-2); border-color:var(--border)}
+.refdie code{
+  font-family:var(--mono); font-size:11px; color:var(--dim);
+  background:none; border:none; padding:0;
+}
+.refdie:hover code{color:var(--accent)}
 
 /* saved */
 .savedrow{

@@ -8,10 +8,11 @@
      term    := power (('*' | '/' | '%') power)*
      power   := unary (('^' | '**') power)?
      unary   := ('-' | '+')? primary
-     primary := number | group | func '(' expr,* ')' | '(' expr ')' | dice
+     primary := number | func '(' expr,* ')' | '(' expr ')' modifier* | dice
      dice    := [qty] ('d'|'D') sides modifier*
-     sides   := integer | '%' | 'F' ['.' digit] | '(' expr ')'
-     group   := '{' expr (',' expr)* '}' modifier*
+     sides   := integer | '(' expr ')'
+
+   Modifiers after a bracket act on every die inside it: `(3d6+2d8)kh3`.
 
    Every node records its source span so the UI can syntax-highlight the input
    and cross-link it with a plain-English explanation, RegExr style.
@@ -73,7 +74,9 @@
      PARSER
      ========================================================================== */
   class Parser {
-    constructor(src) { this.s = src; this.i = 0; }
+    // uid tags dice and bracket-group nodes so the editor, the Explain list and
+    // the rolled dice can all point at the same thing when hovered
+    constructor(src) { this.s = src; this.i = 0; this.uid = 0; }
 
     fail(msg) { throw new DiceError(msg, this.i); }
     ws() { while (this.i < this.s.length && /\s/.test(this.s[this.i])) this.i++; }
@@ -173,14 +176,13 @@
       const c = this.s[this.i];
       if (c !== 'd' && c !== 'D') return false;
       const rest = this.s.slice(this.i + 1).replace(/^\s*/, '');
-      return /^\d/.test(rest) || rest[0] === '%' || rest[0] === '(' || /^[fF](?![a-z])/.test(rest);
+      return /^\d/.test(rest) || rest[0] === '(';
     }
 
     primary() {
       const a = this.mark();
       if (this.end()) this.fail('unexpected end of expression');
 
-      if (this.peek() === '{') return this.group();
       if (this.atDice()) return this.dice(null, a);
 
       const fn = /^([a-z]+)\s*\(/i.exec(this.s.slice(this.i));
@@ -206,8 +208,19 @@
         const inner = this.expr();
         const cA = this.mark();
         if (!this.lit(')')) this.fail('expected ")"');
-        const node = { t: 'paren', v: inner, brk: [openSp, [cA, this.i]], sp: [a, this.i] };
-        return this.maybeDice(node, a);
+        const brk = [openSp, [cA, this.i]];
+        const closeEnd = this.i;
+        // `(2+2)d6` — the parentheses are a dice quantity
+        if (this.atDice()) return this.dice({ t: 'paren', v: inner, brk, sp: [a, closeEnd] }, a);
+        // `(3d6+2d8)kh3` — modifiers after the bracket act on every die inside
+        const mods = this.modifiers();
+        if (mods.length) {
+          return {
+            t: 'group', sub: inner, mods, brk,
+            core: [a, closeEnd], sp: [a, this.i], uid: ++this.uid
+          };
+        }
+        return { t: 'paren', v: inner, brk, sp: [a, this.i] };
       }
 
       const nA = this.mark();
@@ -226,19 +239,7 @@
       let sides;
       this.ws();
       const sA = this.i;
-      if (this.lit('%')) {
-        sides = { t: 'num', v: 100, sp: [sA, this.i], pct: true };
-      } else if (/^[fF](?![a-z])/.test(this.s.slice(this.i))) {
-        this.i++;
-        let variant = 2;
-        if (this.s[this.i] === '.') {
-          this.i++;
-          const v = this.digits();
-          if (v === null) this.fail('expected a fudge variant, e.g. dF.1');
-          variant = v;
-        }
-        sides = { t: 'fudge', variant, sp: [sA, this.i] };
-      } else if (this.lit('(')) {
+      if (this.lit('(')) {
         sides = this.expr();
         if (!this.lit(')')) this.fail('expected ")" after computed sides');
       } else {
@@ -248,28 +249,7 @@
       }
       const coreEnd = this.i;
       const mods = this.modifiers();
-      return { t: 'dice', qty, sides, mods, core: [a, coreEnd], sp: [a, this.i] };
-    }
-
-    group() {
-      const a = this.mark();
-      this.lit('{');
-      const openSp = [a, this.i];
-      const subs = [this.expr()];
-      const commas = [];
-      for (;;) {
-        const cA = this.mark();
-        if (!this.lit(',')) break;
-        commas.push([cA, this.i]);
-        subs.push(this.expr());
-      }
-      const bA = this.mark();
-      if (!this.lit('}')) this.fail('expected "}" to close the group');
-      const mods = this.modifiers();
-      return {
-        t: 'group', subs, mods, commas,
-        brk: [openSp, [bA, bA + 1]], core: [a, bA + 1], sp: [a, this.i]
-      };
+      return { t: 'dice', qty, sides, mods, core: [a, coreEnd], sp: [a, this.i], uid: ++this.uid };
     }
 
     /* ------------------------------------------------------- comparisons */
@@ -348,10 +328,6 @@
       // -- keep / drop ------------------------------------------------------
       if (this.lit('kh')) return this.fin(start, { t: 'keep', end: 'h', n: this.digits() ?? 1 });
       if (this.lit('kl')) return this.fin(start, { t: 'keep', end: 'l', n: this.digits() ?? 1 });
-      if (this.lit('k')) {
-        const n = this.digits();
-        return n === null ? back() : this.fin(start, { t: 'keep', end: 'h', n });
-      }
       if (this.lit('dh')) return this.fin(start, { t: 'drop', end: 'h', n: this.digits() ?? 1 });
       if (this.lit('dl')) return this.fin(start, { t: 'drop', end: 'l', n: this.digits() ?? 1 });
       if (this.lit('d')) {
@@ -430,34 +406,27 @@
     10: 'd10', 11: 'd11', 12: 'd12', 14: 'd14', 16: 'd16', 18: 'd18',
     20: 'd20', 100: 'd100'
   };
-  function shapeFor(sides, fudge) {
-    if (fudge) return null;
+  function shapeFor(sides) {
     if (SOLIDS[sides]) return SOLIDS[sides];
     return sides > 20 ? 'd100' : 'd20';
   }
 
-  /** the digits shown on the face; Fudge dice read as -, 0, + */
-  function faceText(v, fudge) {
-    if (!fudge) return fmt(v);
-    return v > 0 ? '+' : (v < 0 ? '−' : '0');
-  }
-
-  function dieHTML(r, shape, fudge) {
+  function dieHTML(r, shape, tag) {
     const cls = ['die', 's-' + shape].concat(r.tags);
     if (r.dropped) cls.push('dropped');
     const title = (r.tags.length ? r.tags.join(', ') : 'natural') +
       (r.dropped ? ', dropped' : '') +
       (r.from !== null && r.from !== undefined ? ', was ' + fmt(r.from) : '');
 
-    const face = faceText(r.v, fudge);
+    const face = fmt(r.v);
     const size = face.length >= 3 ? ' v3' : (face.length === 2 ? ' v2' : '');
 
     // one corner slot: a re-rolled die shows what it was, otherwise mark explosions
     let badge = '';
-    if (r.from !== null && r.from !== undefined) badge = '<s>' + esc(faceText(r.from, fudge)) + '</s>';
+    if (r.from !== null && r.from !== undefined) badge = '<s>' + esc(fmt(r.from)) + '</s>';
     else if (r.tags.indexOf('exploded') >= 0) badge = '!';
 
-    return '<span class="' + cls.join(' ') + '" title="' + esc(title) + '">' +
+    return '<span class="' + cls.join(' ') + '"' + tag + ' title="' + esc(title) + '">' +
       '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
       '<use href="#sh-' + shape + '"/></svg>' +
       '<span class="dieval' + size + '">' + esc(face) + '</span>' +
@@ -466,13 +435,16 @@
   }
 
   /** compact chip used when a roll has too many dice to draw as shapes */
-  function chipHTML(r, fudge) {
+  function chipHTML(r, tag) {
     const cls = ['chip-die'].concat(r.tags);
     if (r.dropped) cls.push('dropped');
-    const was = (r.from !== null && r.from !== undefined) ? '<s>' + esc(faceText(r.from, fudge)) + '</s>' : '';
+    const was = (r.from !== null && r.from !== undefined) ? '<s>' + esc(fmt(r.from)) + '</s>' : '';
     const bang = r.tags.indexOf('exploded') >= 0 ? '<sup>!</sup>' : '';
-    return '<span class="' + cls.join(' ') + '">' + was + esc(faceText(r.v, fudge)) + bang + '</span>';
+    return '<span class="' + cls.join(' ') + '"' + tag + '>' + was + esc(fmt(r.v)) + bang + '</span>';
   }
+
+  const PLUS = '<span class="r-plus">+</span>';
+  const subSum = (v) => '<span class="subsum">= ' + esc(fmt(v)) + '</span>';
 
   /* -------------------------------------------------------- result nodes */
   const NumResult = (v) => ({
@@ -504,7 +476,10 @@
 
   const ParenResult = (v) => ({
     k: 'paren', inner: v, children: [v], total: () => v.total(),
-    html: (o) => '<span class="r-brk">(</span>' + v.html(o) + '<span class="r-brk">)</span>'
+    html(o) {
+      return '<span class="r-grp"><span class="r-brk">(</span>' + v.html(o) +
+        '<span class="r-brk">)</span>' + subSum(this.total()) + '</span>';
+    }
   });
 
   const FuncResult = (name, args) => ({
@@ -515,16 +490,12 @@
   });
 
   /* --------------------------------------------------------- dice rolling */
-  const makeDie = (sides, fudge) => fudge ? rng.int(-1, 1) : rng.int(1, sides);
+  const makeDie = (sides) => rng.int(1, sides);
 
   function rollDice(node, ctx) {
-    const fudge = node.sides.t === 'fudge';
-    let sides = 0;
-    if (!fudge) {
-      sides = Math.floor(node.sides.t === 'num' ? node.sides.v : evalNode(node.sides, ctx).total());
-      if (!(sides >= 1)) throw new DiceError('a die needs at least 1 side (got ' + sides + ')');
-      if (sides > LIMIT.sides) throw new DiceError('too many sides (max ' + LIMIT.sides + ')');
-    }
+    const sides = Math.floor(node.sides.t === 'num' ? node.sides.v : evalNode(node.sides, ctx).total());
+    if (!(sides >= 1)) throw new DiceError('a die needs at least 1 side (got ' + sides + ')');
+    if (sides > LIMIT.sides) throw new DiceError('too many sides (max ' + LIMIT.sides + ')');
     const qty = node.qty === null ? 1
       : Math.floor(node.qty.t === 'num' ? node.qty.v : evalNode(node.qty, ctx).total());
     if (!(qty >= 0)) throw new DiceError('dice quantity must be 0 or more (got ' + qty + ')');
@@ -532,11 +503,10 @@
     ctx.dice += qty;
     if (ctx.dice > LIMIT.totalDice) throw new DiceError('too many dice in one expression');
 
-    const dmin = fudge ? -1 : 1;
-    const dmax = fudge ? 1 : sides;
+    const dmin = 1, dmax = sides;
 
     let rolls = [];
-    for (let i = 0; i < qty; i++) rolls.push({ v: makeDie(sides, fudge), tags: [], from: null });
+    for (let i = 0; i < qty; i++) rolls.push({ v: makeDie(sides), tags: [], from: null });
 
     const tag = (r, t) => { if (r.tags.indexOf(t) < 0) r.tags.push(t); };
     const mods = node.mods.slice().sort((a, b) => (ORDER[a.t] || 99) - (ORDER[b.t] || 99));
@@ -561,7 +531,7 @@
             while (cpTest(cp, last) && n < LIMIT.explode) {
               n++;
               if (++ctx.dice > LIMIT.totalDice) throw new DiceError('explosion ran away — too many dice');
-              const raw = makeDie(sides, fudge);
+              const raw = makeDie(sides);
               last = raw;
               const val = m.pen ? raw - 1 : raw;
               if (m.compound) { r.v += val; tag(r, 'exploded'); }
@@ -580,7 +550,7 @@
             let n = 0;
             while (cpTest(cp, r.v) && n < LIMIT.reroll) {
               if (r.from === null) r.from = r.v;
-              r.v = makeDie(sides, fudge);
+              r.v = makeDie(sides);
               tag(r, 'rerolled');
               n++;
               if (m.once) break;
@@ -595,7 +565,7 @@
             let n = 0;
             while (seen.has(r.v) && (!m.cp || cpTest(m.cp, r.v)) && n < LIMIT.reroll) {
               if (r.from === null) r.from = r.v;
-              r.v = makeDie(sides, fudge);
+              r.v = makeDie(sides);
               tag(r, 'rerolled');
               n++;
               if (m.once) break;
@@ -650,7 +620,7 @@
     }
 
     return {
-      k: 'dice', rolls, fudge, sides, qty,
+      k: 'dice', rolls, sides, qty, uid: node.uid,
       notation: notationOf(node),
       successMode: !!(successCp || failureCp),
 
@@ -665,64 +635,47 @@
       },
 
       html(o) {
-        const shape = shapeFor(this.sides, this.fudge);
-        const parts = rolls.map((r) => (shape && !(o && o.plain))
-          ? dieHTML(r, shape, this.fudge)
-          : chipHTML(r, this.fudge));
-        return '<span class="r-notn">' + esc(this.notation) + '</span>' +
-          '<span class="r-brk">[</span>' + parts.join('') + '<span class="r-brk">]</span>';
+        const shape = shapeFor(this.sides);
+        const tag = this.uid ? ' data-x="d' + this.uid + '"' : '';
+        const parts = rolls.map((r) => (o && o.plain) ? chipHTML(r, tag) : dieHTML(r, shape, tag));
+        // several dice in one term are summed, so show the operator and the sum
+        const body = parts.join(PLUS);
+        return '<span class="r-term"' + tag + '>' + body +
+          (rolls.length > 1 ? subSum(this.total()) : '') + '</span>';
       }
     };
   }
 
   /* -------------------------------------------------------- group results */
+  /* Bracket group: modifiers written after ')' act on every die inside it. */
   function evalGroup(node, ctx) {
-    const subs = node.subs.map((s) => evalNode(s, ctx));
-    const mods = node.mods.slice().sort((a, b) => (ORDER[a.t] || 99) - (ORDER[b.t] || 99));
-    const single = subs.length === 1;
-
-    // In a single-expression group, keep/drop/target act on the individual dice.
+    const sub = evalNode(node.sub, ctx);
+    const mods = node.mods.slice().sort((x, y) => (ORDER[x.t] || 99) - (ORDER[y.t] || 99));
     const dice = [];
-    if (single) collectDice(subs[0], dice);
-
-    const units = single
-      ? dice.map((r) => ({
-          ref: r, drop() { r.dropped = true; },
-          get val() { return r.v; }, get dropped() { return !!r.dropped; }
-        }))
-      : subs.map((s) => {
-          const u = { ref: s, dropped: false, drop() { u.dropped = true; } };
-          Object.defineProperty(u, 'val', { get: () => s.total() });
-          return u;
-        });
+    collectDice(sub, dice);
 
     let successCp = null, failureCp = null;
-
     for (const m of mods) {
       switch (m.t) {
         case 'keep': {
-          const live = units.filter((u) => !u.dropped);
-          const order = live.slice().sort((a, b) => b.val - a.val);
+          const live = dice.filter((r) => !r.dropped);
+          const order = live.slice().sort((x, y) => y.v - x.v);
           const keep = new Set(m.end === 'l' ? order.slice(-m.n) : order.slice(0, m.n));
-          for (const u of live) if (!keep.has(u)) u.drop();
+          for (const r of live) if (!keep.has(r)) r.dropped = true;
           break;
         }
         case 'drop': {
-          const live = units.filter((u) => !u.dropped);
-          const order = live.slice().sort((a, b) => b.val - a.val);
-          for (const u of (m.end === 'h' ? order.slice(0, m.n) : order.slice(-m.n))) u.drop();
+          const live = dice.filter((r) => !r.dropped);
+          const order = live.slice().sort((x, y) => y.v - x.v);
+          for (const r of (m.end === 'h' ? order.slice(0, m.n) : order.slice(-m.n))) r.dropped = true;
           break;
         }
         case 'target': successCp = m.cp; break;
         case 'failure': failureCp = m.cp; break;
-        case 'sort':
-          if (single) dice.sort((a, b) => m.dir === 'd' ? b.v - a.v : a.v - b.v);
-          else subs.sort((a, b) => m.dir === 'd' ? b.total() - a.total() : a.total() - b.total());
-          break;
+        case 'sort': dice.sort((x, y) => m.dir === 'd' ? y.v - x.v : x.v - y.v); break;
       }
     }
-
-    if (single && (successCp || failureCp)) {
+    if (successCp || failureCp) {
       for (const r of dice) {
         if (r.dropped) continue;
         if (successCp && cpTest(successCp, r.v)) r.tags.push('success');
@@ -731,28 +684,17 @@
     }
 
     return {
-      k: 'group', subs, units, children: subs, successMode: !!(successCp || failureCp),
-      successes() {
-        if (single) return dice.filter((r) => !r.dropped && r.tags.indexOf('success') >= 0).length;
-        return units.filter((u) => !u.dropped && successCp && cpTest(successCp, u.val)).length;
-      },
-      failures() {
-        if (single) return dice.filter((r) => !r.dropped && r.tags.indexOf('failure') >= 0).length;
-        return units.filter((u) => !u.dropped && failureCp && cpTest(failureCp, u.val)).length;
-      },
+      k: 'group', sub, children: [sub], uid: node.uid,
+      successMode: !!(successCp || failureCp),
+      successes() { return dice.filter((r) => !r.dropped && r.tags.indexOf('success') >= 0).length; },
+      failures() { return dice.filter((r) => !r.dropped && r.tags.indexOf('failure') >= 0).length; },
       total() {
-        if (this.successMode) return this.successes() - this.failures();
-        if (single) return subs[0].total();
-        let s = 0;
-        for (const u of units) if (!u.dropped) s += u.val;
-        return s;
+        return this.successMode ? this.successes() - this.failures() : sub.total();
       },
       html(o) {
-        const inner = subs.map((s, i) => {
-          const dead = !single && units[i] && units[i].dropped;
-          return '<span class="r-sub' + (dead ? ' dropped-sub' : '') + '">' + s.html(o) + '</span>';
-        }).join('<span class="r-op">,</span>');
-        return '<span class="r-brk">{</span>' + inner + '<span class="r-brk">}</span>';
+        const tag = this.uid ? ' data-x="g' + this.uid + '"' : '';
+        return '<span class="r-grp"' + tag + '><span class="r-brk">(</span>' +
+          sub.html(o) + '<span class="r-brk">)</span>' + subSum(this.total()) + '</span>';
       }
     };
   }
@@ -781,8 +723,7 @@
   function notationOf(node) {
     const q = node.qty === null ? '' : plain(node.qty);
     let sides;
-    if (node.sides.t === 'fudge') sides = 'F' + (node.sides.variant === 2 ? '' : '.' + node.sides.variant);
-    else if (node.sides.t === 'num') sides = plain(node.sides);
+    if (node.sides.t === 'num') sides = plain(node.sides);
     else sides = '(' + plain(node.sides) + ')';     // computed sides keep their parentheses
     return q + 'd' + sides + node.mods.map(modText).join('');
   }
@@ -815,8 +756,7 @@
       case 'bin': return plain(node.l) + node.op + plain(node.r);
       case 'func': return node.name + '(' + node.args.map(plain).join(', ') + ')';
       case 'dice': return notationOf(node);
-      case 'group': return '{' + node.subs.map(plain).join(', ') + '}' + node.mods.map(modText).join('');
-      case 'fudge': return 'F' + (node.variant === 2 ? '' : '.' + node.variant);
+      case 'group': return '(' + plain(node.sub) + ')' + node.mods.map(modText).join('');
     }
     return '?';
   }
@@ -897,30 +837,19 @@
     const rows = [];
     let uid = 0;
 
-    const push = (sp, cls, row) => {
+    const push = (sp, cls, row, fixedId) => {
       if (!sp) return null;
-      const id = row ? 'x' + (++uid) : null;
+      const id = row ? (fixedId || 'x' + (++uid)) : null;
       spans.push({ a: sp[0], b: sp[1], cls, id });
       if (row) rows.push(Object.assign({ id, code: src.slice(sp[0], sp[1]) }, row));
       return id;
     };
-
-    function diceTitle(node) {
-      const s = node.sides;
-      if (s.t === 'fudge') return 'Fudge / FATE dice';
-      if (s.pct) return 'Percentile dice';
-      return 'Dice roll';
-    }
 
     function diceDesc(node) {
       const s = node.sides;
       const q = node.qty === null ? '1' : plain(node.qty);
       const many = q !== '1';
       const dieWord = many ? 'dice' : 'die';
-      if (s.t === 'fudge') {
-        return 'Roll ' + q + ' Fudge ' + dieWord + '. Each shows −1, 0 or +1 with equal chance.';
-      }
-      if (s.pct) return 'Roll ' + q + ' percentile ' + dieWord + ' (1–100), then sum.';
       const sides = plain(s);
       const computed = s.t !== 'num';
       return 'Roll ' + q + ' ' + (computed ? '(' + sides + ')' : sides) + '-sided ' +
@@ -965,9 +894,9 @@
 
         case 'dice': {
           const many = node.qty !== null && !(node.qty.t === 'num' && node.qty.v === 1);
-          push(node.core, 't-dice', { title: diceTitle(node), desc: diceDesc(node), depth });
+          push(node.core, 't-dice', { title: 'Dice roll', desc: diceDesc(node), depth }, 'd' + node.uid);
           if (node.qty && node.qty.t !== 'num') walk(node.qty, depth + 1);
-          if (node.sides.t !== 'num' && node.sides.t !== 'fudge') walk(node.sides, depth + 1);
+          if (node.sides.t !== 'num') walk(node.sides, depth + 1);
           for (const m of node.mods) {
             const [title, desc] = modExplain(m, many ? 'die' : 'die');
             push(m.sp, 't-mod', { title, desc, depth: depth + 1 });
@@ -977,20 +906,15 @@
 
         case 'group': {
           push(node.brk[0], 't-brk', {
-            title: 'Roll group',
-            desc: node.subs.length > 1
-              ? 'Roll each of the ' + node.subs.length + ' expressions separately, then combine their totals. Group modifiers act on whole sub-rolls.'
-              : 'A group around a single expression. Group modifiers act on every individual die inside it.',
+            title: 'Bracket group',
+            desc: 'Worked out first, and the modifiers after the bracket act on every die inside it rather than on one term.',
             depth
-          });
-          node.subs.forEach((s, i) => {
-            walk(s, depth + 1);
-            if (node.commas[i]) push(node.commas[i], 't-op');
-          });
+          }, 'g' + node.uid);
+          walk(node.sub, depth + 1);
           push(node.brk[1], 't-brk');
           for (const m of node.mods) {
-            const [title, desc] = modExplain(m, 'sub-roll');
-            push(m.sp, 't-mod', { title, desc: desc, depth: depth + 1 });
+            const [title, desc] = modExplain(m, 'die');
+            push(m.sp, 't-mod', { title, desc, depth: depth + 1 });
           }
           break;
         }
@@ -1109,5 +1033,7 @@
     };
   }
 
-  global.DiceEngine = { parse, inspect, evaluate, roll, analyse, fmt, esc, DiceError, LIMIT, FUNCS };
+  global.DiceEngine = {
+    parse, inspect, evaluate, roll, analyse, fmt, esc, shapeFor, DiceError, LIMIT, FUNCS
+  };
 }(window));
