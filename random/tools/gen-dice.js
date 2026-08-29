@@ -288,16 +288,25 @@ function build(name, rawVerts, opts) {
         its orientation. For a barrel it lays the long axis across the view.
         YAW then turns everything off square by a constant, which is what
         opens up the side faces. */
-  const restPts = faces[rest].idx.map((i) => laid[i]);
-  const rc = centroid(restPts);
-  let near = null;
-  for (let i = 0; i < restPts.length; i++) {
-    const a = restPts[i], b = restPts[(i + 1) % restPts.length];
-    const m = sub(scl(add(a, b), 0.5), rc);
-    const d = Math.hypot(m[0], m[2]);
-    if (d > 1e-6 && (!near || d < near.d)) near = { m, d };
+  const ring = faces[rest].idx;
+  const rc = centroid(ring.map((i) => laid[i]));
+
+  // Pick the edge of the resting face that lies furthest from the solid's own
+  // axis, measured before it was laid down. Every family built around an axis
+  // then presents the same feature: barrels show their long side, bipyramids
+  // and the trapezohedron their equatorial edge. On the Platonic solids the
+  // resting face is regular, so every edge is equivalent and the choice is
+  // free. Judging it after laying instead picked whichever edge happened to be
+  // nearest, which is why the bipyramids disagreed with each other.
+  let pick = 0, far = -Infinity;
+  for (let i = 0; i < ring.length; i++) {
+    const m = scl(add(verts[ring[i]], verts[ring[(i + 1) % ring.length]]), 0.5);
+    const r = Math.hypot(m[0], m[2]);
+    if (r > far + 1e-9) { far = r; pick = i; }
   }
-  const base = near ? Math.atan2(-near.m[0], near.m[2]) * 180 / Math.PI : 0;
+  const em = sub(scl(add(laid[ring[pick]], laid[ring[(pick + 1) % ring.length]]), 0.5), rc);
+  const base = Math.hypot(em[0], em[2]) > 1e-6
+    ? Math.atan2(-em[0], em[2]) * 180 / Math.PI : 0;
   const bestSpin = base + (opts.yaw == null ? YAW : opts.yaw);
   const spin = bestSpin * Math.PI / 180;
 
@@ -341,14 +350,14 @@ function build(name, rawVerts, opts) {
 /* ------------------------------------------------------------------ shapes */
 /* Odd-sided dice are long n-gonal barrels resting on a side face; even-sided
    ones without a Platonic solid are n/2-gon bipyramids. */
-const BARREL = 1.35;   // half-length: long enough never to land on an end
+const BARREL = 2.7;    // half-length: twice as long as it is wide, so it lands on a side
 const BIPY = 1.18;     // apex height above the equator
 
 const SHAPES = [
   build('d2', prism(28, 0.16), { restSides: 28 }),
-  // The d4's silhouette *is* its base triangle, so any off-square yaw stands it
-  // on a corner. It is the one die that has to face the camera square on.
-  build('d4', tetrahedron(), { yaw: 0 }),
+  // The d4 is turned a further 60 degrees so a base corner faces the camera:
+  // that puts all three ground vertices along the bottom, apex clear above.
+  build('d4', tetrahedron(), { yaw: 60 }),
   build('d5', prism(5, BARREL), { restSides: 4 }),
   build('d6', cube(), {}),
   build('d7', prism(7, BARREL), { restSides: 4 }),

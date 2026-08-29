@@ -162,11 +162,15 @@ Only two things differ between shapes: **which face rests on the ground**, and t
 **yaw** it is turned to. The camera's pitch, position and scale are constants — the
 projection never looks at the shape.
 
-Yaw comes from the resting face, the same rule everywhere: present that face's widest
-side to the camera rather than one of its corners, then turn off square by `YAW` to open
-up the side faces. The d4 overrides `YAW` to 0 — its silhouette *is* its base triangle,
-so any off-square rotation stands it on a corner, and it is the only die with no face
-parallel to the one it rests on to correct the impression. Every solid is normalised to a circumradius of 1,
+Yaw comes from the resting face, the same rule everywhere: take the edge of that face
+lying furthest from the solid's own axis, point it at the camera, then turn off square by
+`YAW` to open up the side faces. Measuring against the solid's axis is what keeps the
+families agreeing — barrels present their long side, bipyramids and the trapezohedron
+their equatorial edge — while on the Platonic solids the resting face is regular, so
+every edge is equivalent and the choice is free.
+
+The d4 adds a further 60°, putting a base corner toward the camera so all three ground
+vertices sit along the bottom with the apex clear above them. Every solid is normalised to a circumradius of 1,
 so apparent size falls out of the geometry itself rather than a per-shape fit; a die
 that is genuinely squatter renders smaller. To resize one deliberately, give it a `size`
 in the shape list, which scales the solid in 3D before the camera ever sees it.
