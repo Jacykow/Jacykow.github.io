@@ -1,32 +1,42 @@
 /* ============================================================================
    Random Engine — dice notation parser, evaluator & explainer
    ----------------------------------------------------------------------------
-   Grammar follows the rpg-dice-roller dialect (the most complete descendant of
-   the Sidekick / Dice Maiden Discord notation), plus a few Dice Maiden aliases.
+   There are exactly two structural types, and everything follows from them:
+
+     value   a single number
+     set     an ordered collection of values
+
+   A set becomes a value by being SUMMED — that is the only implicit reduction.
+   `,` builds a set, `N(expr)` repeats an expression into one, and `4d6` is
+   sugar for `4(d6)`. A set inside a set unpacks, so nesting never compounds.
+
+   Modifiers fall into three kinds:
+
+     die       e, r                      need a die to re-roll
+     element   min, max, s, f, cs, cf    apply to each member in turn
+     set       kh, kl, dh, dl, u         need a collection, error on a value
+
+   On top of numbers there are result types. `s` yields a success check whose
+   members read as success/failure and cast to 1/0, so it can be used in
+   arithmetic. `f`, `cs` and `cf` yield checks that carry no number and cannot
+   be cast — using one as an operand is rejected before the roll happens.
 
      expr    := term (('+' | '-') term)*
      term    := power (('*' | '/' | '%') power)*
      power   := unary (('^' | '**') power)?
      unary   := ('-' | '+')? primary
-     primary := number | func '(' expr,* ')' | '(' expr ')' modifier* | dice
-     dice    := [qty] ('d'|'D') sides modifier*
-     sides   := integer | '(' expr ')'
-
-   Modifiers after a bracket act on every die inside it: `(3d6+2d8)kh3`.
-
-   Every node records its source span so the UI can syntax-highlight the input
-   and cross-link it with a plain-English explanation, RegExr style.
+     primary := number ['(' list ')' | 'd' sides] modifier*
+              | '(' list ')' modifier*
+              | func '(' list ')'
+              | 'd' sides modifier*
+     list    := expr (',' expr)*
    ========================================================================== */
 (function (global) {
   'use strict';
 
-  /* ---------------------------------------------------------------- limits */
   const LIMIT = {
-    qty: 5000,        // dice per term
-    sides: 1000000,
-    explode: 500,     // chained explosions per die
-    reroll: 500,      // rerolls per die
-    totalDice: 20000  // dice per whole evaluation
+    qty: 5000, sides: 1000000, explode: 500, reroll: 500,
+    totalDice: 20000, repeat: 1000
   };
 
   /* ------------------------------------------------------------------- rng */
@@ -45,29 +55,44 @@
     return { int(min, max) { return min + Math.floor(next() * (max - min + 1)); } };
   }());
 
-  /* ----------------------------------------------------------- math funcs */
-  /* Only the two that reduce a collection to one value. The scalar helpers
-     (floor, sqrt, ...) are gone. */
+  /* the only two functions left: both reduce a collection to one value */
   const FUNCS = { max: Math.max, min: Math.min };
+  const FUNC_DESC = { max: 'the largest value', min: 'the smallest value' };
 
-  const FUNC_DESC = { max: 'the largest argument', min: 'the smallest argument' };
+  /* which structural type each modifier needs, and the order they run in */
+  const MODS = {
+    min: { kind: 'element', order: 1 },
+    max: { kind: 'element', order: 2 },
+    explode: { kind: 'die', order: 3 },
+    reroll: { kind: 'die', order: 4 },
+    unique: { kind: 'set', order: 5, dice: true },
+    keep: { kind: 'set', order: 6 },
+    drop: { kind: 'set', order: 7 },
+    check: { kind: 'element', order: 8 }
+  };
 
-  /* Application order of dice modifiers — lower runs first. */
-  const ORDER = {
-    min: 1, max: 2, explode: 3, reroll: 4, unique: 5, keep: 6, drop: 7,
-    target: 8, failure: 8.5, critSuccess: 9, critFail: 10
+  /* the four checks. only `s` carries a number through to arithmetic */
+  const CHECKS = {
+    s: { castable: true, hit: 'success', miss: 'failure', label: 'Success check' },
+    f: { castable: false, hit: 'failure', miss: null, label: 'Failure check' },
+    cs: { castable: false, hit: 'critSuccess', miss: null, label: 'Critical success' },
+    cf: { castable: false, hit: 'critFail', miss: null, label: 'Critical failure' }
   };
 
   class DiceError extends Error {
     constructor(msg, pos) { super(msg); this.name = 'DiceError'; this.pos = pos; }
   }
 
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const fmt = (n) => !isFinite(n) ? String(n)
+    : (Number.isInteger(n) ? String(n) : String(Math.round(n * 1000) / 1000));
+  const cpText = (cp) => cp ? cp.op + cp.v : '';
+
   /* ==========================================================================
      PARSER
      ========================================================================== */
   class Parser {
-    // uid tags dice and bracket-group nodes so the editor, the Explain list and
-    // the rolled dice can all point at the same thing when hovered
     constructor(src, uidBase) { this.s = src; this.i = 0; this.uid = uidBase || 0; }
 
     fail(msg) { throw new DiceError(msg, this.i); }
@@ -83,14 +108,6 @@
         return true;
       }
       return false;
-    }
-
-    /** literal match that must not be followed by another letter */
-    word(str) {
-      const save = this.i;
-      if (!this.lit(str)) return false;
-      if (/[a-z]/i.test(this.s[this.i] || '')) { this.i = save; return false; }
-      return true;
     }
 
     digits() {
@@ -117,7 +134,6 @@
       return parseInt(m[0], 10);
     }
 
-    /* ------------------------------------------------------------ entry */
     parse() {
       const node = this.expr();
       if (!this.end()) this.fail('unexpected "' + this.s[this.i] + '"');
@@ -162,13 +178,25 @@
       return this.primary();
     }
 
-    /** true when the cursor sits on a `d` that begins a dice spec */
+    /** cursor sits on a `d` that starts a dice spec */
     atDice() {
       this.ws();
       const c = this.s[this.i];
       if (c !== 'd' && c !== 'D') return false;
       const rest = this.s.slice(this.i + 1).replace(/^\s*/, '');
       return /^\d/.test(rest) || rest[0] === '(';
+    }
+
+    /** comma-separated expressions inside brackets */
+    list() {
+      const items = [this.expr()], commas = [];
+      for (;;) {
+        const a = this.mark();
+        if (!this.lit(',')) break;
+        commas.push([a, this.i]);
+        items.push(this.expr());
+      }
+      return { items, commas };
     }
 
     primary() {
@@ -181,49 +209,52 @@
       if (fn) {
         const name = fn[1].toLowerCase();
         if (!Object.prototype.hasOwnProperty.call(FUNCS, name)) {
-          this.fail('unknown function "' + name + '"');
+          this.fail('unknown function "' + name + '" — only max and min remain');
         }
         const nameSp = [a, a + fn[1].length];
         this.i += fn[0].length;
         const openSp = [this.i - 1, this.i];
-        const args = [this.expr()];
-        while (this.lit(',')) args.push(this.expr());
+        const { items } = this.list();
         const cA = this.mark();
         if (!this.lit(')')) this.fail('expected ")" to close ' + name + '()');
-        const node = { t: 'func', name, args, nameSp, brk: [openSp, [cA, this.i]], sp: [a, this.i] };
-        return this.maybeDice(node, a);
+        return { t: 'func', name, args: items, nameSp, brk: [openSp, [cA, this.i]], sp: [a, this.i] };
       }
 
-      const pA = this.mark();
-      if (this.lit('(')) {
-        const openSp = [pA, this.i];
-        const inner = this.expr();
-        const cA = this.mark();
-        if (!this.lit(')')) this.fail('expected ")"');
-        const brk = [openSp, [cA, this.i]];
-        const closeEnd = this.i;
-        // `(2+2)d6` — the parentheses are a dice quantity
-        if (this.atDice()) return this.dice({ t: 'paren', v: inner, brk, sp: [a, closeEnd] }, a);
-        // `(3d6+2d8)kh3` — modifiers after the bracket act on every die inside
-        const mods = this.modifiers();
-        if (mods.length) {
-          return {
-            t: 'group', sub: inner, mods, brk,
-            core: [a, closeEnd], sp: [a, this.i], uid: ++this.uid
-          };
-        }
-        return { t: 'paren', v: inner, brk, sp: [a, this.i], uid: ++this.uid };
-      }
+      if (this.peek() === '(') return this.bracket(a, null);
 
       const nA = this.mark();
       const n = this.number();
-      if (n !== null) return this.maybeDice({ t: 'num', v: n, sp: [nA, this.i] }, a);
+      if (n !== null) {
+        const numNode = { t: 'num', v: n, sp: [nA, this.i] };
+        if (this.atDice()) return this.dice(numNode, a);
+        if (this.peek() === '(') return this.bracket(a, numNode);   // 4(...) repeats
+        return numNode;
+      }
 
       this.fail('unexpected "' + this.s[this.i] + '"');
     }
 
-    maybeDice(qty, a) {
-      return this.atDice() ? this.dice(qty, a) : qty;
+    /** `( a , b )` with an optional repeat count in front */
+    bracket(a, count) {
+      const oA = this.mark();
+      this.lit('(');
+      const openSp = [oA, this.i];
+      const { items, commas } = this.list();
+      const cA = this.mark();
+      if (!this.lit(')')) this.fail('expected ")"');
+      const brk = [openSp, [cA, this.i]];
+      const closeEnd = this.i;
+
+      // `(2+2)d6` — the bracket is a dice quantity, not a set
+      if (!count && items.length === 1 && this.atDice()) {
+        return this.dice({ t: 'paren', v: items[0], brk, sp: [a, closeEnd] }, a);
+      }
+      const mods = this.modifiers();
+      const uid = ++this.uid;
+      const base = { items, commas, mods, brk, core: [a, closeEnd], sp: [a, this.i], uid };
+      if (count) return Object.assign({ t: 'rep', count }, base);
+      if (items.length > 1) return Object.assign({ t: 'set' }, base);
+      return { t: 'paren', v: items[0], mods, brk, core: [a, closeEnd], sp: [a, this.i], uid };
     }
 
     dice(qty, a) {
@@ -259,16 +290,7 @@
       return null;
     }
 
-    /** a bare number after a modifier is shorthand for "equal to n" */
-    bareCp() {
-      const n = this.digits();          // unsigned only: `1d6!-1` must stay a subtraction
-      return n === null ? null : { op: '=', v: n };
-    }
-
-    cpAny() { return this.comparePoint() || this.bareCp(); }
-
-    /** an explicit comparison, or a bare number read in the modifier's
-        natural direction: e6 explodes on 6+, r2 re-rolls 2 and below */
+    /** an explicit comparison, or a bare number in the modifier's direction */
     cpDir(dir) {
       const cp = this.comparePoint();
       if (cp) return cp;
@@ -276,16 +298,13 @@
       return n === null ? null : { op: dir, v: n };
     }
 
-    /* ---------------------------------------------------------- modifiers */
     modifiers() {
       const mods = [];
       for (;;) {
         const m = this.modifier();
         if (!m) return mods;
-        // `!!` used to mean compounding. It is gone, and left unguarded it now
-        // parses as two explode passes and quietly doubles the dice.
         if (m.t === 'explode' && mods.some((p) => p.t === 'explode')) {
-          this.fail('a die can only explode once — "!!" is no longer a modifier');
+          this.fail('a die can only explode once');
         }
         mods.push(m);
       }
@@ -297,7 +316,6 @@
       const start = this.mark();
       const back = () => { this.i = start; return null; };
 
-      // -- min / max clamps -------------------------------------------------
       if (this.lit('min')) {
         const n = this.signedInt();
         return n === null ? back() : this.fin(start, { t: 'min', n });
@@ -307,31 +325,20 @@
         return n === null ? back() : this.fin(start, { t: 'max', n });
       }
 
-      /* Anything that can repeat follows one rule: the plain letter does it
-         once, a trailing `i` does it for as long as it keeps qualifying.
-         `u` is exempt — it narrows the set of allowed values rather than
-         repeating a roll. */
-
-      // -- exploding: e, ei, and the penetrating pair ep, epi ---------------
+      /* repeatable things: bare letter once, trailing i for as long as it holds */
       if (this.lit('epi')) return this.fin(start, { t: 'explode', pen: true, inf: true, cp: this.cpDir('>=') });
       if (this.lit('ep')) return this.fin(start, { t: 'explode', pen: true, inf: false, cp: this.cpDir('>=') });
       if (this.lit('ei')) return this.fin(start, { t: 'explode', pen: false, inf: true, cp: this.cpDir('>=') });
       if (this.lit('e')) return this.fin(start, { t: 'explode', pen: false, inf: false, cp: this.cpDir('>=') });
-
-      // -- reroll -----------------------------------------------------------
       if (this.lit('ri')) return this.fin(start, { t: 'reroll', inf: true, cp: this.cpDir('<=') });
       if (this.lit('r')) return this.fin(start, { t: 'reroll', inf: false, cp: this.cpDir('<=') });
 
-      // -- unique -----------------------------------------------------------
-      // u on its own keeps re-rolling until every die differs; uN caps the
-      // attempts at N. An explicit comparison still limits which dice take part.
       if (this.lit('u')) {
         const cp = this.comparePoint();
         const tries = cp ? 0 : (this.digits() || 0);
         return this.fin(start, { t: 'unique', tries, cp });
       }
 
-      // -- keep / drop ------------------------------------------------------
       if (this.lit('kh')) return this.fin(start, { t: 'keep', end: 'h', n: this.digits() ?? 1 });
       if (this.lit('kl')) return this.fin(start, { t: 'keep', end: 'l', n: this.digits() ?? 1 });
       if (this.lit('dh')) return this.fin(start, { t: 'drop', end: 'h', n: this.digits() ?? 1 });
@@ -341,30 +348,88 @@
         return n === null ? back() : this.fin(start, { t: 'drop', end: 'l', n });
       }
 
-      // -- criticals --------------------------------------------------------
-      if (this.lit('cs')) return this.fin(start, { t: 'critSuccess', cp: this.cpDir('>=') });
-      if (this.lit('cf')) return this.fin(start, { t: 'critFail', cp: this.cpDir('<=') });
-
-      // -- failures ---------------------------------------------------------
+      /* checks. `s` may be left out: 3d6>=5 is 3d6s>=5 */
+      if (this.lit('cs')) {
+        const cp = this.cpDir('>=');
+        return cp ? this.fin(start, { t: 'check', check: 'cs', cp }) : back();
+      }
+      if (this.lit('cf')) {
+        const cp = this.cpDir('<=');
+        return cp ? this.fin(start, { t: 'check', check: 'cf', cp }) : back();
+      }
+      if (this.lit('s')) {
+        const cp = this.cpDir('>=');
+        return cp ? this.fin(start, { t: 'check', check: 's', cp }) : back();
+      }
       if (this.lit('f')) {
         const cp = this.cpDir('<=');
-        return cp ? this.fin(start, { t: 'failure', cp }) : back();
+        return cp ? this.fin(start, { t: 'check', check: 'f', cp }) : back();
       }
-
-      // -- bare comparison = target success ---------------------------------
-      const cp = this.comparePoint();
-      if (cp) return this.fin(start, { t: 'target', cp });
+      const bare = this.comparePoint();
+      if (bare) return this.fin(start, { t: 'check', check: 's', cp: bare, bare: true });
 
       return back();
     }
   }
 
   /* ==========================================================================
-     EVALUATOR
-     Result nodes expose total() and html(), so modifiers applied late (group
-     keep/drop) can mark dice as dropped and every total simply recomputes.
+     STATIC CHECKS — everything that can be rejected before rolling
      ========================================================================== */
+  function isSet(node) {
+    switch (node.t) {
+      case 'dice': return node.qty !== null;
+      case 'rep': return true;
+      case 'set': return true;
+      case 'paren': return isSet(node.v);   // brackets only group; they do not build a set
+      default: return false;
+    }
+  }
 
+  function checkOf(node) {
+    const c = (node.mods || []).filter((m) => m.t === 'check').pop();
+    return c ? c.check : null;
+  }
+
+  function typeCheck(node, arith) {
+    const mods = node.mods || [];
+
+    for (const m of mods) {
+      const spec = MODS[m.t === 'check' ? 'check' : m.t];
+      if (!spec) continue;
+      if (spec.kind === 'set' && !isSet(node)) {
+        throw new DiceError('"' + modText(m) + '" needs a set of values — give it a count ' +
+          'like 4d6, or list them like (d6,d8)', m.sp && m.sp[0]);
+      }
+      if ((spec.kind === 'die' || spec.dice) && node.t !== 'dice') {
+        throw new DiceError('"' + modText(m) + '" has to attach to dice — there is nothing to re-roll',
+          m.sp && m.sp[0]);
+      }
+    }
+
+    const chk = checkOf(node);
+    if (chk && !CHECKS[chk].castable && arith) {
+      const m = mods.filter((x) => x.t === 'check').pop();
+      throw new DiceError('a ' + CHECKS[chk].label.toLowerCase() + ' carries no number, ' +
+        'so it cannot be used in a calculation', m && m.sp && m.sp[0]);
+    }
+
+    switch (node.t) {
+      case 'bin': typeCheck(node.l, true); typeCheck(node.r, true); break;
+      case 'neg': typeCheck(node.v, arith); break;
+      case 'paren': typeCheck(node.v, arith); break;
+      case 'set': case 'rep': node.items.forEach((i) => typeCheck(i, false)); break;
+      case 'func': node.args.forEach((a) => typeCheck(a, true)); break;
+      case 'dice':
+        if (node.qty) typeCheck(node.qty, true);
+        typeCheck(node.sides, true);
+        break;
+    }
+    return node;
+  }
+
+  /* ==========================================================================
+     VALUES
+     ========================================================================== */
   function cpTest(cp, v) {
     switch (cp.op) {
       case '=': return v === cp.v;
@@ -377,360 +442,373 @@
     return false;
   }
 
-  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-
-  function fmt(n) {
-    if (!isFinite(n)) return String(n);
-    return Number.isInteger(n) ? String(n) : String(Math.round(n * 1000) / 1000);
-  }
-
-  const cpText = (cp) => cp ? cp.op + cp.v : '';
-
-  /* Which solid to draw for a given number of sides.
-     d4/d6/d8/d12/d20 are the Platonic solids, d10 a pentagonal trapezohedron,
-     d100 a zocchihedron, d2 a coin. Even sizes without a Platonic solid are
-     n/2-gon bipyramids; odd ones are long n-gon barrels that cannot land on an
-     end. d3 borrows the cube, anything else at or under 20 borrows the d20,
-     and anything larger borrows the d100. Fudge dice have no die to draw. */
   const SOLIDS = {
     2: 'd2', 3: 'd6', 4: 'd4', 5: 'd5', 6: 'd6', 7: 'd7', 8: 'd8', 9: 'd9',
     10: 'd10', 11: 'd11', 12: 'd12', 14: 'd14', 16: 'd16', 18: 'd18',
     20: 'd20', 100: 'd100'
   };
-  function shapeFor(sides) {
-    if (SOLIDS[sides]) return SOLIDS[sides];
-    return sides > 20 ? 'd100' : 'd20';
-  }
+  const shapeFor = (sides) => SOLIDS[sides] || (sides > 20 ? 'd100' : 'd20');
 
-  function dieHTML(r, shape, tag) {
-    const cls = ['die', 's-' + shape].concat(r.tags);
-    if (r.dropped) cls.push('dropped');
-    const title = (r.tags.length ? r.tags.join(', ') : 'natural') +
-      (r.dropped ? ', dropped' : '') +
-      (r.from !== null && r.from !== undefined ? ', was ' + fmt(r.from) : '');
-
-    const face = fmt(r.v);
-    const size = face.length >= 3 ? ' v3' : (face.length === 2 ? ' v2' : '');
-
-    // one corner slot: a re-rolled die shows what it was, otherwise mark explosions
-    let badge = '';
-    if (r.from !== null && r.from !== undefined) badge = '<s>' + esc(fmt(r.from)) + '</s>';
-    else if (r.tags.indexOf('exploded') >= 0) badge = '!';
-
-    return '<span class="' + cls.join(' ') + '"' + tag + ' title="' + esc(title) + '">' +
-      '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
-      '<use href="#sh-' + shape + '"/></svg>' +
-      '<span class="dieval' + size + '">' + esc(face) + '</span>' +
-      (badge ? '<span class="diebadge">' + badge + '</span>' : '') +
-      '</span>';
-  }
-
-  /** compact chip used when a roll has too many dice to draw as shapes */
-  function chipHTML(r, tag) {
-    const cls = ['chip-die'].concat(r.tags);
-    if (r.dropped) cls.push('dropped');
-    const was = (r.from !== null && r.from !== undefined) ? '<s>' + esc(fmt(r.from)) + '</s>' : '';
-    const bang = r.tags.indexOf('exploded') >= 0 ? '<sup>!</sup>' : '';
-    return '<span class="' + cls.join(' ') + '"' + tag + '>' + was + esc(fmt(r.v)) + bang + '</span>';
-  }
-
+  const SQUEEZE_AT = 3;
+  const squeezeStyle = (n) => n <= SQUEEZE_AT ? ''
+    : ' style="--sq:' + ((SQUEEZE_AT - n) / (n - 1)).toFixed(4) + '"';
   const PLUS = '<span class="r-plus">+</span>';
 
-  /* Subtotals are not written inline any more: each summing node just carries
-     its value, and the UI draws them as a tree underneath the dice. A term of
-     more than SQUEEZE_AT dice overlaps them so it never takes more room than
-     that many — the individual faces stop mattering at that point. */
-  const SQUEEZE_AT = 3;
-  function squeezeStyle(n) {
-    if (n <= SQUEEZE_AT) return '';
-    // n dice with margin m must span SQUEEZE_AT dice: m = (SQUEEZE_AT - n)/(n - 1)
-    return ' style="--sq:' + ((SQUEEZE_AT - n) / (n - 1)).toFixed(4) + '"';
+  function checkTotal(item) {
+    const c = item.check;
+    if (!c) return null;
+    if (!CHECKS[c.kind].castable) {
+      throw new DiceError('a ' + CHECKS[c.kind].label.toLowerCase() + ' cannot be used as a number');
+    }
+    return c.hit ? 1 : 0;
   }
 
-  /* -------------------------------------------------------- result nodes */
-  const NumResult = (v) => ({
-    k: 'num', total: () => v, html: () => '<span class="r-num">' + fmt(v) + '</span>'
-  });
-
-  function BinResult(op, l, r, uid) {
-    const tag = uid ? ' data-x="o' + uid + '"' : '';
-    return {
-      k: 'bin', children: [l, r],
-      total() {
-        const a = l.total(), b = r.total();
-        switch (op) {
-          case '+': return a + b;
-          case '-': return a - b;
-          case '*': return a * b;
-          case '/': return a / b;
-          case '%': return a % b;
-          case '^': return Math.pow(a, b);
-        }
-      },
-      html: (o) => l.html(o) + '<span class="r-op"' + tag + '>' + esc(op) + '</span>' + r.html(o)
-    };
+  function markClass(item) {
+    if (!item.check) return '';
+    const c = CHECKS[item.check.kind];
+    return item.check.hit ? ' ' + c.hit : (c.miss ? ' ' + c.miss : '');
   }
 
-  const NegResult = (v) => ({
-    k: 'neg', children: [v], total: () => -v.total(),
-    html: (o) => '<span class="r-op">-</span>' + v.html(o)
-  });
+  /** totals throw on a non-castable check; the display must not. raw() is the
+      underlying number, which never consults the check, so there is no loop. */
+  function safeTotal(node) {
+    try { return node.total(); } catch (e) { return node.raw(); }
+  }
 
-  const ParenResult = (v, uid) => ({
-    k: 'paren', inner: v, children: [v], total: () => v.total(),
-    html(o) {
-      const tag = uid ? ' data-x="p' + uid + '"' : '';
-      return '<span class="r-grp"' + tag + ' data-sum="' + esc(fmt(this.total())) + '">' +
-        '<span class="r-brk"' + tag + '>(</span>' + v.html(o) +
-        '<span class="r-brk"' + tag + '>)</span></span>';
-    }
-  });
-
-  const FuncResult = (name, args) => ({
-    k: 'func', children: args,
-    total: () => FUNCS[name].apply(null, args.map((a) => a.total())),
-    html: (o) => '<span class="r-fn">' + name + '</span><span class="r-brk">(</span>' +
-      args.map((a) => a.html(o)).join('<span class="r-op">,</span>') + '<span class="r-brk">)</span>'
-  });
-
-  /* --------------------------------------------------------- dice rolling */
-  const makeDie = (sides) => rng.int(1, sides);
-
-  function rollDice(node, ctx) {
-    const sides = Math.floor(node.sides.t === 'num' ? node.sides.v : evalNode(node.sides, ctx).total());
-    if (!(sides >= 1)) throw new DiceError('a die needs at least 1 side (got ' + sides + ')');
-    if (sides > LIMIT.sides) throw new DiceError('too many sides (max ' + LIMIT.sides + ')');
-    const qty = node.qty === null ? 1
-      : Math.floor(node.qty.t === 'num' ? node.qty.v : evalNode(node.qty, ctx).total());
-    if (!(qty >= 0)) throw new DiceError('dice quantity must be 0 or more (got ' + qty + ')');
-    if (qty > LIMIT.qty) throw new DiceError('too many dice (max ' + LIMIT.qty + ')');
-    ctx.dice += qty;
-    if (ctx.dice > LIMIT.totalDice) throw new DiceError('too many dice in one expression');
-
-    const dmin = 1, dmax = sides;
-
-    let rolls = [];
-    for (let i = 0; i < qty; i++) rolls.push({ v: makeDie(sides), tags: [], from: null });
-
-    const tag = (r, t) => { if (r.tags.indexOf(t) < 0) r.tags.push(t); };
-    const mods = node.mods.slice().sort((a, b) => (ORDER[a.t] || 99) - (ORDER[b.t] || 99));
-    let successCp = null, failureCp = null;
-
-    for (const m of mods) {
-      switch (m.t) {
-        case 'min':
-          for (const r of rolls) if (r.v < m.n) { if (r.from === null) r.from = r.v; r.v = m.n; tag(r, 'clamped'); }
-          break;
-
-        case 'max':
-          for (const r of rolls) if (r.v > m.n) { if (r.from === null) r.from = r.v; r.v = m.n; tag(r, 'clamped'); }
-          break;
-
-        case 'explode': {
-          const cp = m.cp || { op: '=', v: dmax };
-          const out = [];
-          for (const r of rolls) {
-            out.push(r);
-            let last = r.v, n = 0;
-            while (cpTest(cp, last) && n < LIMIT.explode) {
-              n++;
-              if (++ctx.dice > LIMIT.totalDice) throw new DiceError('explosion ran away — too many dice');
-              const raw = makeDie(sides);
-              last = raw;
-              const val = m.pen ? raw - 1 : raw;
-              out.push({ v: val, tags: ['exploded'], from: null });
-              if (!m.inf) break;
-            }
-            if (n > 0) tag(r, 'exploded');
-          }
-          rolls = out;
-          break;
-        }
-
-        case 'reroll': {
-          const cp = m.cp || { op: '=', v: dmin };
-          for (const r of rolls) {
-            let n = 0;
-            while (cpTest(cp, r.v) && n < LIMIT.reroll) {
-              if (r.from === null) r.from = r.v;
-              r.v = makeDie(sides);
-              tag(r, 'rerolled');
-              n++;
-              if (!m.inf) break;
-            }
-          }
-          break;
-        }
-
-        case 'unique': {
-          const seen = new Set();
-          for (const r of rolls) {
-            let n = 0;
-            const cap = m.tries || LIMIT.reroll;
-            while (seen.has(r.v) && (!m.cp || cpTest(m.cp, r.v)) && n < cap) {
-              if (r.from === null) r.from = r.v;
-              r.v = makeDie(sides);
-              tag(r, 'rerolled');
-              n++;
-            }
-            seen.add(r.v);
-          }
-          break;
-        }
-
-        case 'keep': {
-          const live = rolls.filter((r) => !r.dropped);
-          const order = live.slice().sort((a, b) => b.v - a.v);
-          const keep = new Set(m.end === 'l' ? order.slice(-m.n) : order.slice(0, m.n));
-          for (const r of live) if (!keep.has(r)) r.dropped = true;
-          break;
-        }
-
-        case 'drop': {
-          const live = rolls.filter((r) => !r.dropped);
-          const order = live.slice().sort((a, b) => b.v - a.v);
-          for (const r of (m.end === 'h' ? order.slice(0, m.n) : order.slice(-m.n))) r.dropped = true;
-          break;
-        }
-
-        case 'target': successCp = m.cp; break;
-        case 'failure': failureCp = m.cp; break;
-
-        case 'critSuccess': {
-          const cp = m.cp || { op: '=', v: dmax };
-          for (const r of rolls) if (cpTest(cp, r.v)) tag(r, 'critSuccess');
-          break;
-        }
-
-        case 'critFail': {
-          const cp = m.cp || { op: '=', v: dmin };
-          for (const r of rolls) if (cpTest(cp, r.v)) tag(r, 'critFail');
-          break;
-        }
-
-      }
-    }
-
-    if (successCp || failureCp) {
-      for (const r of rolls) {
-        if (r.dropped) continue;
-        if (successCp && cpTest(successCp, r.v)) tag(r, 'success');
-        else if (failureCp && cpTest(failureCp, r.v)) tag(r, 'failure');
-      }
-    }
-
+  function Die(roll, sides, uid) {
     return {
-      k: 'dice', rolls, sides, qty, uid: node.uid,
-      notation: notationOf(node),
-      successMode: !!(successCp || failureCp),
-
-      successes() { return rolls.filter((r) => !r.dropped && r.tags.indexOf('success') >= 0).length; },
-      failures() { return rolls.filter((r) => !r.dropped && r.tags.indexOf('failure') >= 0).length; },
-
-      total() {
-        if (this.successMode) return this.successes() - this.failures();
-        let s = 0;
-        for (const r of rolls) if (!r.dropped) s += r.v;
-        return s;
-      },
-
+      set: false, die: true, roll, sides, uid, check: null,
+      get dropped() { return !!roll.dropped; },
+      set dropped(v) { roll.dropped = v; },
+      get value() { return roll.v; },
+      raw() { return roll.v; },
+      total() { const c = checkTotal(this); return c === null ? roll.v : c; },
       html(o) {
-        const shape = shapeFor(this.sides);
-        const tag = this.uid ? ' data-x="d' + this.uid + '"' : '';
-        const parts = rolls.map((r) => (o && o.plain) ? chipHTML(r, tag) : dieHTML(r, shape, tag));
-        const many = rolls.length > SQUEEZE_AT;
-        const squeezed = rolls.length > SQUEEZE_AT;
-        // the + between dice in a term is what the notation actually means
-        const body = squeezed ? parts.join('') : parts.join(PLUS);
-        return '<span class="r-term' + (squeezed ? ' squeezed' : '') + '"' + tag +
-          (many ? ' data-sum="' + esc(fmt(this.total())) + '"' : '') +
-          squeezeStyle(rolls.length) + '>' + body + '</span>';
+        const tag = uid ? ' data-x="d' + uid + '"' : '';
+        return (o && o.plain) ? chipHTML(this, tag) : dieHTML(this, shapeFor(sides), tag);
       }
     };
   }
 
-  /* -------------------------------------------------------- group results */
-  /* Bracket group: modifiers written after ')' act on every die inside it. */
-  function evalGroup(node, ctx) {
-    const sub = evalNode(node.sub, ctx);
-    const mods = node.mods.slice().sort((x, y) => (ORDER[x.t] || 99) - (ORDER[y.t] || 99));
-    const dice = [];
-    collectDice(sub, dice);
-
-    let successCp = null, failureCp = null;
-    for (const m of mods) {
-      switch (m.t) {
-        case 'keep': {
-          const live = dice.filter((r) => !r.dropped);
-          const order = live.slice().sort((x, y) => y.v - x.v);
-          const keep = new Set(m.end === 'l' ? order.slice(-m.n) : order.slice(0, m.n));
-          for (const r of live) if (!keep.has(r)) r.dropped = true;
-          break;
-        }
-        case 'drop': {
-          const live = dice.filter((r) => !r.dropped);
-          const order = live.slice().sort((x, y) => y.v - x.v);
-          for (const r of (m.end === 'h' ? order.slice(0, m.n) : order.slice(-m.n))) r.dropped = true;
-          break;
-        }
-        case 'target': successCp = m.cp; break;
-        case 'failure': failureCp = m.cp; break;
-      }
-    }
-    if (successCp || failureCp) {
-      for (const r of dice) {
-        if (r.dropped) continue;
-        if (successCp && cpTest(successCp, r.v)) r.tags.push('success');
-        else if (failureCp && cpTest(failureCp, r.v)) r.tags.push('failure');
-      }
-    }
-
+  function Val(v, html) {
     return {
-      k: 'group', sub, children: [sub], uid: node.uid,
-      successMode: !!(successCp || failureCp),
-      successes() { return dice.filter((r) => !r.dropped && r.tags.indexOf('success') >= 0).length; },
-      failures() { return dice.filter((r) => !r.dropped && r.tags.indexOf('failure') >= 0).length; },
-      total() {
-        return this.successMode ? this.successes() - this.failures() : sub.total();
-      },
+      set: false, die: false, check: null, dropped: false,
+      get value() { return v; },
+      raw() { return v; },
+      total() { const c = checkTotal(this); return c === null ? v : c; },
+      html() { return html || '<span class="r-num">' + fmt(v) + '</span>'; }
+    };
+  }
+
+  /** a bracket around a value: still a value, drawn with its own subtotal */
+  function Group(inner, uid) {
+    return {
+      set: false, die: false, check: null, dropped: false, uid,
+      get value() { return inner.raw(); },
+      raw() { return inner.raw(); },
+      total() { const c = checkTotal(this); return c === null ? inner.total() : c; },
       html(o) {
-        const tag = this.uid ? ' data-x="g' + this.uid + '"' : '';
-        return '<span class="r-grp"' + tag + ' data-sum="' + esc(fmt(this.total())) + '">' +
-          '<span class="r-brk"' + tag + '>(</span>' + sub.html(o) +
+        const tag = uid ? ' data-x="s' + uid + '"' : '';
+        return '<span class="r-grp"' + tag + ' data-sum="' + esc(fmt(safeTotal(inner))) + '">' +
+          '<span class="r-brk"' + tag + '>(</span>' + inner.html(o) +
           '<span class="r-brk"' + tag + '>)</span></span>';
       }
     };
   }
 
-  function collectDice(node, out) {
-    if (!node) return;
-    if (node.k === 'dice') { for (const r of node.rolls) out.push(r); return; }
-    if (node.children) for (const c of node.children) collectDice(c, out);
+  function SetVal(members, opts) {
+    opts = opts || {};
+    return {
+      set: true, members, check: null, dropped: false, uid: opts.uid,
+      brackets: !!opts.brackets, prefix: opts.prefix || '',
+      get value() { return this.raw(); },
+      raw() { let s = 0; for (const m of members) if (!m.dropped) s += m.raw(); return s; },
+      live() { return members.filter((m) => !m.dropped); },
+      total() {
+        const c = checkTotal(this);
+        if (c !== null) return c;
+        let s = 0;
+        for (const m of this.live()) s += m.total();
+        return s;
+      },
+      marks() {
+        const out = {};
+        const add = (k) => { if (k) out[k] = (out[k] || 0) + 1; };
+        for (const m of this.live()) {
+          if (m.check) {
+            const c = CHECKS[m.check.kind];
+            add(m.check.hit ? c.hit : c.miss);
+          } else if (m.set && m.marks) {
+            const sub = m.marks();
+            if (sub) for (const k in sub) out[k] = (out[k] || 0) + sub[k];
+          }
+        }
+        return Object.keys(out).length ? out : null;
+      },
+      html(o) {
+        const tag = this.uid ? ' data-x="' + (this.brackets ? 's' : 'd') + this.uid + '"' : '';
+        const sum = ' data-sum="' + esc(fmt(safeTotal(this))) + '"';
+        if (this.brackets) {
+          return '<span class="r-grp"' + tag + sum + '>' + this.prefix +
+            '<span class="r-brk"' + tag + '>(</span>' +
+            members.map((m) => m.html(o)).join('<span class="r-op">,</span>') +
+            '<span class="r-brk"' + tag + '>)</span></span>';
+        }
+        const squeezed = members.length > SQUEEZE_AT && members.every((m) => m.die);
+        const body = members.map((m) => m.html(o)).join(squeezed ? '' : PLUS);
+        return '<span class="r-term' + (squeezed ? ' squeezed' : '') + '"' + tag +
+          (members.length > 1 ? sum : '') + squeezeStyle(members.length) + '>' + body + '</span>';
+      }
+    };
   }
 
-  /* ---------------------------------------------------------- dispatcher */
+  /* ------------------------------------------------------------- markup */
+  function dieHTML(item, shape, tag) {
+    const r = item.roll;
+    const cls = ['die', 's-' + shape].concat(r.tags);
+    if (r.dropped) cls.push('dropped');
+    const mk = markClass(item);
+    if (mk) cls.push(mk.trim());
+    const face = fmt(r.v);
+    const size = face.length >= 3 ? ' v3' : (face.length === 2 ? ' v2' : '');
+    let badge = '';
+    if (r.from !== null && r.from !== undefined) badge = '<s>' + esc(fmt(r.from)) + '</s>';
+    else if (r.tags.indexOf('exploded') >= 0) badge = '!';
+    const title = (r.tags.length ? r.tags.join(', ') : 'natural') +
+      (r.dropped ? ', dropped' : '') + (mk ? ',' + mk : '');
+    return '<span class="' + cls.join(' ') + '"' + tag + ' title="' + esc(title) + '">' +
+      '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
+      '<use href="#sh-' + shape + '"/></svg>' +
+      '<span class="dieval' + size + '">' + esc(face) + '</span>' +
+      (badge ? '<span class="diebadge">' + badge + '</span>' : '') + '</span>';
+  }
+
+  function chipHTML(item, tag) {
+    const r = item.roll;
+    const cls = ['chip-die'].concat(r.tags);
+    if (r.dropped) cls.push('dropped');
+    const mk = markClass(item);
+    if (mk) cls.push(mk.trim());
+    const was = (r.from !== null && r.from !== undefined) ? '<s>' + esc(fmt(r.from)) + '</s>' : '';
+    const bang = r.tags.indexOf('exploded') >= 0 ? '<sup>!</sup>' : '';
+    return '<span class="' + cls.join(' ') + '"' + tag + '>' + was + esc(fmt(r.v)) + bang + '</span>';
+  }
+
+  /* ==========================================================================
+     EVALUATION
+     ========================================================================== */
+  const makeDie = (sides) => rng.int(1, sides);
+  const num = (node, ctx) => evalNode(node, ctx).total();
+
+  function applyDieMods(rolls, sides, mods, ctx) {
+    const tag = (r, t) => { if (r.tags.indexOf(t) < 0) r.tags.push(t); };
+    let out = rolls;
+    const die = mods.filter((x) => MODS[x.t] && MODS[x.t].kind === 'die')
+      .sort((a, b) => MODS[a.t].order - MODS[b.t].order);
+    for (const m of die) {
+      if (m.t === 'explode') {
+        const cp = m.cp || { op: '=', v: sides };
+        const next = [];
+        for (const r of out) {
+          next.push(r);
+          let last = r.v, n = 0;
+          while (cpTest(cp, last) && n < LIMIT.explode) {
+            n++;
+            if (++ctx.dice > LIMIT.totalDice) throw new DiceError('too many dice in one expression');
+            const raw = makeDie(sides);
+            last = raw;
+            next.push({ v: m.pen ? raw - 1 : raw, tags: ['exploded'], from: null });
+            if (!m.inf) break;
+          }
+          if (n > 0) tag(r, 'exploded');
+        }
+        out = next;
+      } else if (m.t === 'reroll') {
+        const cp = m.cp || { op: '=', v: 1 };
+        for (const r of out) {
+          let n = 0;
+          while (cpTest(cp, r.v) && n < LIMIT.reroll) {
+            if (r.from === null) r.from = r.v;
+            r.v = makeDie(sides);
+            tag(r, 'rerolled');
+            n++;
+            if (!m.inf) break;
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  function eachMember(value, fn) {
+    if (value.set) { for (const m of value.members) fn(m); } else fn(value);
+  }
+
+  function applyElement(item, m) {
+    if (m.t === 'min' || m.t === 'max') {
+      if (!item.roll) return;                       // clamping only means something on a face
+      const over = m.t === 'min' ? item.roll.v < m.n : item.roll.v > m.n;
+      if (!over) return;
+      if (item.roll.from === null) item.roll.from = item.roll.v;
+      item.roll.v = m.n;
+      if (item.roll.tags.indexOf('clamped') < 0) item.roll.tags.push('clamped');
+      return;
+    }
+    if (m.t === 'check') {
+      item.check = { kind: m.check, hit: cpTest(m.cp, item.value) };
+    }
+  }
+
+  function applySet(value, m, sides) {
+    if (!value.set) throw new DiceError('"' + modText(m) + '" needs a set of values');
+    const members = value.members;
+    if (m.t === 'keep' || m.t === 'drop') {
+      const live = members.filter((x) => !x.dropped);
+      const order = live.slice().sort((a, b) => safeTotal(b) - safeTotal(a));
+      if (m.t === 'keep') {
+        const keep = new Set(m.end === 'l' ? order.slice(-m.n) : order.slice(0, m.n));
+        for (const x of live) if (!keep.has(x)) x.dropped = true;
+      } else {
+        for (const x of (m.end === 'h' ? order.slice(0, m.n) : order.slice(-m.n))) x.dropped = true;
+      }
+      return;
+    }
+    if (m.t === 'unique') {
+      const seen = new Set();
+      const cap = m.tries || LIMIT.reroll;
+      for (const x of members) {
+        if (!x.die) throw new DiceError('"u" needs dice to re-roll');
+        let n = 0;
+        while (seen.has(x.roll.v) && (!m.cp || cpTest(m.cp, x.roll.v)) && n < cap) {
+          if (x.roll.from === null) x.roll.from = x.roll.v;
+          x.roll.v = makeDie(sides);
+          if (x.roll.tags.indexOf('rerolled') < 0) x.roll.tags.push('rerolled');
+          n++;
+        }
+        seen.add(x.roll.v);
+      }
+    }
+  }
+
+  function applyMods(value, mods, sides) {
+    const ordered = mods.filter((m) => {
+      const k = MODS[m.t === 'check' ? 'check' : m.t];
+      return k && k.kind !== 'die';
+    }).sort((a, b) => {
+      const ka = MODS[a.t === 'check' ? 'check' : a.t];
+      const kb = MODS[b.t === 'check' ? 'check' : b.t];
+      return ka.order - kb.order;
+    });
+
+    for (const m of ordered) {
+      const kind = MODS[m.t === 'check' ? 'check' : m.t].kind;
+      if (kind === 'element') eachMember(value, (item) => applyElement(item, m));
+      else applySet(value, m, sides);
+    }
+    return value;
+  }
+
+  function rollDice(node, ctx) {
+    const sides = Math.floor(num(node.sides, ctx));
+    if (!(sides >= 1)) throw new DiceError('a die needs at least 1 side (got ' + sides + ')');
+    if (sides > LIMIT.sides) throw new DiceError('too many sides (max ' + LIMIT.sides + ')');
+
+    const single = node.qty === null;
+    const qty = single ? 1 : Math.floor(num(node.qty, ctx));
+    if (!(qty >= 0)) throw new DiceError('dice quantity must be 0 or more (got ' + qty + ')');
+    if (qty > LIMIT.qty) throw new DiceError('too many dice (max ' + LIMIT.qty + ')');
+    ctx.dice += qty;
+    if (ctx.dice > LIMIT.totalDice) throw new DiceError('too many dice in one expression');
+
+    let rolls = [];
+    for (let i = 0; i < qty; i++) rolls.push({ v: makeDie(sides), tags: [], from: null });
+    rolls = applyDieMods(rolls, sides, node.mods, ctx);
+
+    const dice = rolls.map((r) => Die(r, sides, node.uid));
+    // a bare d6 is one value; 4d6 is a set of four
+    const value = single ? dice[0] : SetVal(dice, { uid: node.uid });
+    return applyMods(value, node.mods, sides);
+  }
+
+  /** a set inside a set unpacks, so nesting never compounds */
+  function flatten(items) {
+    const out = [];
+    for (const it of items) {
+      if (it.set && !it.brackets) out.push.apply(out, it.members);
+      else out.push(it);
+    }
+    return out;
+  }
+
   function evalNode(node, ctx) {
     switch (node.t) {
-      case 'num': return NumResult(node.v);
-      case 'neg': return NegResult(evalNode(node.v, ctx));
-      case 'paren': return ParenResult(evalNode(node.v, ctx), node.uid);
-      case 'bin': return BinResult(node.op, evalNode(node.l, ctx), evalNode(node.r, ctx), node.uid);
-      case 'func': return FuncResult(node.name, node.args.map((a) => evalNode(a, ctx)));
+      case 'num': return Val(node.v);
+
+      case 'neg': {
+        const v = evalNode(node.v, ctx);
+        if (v.set) {
+          // a minus in front of a set flips every member
+          return SetVal(v.members.map((m) =>
+            Val(-safeTotal(m), '<span class="r-op">-</span>' + m.html())), { uid: node.uid });
+        }
+        return Val(-v.total(), '<span class="r-op">-</span>' + v.html());
+      }
+
+      case 'bin': {
+        const l = evalNode(node.l, ctx), r = evalNode(node.r, ctx);
+        const a = l.total(), b = r.total();
+        let v;
+        switch (node.op) {
+          case '+': v = a + b; break;
+          case '-': v = a - b; break;
+          case '*': v = a * b; break;
+          case '/': v = a / b; break;
+          case '%': v = a % b; break;
+          case '^': v = Math.pow(a, b); break;
+        }
+        const tag = node.uid ? ' data-x="o' + node.uid + '"' : '';
+        return Val(v, l.html() + '<span class="r-op"' + tag + '>' + esc(node.op) + '</span>' + r.html());
+      }
+
+      case 'func': {
+        const parts = node.args.map((a) => evalNode(a, ctx));
+        const v = FUNCS[node.name].apply(null, parts.map((p) => p.total()));
+        return Val(v, '<span class="r-fn">' + node.name + '</span><span class="r-brk">(</span>' +
+          parts.map((p) => p.html()).join('<span class="r-op">,</span>') + '<span class="r-brk">)</span>');
+      }
+
       case 'dice': return rollDice(node, ctx);
-      case 'group': return evalGroup(node, ctx);
+
+      case 'paren': {
+        const inner = evalNode(node.v, ctx);
+        // grouping only — a bracket never turns a value into a set
+        const value = inner.set
+          ? SetVal(inner.members, { uid: node.uid, brackets: true })
+          : Group(inner, node.uid);
+        return applyMods(value, node.mods || [], null);
+      }
+
+      case 'set': {
+        const parts = node.items.map((i) => evalNode(i, ctx));
+        return applyMods(SetVal(flatten(parts), { uid: node.uid, brackets: true }), node.mods || [], null);
+      }
+
+      case 'rep': {
+        const n = Math.floor(num(node.count, ctx));
+        if (!(n >= 0)) throw new DiceError('a repeat count must be 0 or more');
+        if (n > LIMIT.repeat) throw new DiceError('repeat count too large (max ' + LIMIT.repeat + ')');
+        const members = [];
+        for (let i = 0; i < n; i++) {
+          for (const p of flatten(node.items.map((x) => evalNode(x, ctx)))) members.push(p);
+        }
+        const prefix = '<span class="r-num">' + esc(plain(node.count)) + '</span>';
+        return applyMods(SetVal(members, { uid: node.uid, brackets: true, prefix }), node.mods || [], null);
+      }
     }
-    throw new DiceError('cannot evaluate node "' + node.t + '"');
+    throw new DiceError('cannot evaluate "' + node.t + '"');
   }
 
   /* ------------------------------------------- notation reconstruction */
-  function notationOf(node) {
-    const q = node.qty === null ? '' : plain(node.qty);
-    let sides;
-    if (node.sides.t === 'num') sides = plain(node.sides);
-    else sides = '(' + plain(node.sides) + ')';     // computed sides keep their parentheses
-    return q + 'd' + sides + node.mods.map(modText).join('');
-  }
-
   function modText(m) {
     switch (m.t) {
       case 'min': return 'min' + m.n;
@@ -740,31 +818,33 @@
       case 'unique': return 'u' + (m.tries || '') + cpText(m.cp);
       case 'keep': return 'k' + m.end + m.n;
       case 'drop': return 'd' + m.end + m.n;
-      case 'target': return cpText(m.cp);
-      case 'failure': return 'f' + cpText(m.cp);
-      case 'critSuccess': return 'cs' + cpText(m.cp);
-      case 'critFail': return 'cf' + cpText(m.cp);
+      case 'check': return (m.bare ? '' : m.check) + cpText(m.cp);
     }
     return '';
   }
 
   function plain(node) {
+    const mods = (node.mods || []).map(modText).join('');
     switch (node.t) {
       case 'num': return fmt(node.v);
       case 'neg': return '-' + plain(node.v);
-      case 'paren': return '(' + plain(node.v) + ')';
       case 'bin': return plain(node.l) + node.op + plain(node.r);
-      case 'func': return node.name + '(' + node.args.map(plain).join(', ') + ')';
-      case 'dice': return notationOf(node);
-      case 'group': return '(' + plain(node.sub) + ')' + node.mods.map(modText).join('');
+      case 'func': return node.name + '(' + node.args.map(plain).join(',') + ')';
+      case 'dice': {
+        const q = node.qty === null ? '' : plain(node.qty);
+        const s = node.sides.t === 'num' ? plain(node.sides) : '(' + plain(node.sides) + ')';
+        return q + 'd' + s + mods;
+      }
+      case 'paren': return '(' + plain(node.v) + ')' + mods;
+      case 'set': return '(' + node.items.map(plain).join(',') + ')' + mods;
+      case 'rep': return plain(node.count) + '(' + node.items.map(plain).join(',') + ')' + mods;
     }
     return '?';
   }
 
   /* ==========================================================================
-     SPANS + EXPLAIN  (drives the highlighted editor and the Explain panel)
+     EXPLAIN
      ========================================================================== */
-
   function cpPhrase(cp, fallback) {
     if (!cp) return fallback || '';
     switch (cp.op) {
@@ -778,103 +858,74 @@
     return '';
   }
 
-  const ord = (n) => n === 1 ? '' : n + ' ';
-
-  function modExplain(m, dieWord) {
-    const d = dieWord || 'die';
+  function modExplain(m) {
     switch (m.t) {
-      case 'min': return ['Minimum', 'Any roll below ' + m.n + ' counts as ' + m.n + '.'];
-      case 'max': return ['Maximum', 'Any roll above ' + m.n + ' counts as ' + m.n + '.'];
-      case 'explode': {
-        const on = m.cp ? cpPhrase(m.cp) : 'its highest face';
-        let how = 'roll an extra ' + d + ' and add it alongside';
-        if (m.pen) how += ', subtracting 1 from every extra roll';
-        const times = m.inf ? ' Repeats as long as it keeps happening.' : ' One extra roll per die.';
-        return [m.pen ? 'Penetrating explode' : 'Exploding',
-                'When a ' + d + ' rolls ' + on + ', ' + how + '.' + times];
-      }
+      case 'min': return ['Minimum', 'Any face below ' + m.n + ' counts as ' + m.n + '.'];
+      case 'max': return ['Maximum', 'Any face above ' + m.n + ' counts as ' + m.n + '.'];
+      case 'explode': return [m.pen ? 'Penetrating explode' : 'Exploding',
+        'When a die rolls ' + cpPhrase(m.cp, 'its highest face') + ', roll an extra die and add it' +
+        (m.pen ? ', subtracting 1 from every extra roll' : '') + '.' +
+        (m.inf ? ' Repeats while it keeps happening.' : ' One extra roll per die.')];
       case 'reroll': return ['Re-roll',
-        'Any ' + d + ' showing ' + cpPhrase(m.cp, 'its lowest face') + ' is re-rolled' +
+        'Any die showing ' + cpPhrase(m.cp, 'its lowest face') + ' is re-rolled' +
         (m.inf ? ' until it no longer qualifies.' : ' once — the new value stands.')];
       case 'unique': return ['Unique',
-        'Duplicate results are re-rolled' + (m.tries ? ' up to ' + m.tries + ' times' : '') +
-        ' so every ' + d + ' shows a different value' +
-        (m.cp ? ', but only for dice showing ' + cpPhrase(m.cp) + '.' : '.')];
+        'Duplicates are re-rolled' + (m.tries ? ' up to ' + m.tries + ' times' : '') +
+        ' so every die shows a different value. Needs a set.'];
       case 'keep': return ['Keep ' + (m.end === 'h' ? 'highest' : 'lowest'),
-        'Keep only the ' + ord(m.n) + (m.end === 'h' ? 'highest' : 'lowest') + (m.n === 1 ? ' result' : ' results') + '; the rest are struck out.'];
+        'Keep the ' + (m.n === 1 ? '' : m.n + ' ') + (m.end === 'h' ? 'highest' : 'lowest') +
+        ' member; the rest are struck out. Needs a set.'];
       case 'drop': return ['Drop ' + (m.end === 'h' ? 'highest' : 'lowest'),
-        'Throw away the ' + ord(m.n) + (m.end === 'h' ? 'highest' : 'lowest') + (m.n === 1 ? ' result' : ' results') + '.'];
-      case 'target': return ['Count successes',
-        'Stop summing. Instead count every ' + d + ' showing ' + cpPhrase(m.cp) + ' as one success.'];
-      case 'failure': return ['Count failures',
-        'Every ' + d + ' showing ' + cpPhrase(m.cp) + ' subtracts one from the success count.'];
-      case 'critSuccess': return ['Critical success',
-        'Flag any ' + d + ' showing ' + cpPhrase(m.cp, 'its highest face') + ' as a critical success (display only).'];
-      case 'critFail': return ['Critical failure',
-        'Flag any ' + d + ' showing ' + cpPhrase(m.cp, 'its lowest face') + ' as a critical failure (display only).'];
+        'Throw away the ' + (m.n === 1 ? '' : m.n + ' ') + (m.end === 'h' ? 'highest' : 'lowest') +
+        ' member. Needs a set.'];
+      case 'check': {
+        const c = CHECKS[m.check];
+        return [c.label, 'Mark every member of ' + cpPhrase(m.cp) + ' as ' + c.hit + '. ' +
+          (c.castable
+            ? 'A hit counts as 1 and a miss as 0, so this can still be used in a calculation.'
+            : 'This is a result type — it carries no number, so it cannot be used in a calculation.')];
+      }
     }
     return ['Modifier', ''];
   }
 
   const OP_NAMES = {
-    '+': ['Add', 'Add the value on the right to the running total.'],
-    '-': ['Subtract', 'Subtract the value on the right from the running total.'],
-    '*': ['Multiply', 'Multiply the two sides together.'],
-    '/': ['Divide', 'Divide the left side by the right. Fractions are kept — wrap it in floor() to round down.'],
-    '%': ['Remainder', 'The remainder after dividing the left side by the right.'],
+    '+': ['Add', 'Each side is reduced to a value first — a set is summed.'],
+    '-': ['Subtract', 'Each side is reduced to a value first — a set is summed.'],
+    '*': ['Multiply', 'A set is summed before multiplying, never multiplied out.'],
+    '/': ['Divide', 'Fractions are kept.'],
+    '%': ['Remainder', 'The remainder after dividing.'],
     '^': ['Power', 'Raise the left side to the power of the right.']
   };
 
-  /**
-   * Walk the AST and produce:
-   *   spans — [{a, b, cls, id}] for syntax highlighting
-   *   rows  — [{id, code, title, desc, depth}] for the Explain panel
-   */
   function describe(ast, src) {
-    const spans = [];
-    const rows = [];
+    const spans = [], rows = [];
     let uid = 0;
 
     const push = (sp, cls, row, fixedId) => {
       if (!sp) return null;
-      const id = row ? (fixedId || 'x' + (++uid)) : null;
+      const id = row ? (fixedId || 'x' + (++uid)) : (fixedId || null);
       spans.push({ a: sp[0], b: sp[1], cls, id });
       if (row) rows.push(Object.assign({ id, code: src.slice(sp[0], sp[1]) }, row));
       return id;
     };
 
-    function diceDesc(node) {
-      const s = node.sides;
-      const q = node.qty === null ? '1' : plain(node.qty);
-      const many = q !== '1';
-      const dieWord = many ? 'dice' : 'die';
-      const sides = plain(s);
-      const computed = s.t !== 'num';
-      return 'Roll ' + q + ' ' + (computed ? '(' + sides + ')' : sides) + '-sided ' +
-        dieWord + (many ? ' and sum them' : '') + '.' +
-        (computed || node.qty && node.qty.t !== 'num' ? ' Quantity and sides are worked out first.' : '');
-    }
+    const mods = (node, depth) => {
+      for (const m of node.mods || []) {
+        const [title, desc] = modExplain(m);
+        push(m.sp, 't-mod', { title, desc, depth: depth + 1 });
+      }
+    };
 
     function walk(node, depth) {
       switch (node.t) {
         case 'num':
           push(node.sp, 't-num', { title: 'Constant', desc: 'The flat value ' + fmt(node.v) + '.', depth });
           break;
-
         case 'neg':
-          push(node.opSp, 't-op', { title: 'Negate', desc: 'Flip the sign of what follows.', depth });
+          push(node.opSp, 't-op', { title: 'Negate', desc: 'Flip the sign. Over a set, every member flips.', depth });
           walk(node.v, depth + 1);
           break;
-
-        case 'paren': {
-          const pid = node.uid ? 'p' + node.uid : null;
-          push(node.brk[0], 't-brk', { title: 'Group', desc: 'Everything inside the parentheses is worked out first.', depth }, pid);
-          walk(node.v, depth + 1);
-          push(node.brk[1], 't-brk', null, pid);
-          if (pid) spans[spans.length - 1].id = pid;
-          break;
-        }
-
         case 'bin': {
           walk(node.l, depth);
           const [title, desc] = OP_NAMES[node.op] || ['Operator', ''];
@@ -882,42 +933,70 @@
           walk(node.r, depth);
           break;
         }
-
         case 'func':
           push(node.nameSp, 't-fn', {
-            title: node.name + '()',
-            desc: 'Apply ' + (FUNC_DESC[node.name] || node.name) + ' to the value inside.', depth
+            title: node.name + '()', desc: 'Take ' + FUNC_DESC[node.name] + ' of the list.', depth
           });
           push(node.brk[0], 't-brk');
           node.args.forEach((a) => walk(a, depth + 1));
           push(node.brk[1], 't-brk');
           break;
-
         case 'dice': {
-          const many = node.qty !== null && !(node.qty.t === 'num' && node.qty.v === 1);
-          push(node.core, 't-dice', { title: 'Dice roll', desc: diceDesc(node), depth }, 'd' + node.uid);
+          const many = node.qty !== null;
+          const q = many ? plain(node.qty) : '1';
+          const sides = node.sides.t === 'num' ? plain(node.sides) : '(' + plain(node.sides) + ')';
+          push(node.core, 't-dice', {
+            title: many ? 'Dice — a set' : 'One die — a value',
+            desc: many
+              ? 'Roll ' + q + ' ' + sides + '-sided dice. That is a set of ' + q +
+                ' values, summed whenever a single value is needed.'
+              : 'Roll one ' + sides + '-sided die. A single value, not a set — ' +
+                'set modifiers like kh will not attach to it.',
+            depth
+          }, 'd' + node.uid);
           if (node.qty && node.qty.t !== 'num') walk(node.qty, depth + 1);
           if (node.sides.t !== 'num') walk(node.sides, depth + 1);
-          for (const m of node.mods) {
-            const [title, desc] = modExplain(m, many ? 'die' : 'die');
-            push(m.sp, 't-mod', { title, desc, depth: depth + 1 });
-          }
+          mods(node, depth);
           break;
         }
-
-        case 'group': {
+        case 'paren': {
+          const pid = 's' + node.uid;
           push(node.brk[0], 't-brk', {
-            title: 'Bracket group',
-            desc: 'Worked out first, and the modifiers after the bracket act on every die inside it rather than on one term.',
+            title: 'Bracket', desc: 'Worked out first. Modifiers after it act on what is inside.', depth
+          }, pid);
+          walk(node.v, depth + 1);
+          push(node.brk[1], 't-brk', null, pid);
+          mods(node, depth);
+          break;
+        }
+        case 'set': {
+          const sid = 's' + node.uid;
+          push(node.brk[0], 't-brk', {
+            title: 'Set', desc: 'A set of ' + node.items.length + ' values. Any set inside unpacks ' +
+              'into it, and the whole thing sums when a value is needed.', depth
+          }, sid);
+          node.items.forEach((it, i) => {
+            walk(it, depth + 1);
+            if (node.commas[i]) push(node.commas[i], 't-op', null, sid);
+          });
+          push(node.brk[1], 't-brk', null, sid);
+          mods(node, depth);
+          break;
+        }
+        case 'rep': {
+          const rid = 's' + node.uid;
+          push([node.count.sp[0], node.brk[0][1]], 't-rep', {
+            title: 'Repeat into a set',
+            desc: 'Evaluate the bracket ' + plain(node.count) +
+              ' separate times and collect the results as a set.',
             depth
-          }, 'g' + node.uid);
-          walk(node.sub, depth + 1);
-          push(node.brk[1], 't-brk');
-          if (node.uid) spans[spans.length - 1].id = 'g' + node.uid;
-          for (const m of node.mods) {
-            const [title, desc] = modExplain(m, 'die');
-            push(m.sp, 't-mod', { title, desc, depth: depth + 1 });
-          }
+          }, rid);
+          node.items.forEach((it, i) => {
+            walk(it, depth + 1);
+            if (node.commas[i]) push(node.commas[i], 't-op', null, rid);
+          });
+          push(node.brk[1], 't-brk', null, rid);
+          mods(node, depth);
           break;
         }
       }
@@ -929,11 +1008,73 @@
   }
 
   /* ==========================================================================
+     PREVIEW — the dice an expression would throw, by name
+     ========================================================================== */
+  const PREVIEW_MAX = 8;
+
+  function constOf(node) {
+    if (!node) return null;
+    switch (node.t) {
+      case 'num': return node.v;
+      case 'paren': return constOf(node.v);
+      case 'neg': { const v = constOf(node.v); return v === null ? null : -v; }
+      case 'bin': {
+        const a = constOf(node.l), b = constOf(node.r);
+        if (a === null || b === null) return null;
+        switch (node.op) {
+          case '+': return a + b; case '-': return a - b; case '*': return a * b;
+          case '/': return a / b; case '%': return a % b; case '^': return Math.pow(a, b);
+        }
+        return null;
+      }
+    }
+    return null;
+  }
+
+  function previewNode(node) {
+    switch (node.t) {
+      case 'num': return '<span class="r-num">' + fmt(node.v) + '</span>';
+      case 'neg': return '<span class="r-op">-</span>' + previewNode(node.v);
+      case 'bin':
+        return previewNode(node.l) +
+          '<span class="r-op"' + (node.uid ? ' data-x="o' + node.uid + '"' : '') + '>' +
+          esc(node.op) + '</span>' + previewNode(node.r);
+      case 'func':
+        return '<span class="r-fn">' + node.name + '</span><span class="r-brk">(</span>' +
+          node.args.map(previewNode).join('<span class="r-op">,</span>') + '<span class="r-brk">)</span>';
+      case 'paren': case 'set': case 'rep': {
+        const tag = ' data-x="s' + node.uid + '"';
+        const items = (node.t === 'paren' ? [node.v] : node.items).map(previewNode)
+          .join('<span class="r-op">,</span>');
+        const pre = node.t === 'rep' ? '<span class="r-num">' + esc(plain(node.count)) + '</span>' : '';
+        return '<span class="r-grp"' + tag + '>' + pre + '<span class="r-brk"' + tag + '>(</span>' +
+          items + '<span class="r-brk"' + tag + '>)</span></span>';
+      }
+      case 'dice': {
+        const sides = constOf(node.sides);
+        const qty = node.qty === null ? 1 : constOf(node.qty);
+        const shape = sides === null ? 'd20' : shapeFor(Math.floor(sides));
+        const face = sides === null ? '?' : fmt(Math.floor(sides));
+        const n = (qty === null || !(qty >= 0)) ? 1 : Math.floor(qty);
+        const shown = Math.max(1, Math.min(n, PREVIEW_MAX));
+        const size = face.length >= 3 ? ' v3' : (face.length === 2 ? ' v2' : '');
+        const tag = ' data-x="d' + node.uid + '"';
+        const one = '<span class="die ghost s-' + shape + '"' + tag + '>' +
+          '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
+          '<use href="#sh-' + shape + '"/></svg>' +
+          '<span class="dieval' + size + '">' + esc(face) + '</span></span>';
+        const squeezed = n > SQUEEZE_AT;
+        const parts = new Array(shown).fill(one);
+        return '<span class="r-term' + (squeezed ? ' squeezed' : '') + '"' + tag +
+          squeezeStyle(shown) + '>' + (squeezed ? parts.join('') : parts.join(PLUS)) + '</span>';
+      }
+    }
+    return '';
+  }
+
+  /* ==========================================================================
      PUBLIC API
      ========================================================================== */
-
-  /** commas at bracket depth 0 separate whole rolls; inside a function they
-      are argument separators, so only the top level counts */
   function splitParts(src) {
     const out = [];
     let depth = 0, start = 0;
@@ -947,8 +1088,6 @@
     return out;
   }
 
-  /** Split off a `3x` repeat prefix, a `# label` suffix and any top-level
-      commas, then parse each part. */
   function parse(input) {
     const raw = String(input == null ? '' : input);
     let src = raw.trim();
@@ -975,13 +1114,12 @@
     const parts = [];
     let uid = 0;
     for (const piece of splitParts(src)) {
-      if (!piece.text.trim()) {
-        throw new DiceError('empty roll between commas', offset + piece.a);
-      }
+      if (!piece.text.trim()) throw new DiceError('empty roll between commas', offset + piece.a);
       const p = new Parser(piece.text, uid);
       let ast;
       try {
         ast = p.parse();
+        typeCheck(ast, false);
       } catch (e) {
         if (e instanceof DiceError && e.pos != null) e.pos += offset + piece.a;
         throw e;
@@ -992,12 +1130,10 @@
 
     return {
       parts, ast: parts[0].ast, repeat, repeatSp, label, labelSp, offset, src,
-      trimmed: raw.trim(),
-      notation: parts.map((p) => plain(p.ast)).join(', ')
+      trimmed: raw.trim(), notation: parts.map((p) => plain(p.ast)).join(', ')
     };
   }
 
-  /** Everything the UI needs to highlight + explain an input string. */
   function inspect(input) {
     const p = parse(input);
     const spans = [], rows = [];
@@ -1006,11 +1142,12 @@
       for (const s of d.spans) spans.push({ a: s.a + part.a, b: s.b + part.a, cls: s.cls, id: s.id });
       for (const r of d.rows) rows.push(Object.assign({}, r));
       if (i < p.parts.length - 1) {
-        const c = p.parts[i + 1].a - 1;                 // the comma between parts
+        const c = p.parts[i + 1].a - 1;
         spans.push({ a: c, b: c + 1, cls: 't-op', id: 'xc' + i });
         rows.push({
           id: 'xc' + i, code: ',', depth: 0, title: 'Next roll',
-          desc: 'A comma starts a separate roll. They are reported together as one entry.'
+          desc: 'At the top level a comma starts a separate roll, reported alongside the others. ' +
+            'Inside brackets the same comma builds a set.'
         });
       }
     });
@@ -1020,23 +1157,28 @@
       spans.unshift({ a: p.repeatSp[0], b: p.repeatSp[1], cls: 't-rep', id: 'xrep' });
       rows.unshift({
         id: 'xrep', code: p.trimmed.slice(p.repeatSp[0], p.repeatSp[1]), depth: 0,
-        title: 'Repeat', desc: 'Roll the whole expression ' + p.repeat + ' separate times and report each set.'
+        title: 'Repeat', desc: 'Roll the whole expression ' + p.repeat + ' separate times.'
       });
     }
     if (p.labelSp) {
       spans.push({ a: p.labelSp[0], b: p.labelSp[1], cls: 't-cmt', id: 'xlbl' });
       rows.push({
         id: 'xlbl', code: p.trimmed.slice(p.labelSp[0], p.labelSp[1]), depth: 0,
-        title: 'Label', desc: 'Everything after # is a note attached to the roll — it never affects the maths.'
+        title: 'Label', desc: 'Everything after # is a note — it never affects the maths.'
       });
     }
     return { parsed: p, spans, rows, notation: p.notation };
   }
 
-  /** Evaluate a parsed AST once. */
   const evaluate = (ast) => evalNode(ast, { dice: 0 });
 
-  /** Parse + evaluate, honouring the repeat prefix. */
+  function countDice(v) {
+    if (!v) return 0;
+    if (v.die) return 1;
+    if (v.set) { let n = 0; for (const m of v.members) n += countDice(m); return n; }
+    return 0;
+  }
+
   function roll(input) {
     const p = parse(input);
     const sets = [];
@@ -1044,23 +1186,41 @@
     for (let i = 0; i < p.repeat; i++) {
       for (const part of p.parts) {
         const r = evaluate(part.ast);
-        // name each set when there is more than one, so the card can label them
         if (multi) r.name = p.parts.length > 1 ? plain(part.ast) : null;
         sets.push(r);
       }
     }
     let diceCount = 0;
-    for (const s of sets) { const bag = []; collectDice(s, bag); diceCount += bag.length; }
+    for (const s of sets) diceCount += countDice(s);
+
+    // a non-castable check has no total; the roll reports its marks instead
+    let total = 0, numeric = true;
+    try { for (const s of sets) total += s.total(); }
+    catch (e) { numeric = false; total = 0; }
+
+    const marks = {};
+    for (const s of sets) {
+      let m = null;
+      if (s.check) {
+        const c = CHECKS[s.check.kind];
+        const key = s.check.hit ? c.hit : c.miss;
+        if (key) m = { [key]: 1 };
+      } else if (s.marks) m = s.marks();
+      if (m) for (const k in m) marks[k] = (marks[k] || 0) + m[k];
+    }
+
     return {
-      input: p.trimmed, notation: p.notation, label: p.label, repeat: p.repeat, sets, diceCount,
-      total: sets.reduce((a, s) => a + s.total(), 0),
-      successMode: sets.length > 0 && !!sets[0].successMode,
-      successes: sets.reduce((a, s) => a + (s.successMode ? s.successes() : 0), 0),
-      failures: sets.reduce((a, s) => a + (s.successMode ? s.failures() : 0), 0)
+      input: p.trimmed, notation: p.notation, label: p.label, repeat: p.repeat,
+      sets, diceCount, total, numeric,
+      marks: Object.keys(marks).length ? marks : null
     };
   }
 
-  /** Monte-Carlo the distribution of an expression's total. */
+  function preview(input) {
+    const p = parse(input);
+    return p.parts.map((part) => previewNode(part.ast)).join('<span class="r-op">,</span>');
+  }
+
   function analyse(input, n) {
     const p = parse(input);
     n = n || 20000;
@@ -1080,88 +1240,13 @@
     return {
       n, min, max, mean, stdev: Math.sqrt(varsum / n),
       median: sorted[Math.floor(n / 2)],
-      p10: sorted[Math.floor(n * 0.10)],
-      p90: sorted[Math.floor(n * 0.90)],
+      p10: sorted[Math.floor(n * 0.10)], p90: sorted[Math.floor(n * 0.90)],
       totals, notation: p.notation
     };
   }
 
-  /* ==========================================================================
-     PREVIEW — what the expression *would* roll, drawn from the parse alone.
-     The dice carry their die name rather than a face, since nothing has been
-     rolled yet, and no subtotals appear because there is nothing to sum.
-     ========================================================================== */
-  const PREVIEW_MAX = 8;   // squeezed dice stack anyway; drawing more is waste
-
-  function constOf(node) {
-    if (!node) return null;
-    switch (node.t) {
-      case 'num': return node.v;
-      case 'paren': return constOf(node.v);
-      case 'neg': { const v = constOf(node.v); return v === null ? null : -v; }
-      case 'bin': {
-        const a = constOf(node.l), b = constOf(node.r);
-        if (a === null || b === null) return null;
-        switch (node.op) {
-          case '+': return a + b; case '-': return a - b; case '*': return a * b;
-          case '/': return a / b; case '%': return a % b; case '^': return Math.pow(a, b);
-        }
-        return null;
-      }
-    }
-    return null;
-  }
-
-  function previewNode(node) {
-    switch (node.t) {
-      case 'num': return '<span class="r-num">' + fmt(node.v) + '</span>';
-      case 'neg': return '<span class="r-op">-</span>' + previewNode(node.v);
-      case 'paren': {
-        const tag = node.uid ? ' data-x="p' + node.uid + '"' : '';
-        return '<span class="r-grp"' + tag + '><span class="r-brk"' + tag + '>(</span>' +
-          previewNode(node.v) + '<span class="r-brk"' + tag + '>)</span></span>';
-      }
-      case 'group':
-        return '<span class="r-grp"' + (node.uid ? ' data-x="g' + node.uid + '"' : '') + '>' +
-          '<span class="r-brk">(</span>' + previewNode(node.sub) + '<span class="r-brk">)</span></span>';
-      case 'bin':
-        return previewNode(node.l) +
-          '<span class="r-op"' + (node.uid ? ' data-x="o' + node.uid + '"' : '') + '>' +
-          esc(node.op) + '</span>' + previewNode(node.r);
-      case 'func':
-        return '<span class="r-fn">' + node.name + '</span><span class="r-brk">(</span>' +
-          node.args.map(previewNode).join('<span class="r-op">,</span>') + '<span class="r-brk">)</span>';
-      case 'dice': {
-        const sides = constOf(node.sides);
-        const qty = node.qty === null ? 1 : constOf(node.qty);
-        const shape = sides === null ? 'd20' : shapeFor(Math.floor(sides));
-        const face = sides === null ? '?' : fmt(Math.floor(sides));
-        const n = (qty === null || !(qty >= 0)) ? 1 : Math.floor(qty);
-        const shown = Math.max(1, Math.min(n, PREVIEW_MAX));
-        const size = face.length >= 3 ? ' v3' : (face.length === 2 ? ' v2' : '');
-        const tag = node.uid ? ' data-x="d' + node.uid + '"' : '';
-        const one = '<span class="die ghost s-' + shape + '"' + tag + '>' +
-          '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
-          '<use href="#sh-' + shape + '"/></svg>' +
-          '<span class="dieval' + size + '">' + esc(face) + '</span></span>';
-        const squeezed = n > SQUEEZE_AT;
-        const parts = new Array(shown).fill(one);
-        return '<span class="r-term' + (squeezed ? ' squeezed' : '') + '"' + tag +
-          squeezeStyle(shown) + '>' + (squeezed ? parts.join('') : parts.join(PLUS)) + '</span>';
-      }
-    }
-    return '';
-  }
-
-  /** HTML for the dice an expression would roll. Never throws on a valid parse. */
-  function preview(input) {
-    const p = parse(input);
-    return p.parts.map((part) => previewNode(part.ast))
-      .join('<span class="r-op">,</span>');
-  }
-
   global.DiceEngine = {
     parse, inspect, evaluate, roll, analyse, preview, fmt, esc, shapeFor,
-    DiceError, LIMIT, FUNCS
+    DiceError, LIMIT, FUNCS, CHECKS
   };
 }(window));

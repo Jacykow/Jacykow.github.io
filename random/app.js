@@ -55,14 +55,27 @@
        term the caret is in; wrap wraps that term. */
   const REFERENCE = [
     ['Dice', [
-      ['~d20', 'one twenty-sided die', 'atom'],
-      ['~4d6', 'four six-sided dice, summed', 'atom'],
+      ['~d20', 'one die — a value', 'atom'],
+      ['~4d6', 'four dice — a set, summed when a value is needed', 'atom'],
       ['~(2+2)~d6', 'computed quantity', 'atom'],
       ['3d~(2*6)', 'computed number of sides', 'atom']
     ]],
+    ['Sets', [
+      ['~(~d6,d8~)', 'a set built by listing values', 'atom'],
+      ['~4(~d10+d6~)', 'repeat an expression into a set of 4', 'atom'],
+      ['~2(~d10,2d6~)', 'sets inside sets unpack', 'atom'],
+      ['(d10,~-~2d6)', 'a minus flips every member', 'atom']
+    ]],
+    ['Keep & drop', [
+      ['4d6~kh3', 'keep the highest 3 — needs a set', 'suffix'],
+      ['2d20~kl1', 'keep the lowest — disadvantage', 'suffix'],
+      ['4d6~dl1', 'drop the lowest', 'suffix'],
+      ['4d6~dh1', 'drop the highest', 'suffix'],
+      ['(3d6,2d8)~kh3', 'best 3 across a listed set', 'suffix']
+    ]],
     ['Exploding', [
       ['d6~e', 'roll again and add when it lands on 6', 'suffix'],
-      ['d6~ei', 'keep exploding for as long as it hits 6', 'suffix'],
+      ['d6~ei', 'keep exploding while it hits 6', 'suffix'],
       ['d6~e5', 'explode on 5 or more', 'suffix'],
       ['d6~ep', 'penetrating: the extra die takes -1', 'suffix'],
       ['d6~epi', 'penetrating, repeated', 'suffix']
@@ -71,46 +84,29 @@
       ['4d6~r', 're-roll a 1, once', 'suffix'],
       ['4d6~ri', 're-roll 1s until they stop', 'suffix'],
       ['4d6~r2', 're-roll 2 and below, once', 'suffix'],
-      ['4d6~ri2', 're-roll 2 and below until they stop', 'suffix']
-    ]],
-    ['Unique', [
       ['4d10~u', 'force every die to a different value', 'suffix'],
-      ['4d10~u1', 're-roll a duplicate once, then accept it', 'suffix'],
       ['4d10~u3', 'give up after three attempts', 'suffix']
     ]],
-    ['Keep & drop', [
-      ['4d6~kh3', 'keep the highest 3', 'suffix'],
-      ['2d20~kl1', 'keep the lowest — disadvantage', 'suffix'],
-      ['4d6~dl1', 'drop the lowest', 'suffix'],
-      ['4d6~dh1', 'drop the highest', 'suffix']
-    ]],
-    ['Successes', [
-      ['10d10~>=8', 'count each 8 or more as a success', 'suffix'],
-      ['10d10>=8~f<=1', 'each 1 cancels a success', 'suffix'],
-      ['2d20~cs19', 'flag 19 and up as a critical success', 'suffix'],
-      ['2d20~cf2', 'flag 2 and under as a critical fail', 'suffix']
+    ['Results', [
+      ['3d6~s5', 'mark each 5+ a success — counts as 1', 'suffix'],
+      ['3d6~>=5', 'the same, with s left out', 'suffix'],
+      ['3d6~f2', 'mark each 2 or less a failure', 'suffix'],
+      ['2d20~cs19', 'mark 19+ a critical success', 'suffix'],
+      ['2d20~cf2', 'mark 2 or less a critical failure', 'suffix']
     ]],
     ['Clamp', [
-      ['4d6~min2', 'treat anything below 2 as 2', 'suffix'],
-      ['4d6~max5', 'treat anything above 5 as 5', 'suffix']
-    ]],
-    ['Bracket groups', [
-      ['~(~3d6+2d8~)kh3', 'keep the best 3 dice across the group', 'atom'],
-      ['~(~4d6+2d10~)dl2', 'drop the worst 2 overall', 'atom'],
-      ['~(~2d6+3d8~)>=5', 'count every die of 5 or more', 'atom'],
-      ['~(~2d20+2d12~)kl1', 'keep the single worst die', 'atom']
+      ['4d6~min2', 'treat any face below 2 as 2', 'suffix'],
+      ['4d6~max5', 'treat any face above 5 as 5', 'suffix']
     ]],
     ['Maths', [
       ['2d6~+2', 'add', 'suffix'],
       ['2d6~-2', 'subtract', 'suffix'],
-      ['2d6~*2', 'multiply', 'suffix'],
+      ['2d6~*2', 'multiply — the set is summed first', 'suffix'],
       ['2d6~/2', 'divide', 'suffix'],
       ['2d6~%2', 'remainder', 'suffix'],
-      ['2d6~^2', 'raise to a power', 'suffix']
-    ]],
-    ['Functions', [
-      ['~max(~d20,10~)', 'the largest argument', 'wrap'],
-      ['~min(~d20,10~)', 'the smallest argument', 'wrap']
+      ['2d6~^2', 'raise to a power', 'suffix'],
+      ['~max(~d20,10~)', 'the largest value', 'wrap'],
+      ['~min(~d20,10~)', 'the smallest value', 'wrap']
     ]],
     ['Whole roll', [
       ['~6x~4d6dl1', 'repeat the whole expression 6 times', 'prefix'],
@@ -291,11 +287,25 @@
   }
 
   /* =============================================================== result */
-  function totalText(roll) {
-    return roll.successMode
-      ? E.fmt(roll.total) + (Math.abs(roll.total) === 1 ? ' hit' : ' hits')
-      : E.fmt(roll.total);
+  const MARK_WORD = {
+    success: ['success', 'successes'], failure: ['failure', 'failures'],
+    critSuccess: ['critical', 'criticals'], critFail: ['crit fail', 'crit fails']
+  };
+
+  function markList(marks) {
+    return Object.keys(marks).map((k) => {
+      const w = MARK_WORD[k] || [k, k];
+      return marks[k] + ' ' + (marks[k] === 1 ? w[0] : w[1]);
+    });
   }
+
+  /** a roll that ends in a result type has no number to show, only its marks */
+  function totalText(roll) {
+    if (roll.numeric) return E.fmt(roll.total);
+    return roll.marks ? markList(roll.marks).join(', ') : '—';
+  }
+
+  const setTotal = (s) => { try { return E.fmt(s.total()); } catch (e) { return '—'; } };
 
   /** history entries below the newest collapse to a single line */
   function lineHTML(roll, idx) {
@@ -327,18 +337,17 @@
       rows = roll.sets.map((s, i) =>
         '<div class="setrow"><span class="i">' + esc(s.name || ('#' + (i + 1))) + '</span>' +
           '<span class="body">' + s.html(opts) + '</span>' +
-          '<span class="st">' + E.fmt(s.total()) + '</span></div>'
+          '<span class="st">' + esc(setTotal(s)) + '</span></div>'
       ).join('');
     } else {
       rows = '<div class="setrow"><span class="body">' + roll.sets[0].html(opts) + '</span></div>';
     }
 
     let tally = '';
-    if (roll.successMode) {
-      tally = '<div class="tally"><b>' + roll.successes + '</b> success' +
-        (roll.successes === 1 ? '' : 'es') +
-        (roll.failures ? ' &minus; <i>' + roll.failures + '</i> failure' + (roll.failures === 1 ? '' : 's') : '') +
-        ' = ' + E.fmt(roll.total) + '</div>';
+    if (roll.marks) {
+      tally = '<div class="tally">' + markList(roll.marks)
+        .map((t) => '<b>' + esc(t) + '</b>').join(' &middot; ') +
+        (roll.numeric ? ' &rarr; ' + E.fmt(roll.total) : '') + '</div>';
     }
 
     const meta = [];
