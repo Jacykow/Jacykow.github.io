@@ -86,11 +86,11 @@ Keep, drop and target success/failure are the modifiers that make sense here.
 
 ### Maths
 
-`+ - * / % ^` (or `**`), parentheses, and the functions `abs ceil cos exp floor log max min
-pow round sign sin sqrt tan`. `round()` rounds half away from zero.
+`+ - * / % ^` (or `**`), parentheses, and `max` / `min` — the two functions that reduce
+several values down to one. The scalar helpers (`floor`, `sqrt`, `abs`, …) are gone.
 
 ```
-(1d6+2)*3        floor(3d6/2)        max(1d20, 1d20)
+(1d6+2)*3        max(d20,10)        min(2d6,7)
 ```
 
 ### Whole-roll extras
