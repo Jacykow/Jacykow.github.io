@@ -46,19 +46,11 @@
   }());
 
   /* ----------------------------------------------------------- math funcs */
-  const FUNCS = {
-    abs: Math.abs, ceil: Math.ceil, cos: Math.cos, exp: Math.exp,
-    floor: Math.floor, log: Math.log, max: Math.max, min: Math.min,
-    pow: Math.pow, sign: Math.sign, sin: Math.sin, sqrt: Math.sqrt, tan: Math.tan,
-    round: (x) => Math.sign(x) * Math.round(Math.abs(x))   // half away from zero
-  };
+  /* Only the two that reduce a collection to one value. The scalar helpers
+     (floor, sqrt, ...) are gone. */
+  const FUNCS = { max: Math.max, min: Math.min };
 
-  const FUNC_DESC = {
-    abs: 'absolute value', ceil: 'round up', cos: 'cosine', exp: 'e to the power of',
-    floor: 'round down', log: 'natural logarithm', max: 'the largest argument',
-    min: 'the smallest argument', pow: 'raise to a power', round: 'round to nearest',
-    sign: 'sign (-1, 0 or 1)', sin: 'sine', sqrt: 'square root', tan: 'tangent'
-  };
+  const FUNC_DESC = { max: 'the largest argument', min: 'the smallest argument' };
 
   /* Application order of dice modifiers — lower runs first. */
   const ORDER = {

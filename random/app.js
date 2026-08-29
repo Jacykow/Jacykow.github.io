@@ -109,20 +109,8 @@
       ['2d6~^2', 'raise to a power', 'suffix']
     ]],
     ['Functions', [
-      ['~floor(~3d6/2~)', 'round down', 'wrap'],
-      ['~ceil(~3d6/2~)', 'round up', 'wrap'],
-      ['~round(~3d6/2~)', 'round to nearest', 'wrap'],
-      ['~abs(~d6-4~)', 'absolute value', 'wrap'],
-      ['~sqrt(~4d6~)', 'square root', 'wrap'],
-      ['~sign(~d6-4~)', 'sign: -1, 0 or 1', 'wrap'],
-      ['~log(~4d6~)', 'natural logarithm', 'wrap'],
-      ['~exp(~d6~)', 'e to the power of', 'wrap'],
-      ['~sin(~d6~)', 'sine', 'wrap'],
-      ['~cos(~d6~)', 'cosine', 'wrap'],
-      ['~tan(~d6~)', 'tangent', 'wrap'],
-      ['~max(~d20~,10)', 'the largest argument', 'wrap'],
-      ['~min(~d20~,10)', 'the smallest argument', 'wrap'],
-      ['~pow(~d6~,2)', 'raise to a power', 'wrap']
+      ['~max(~d20,10~)', 'the largest argument', 'wrap'],
+      ['~min(~d20,10~)', 'the smallest argument', 'wrap']
     ]],
     ['Whole roll', [
       ['~6x~4d6dl1', 'repeat the whole expression 6 times', 'prefix'],
