@@ -40,93 +40,99 @@
     activeTab: 'explain',
     statsToken: 0,
     curRow: null,      // Explain row the caret last sat on
-    hot: null          // token currently hovered, on any of the three surfaces
+    hot: null, hotScope: null   // token currently hovered, and in which expression
   };
 
   /* ======================================================== reference data */
   /* every size that has a solid of its own, for the gallery */
   const DICE_GALLERY = [2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 100];
 
-  /* Each entry is [code, description, form].
-       atom   — inserted where the caret is
-       suffix — appended to the dice term or bracket the caret is in
-       wrap   — wraps that term in a function
-     The code is written with (_) standing for the expression it attaches to,
-     so the reference shows placement rather than a bare fragment. */
+  /* Each entry is [example, description, form].
+       Every example is valid on its own. A ~ toggles between the grey
+       scaffolding and the coloured part that does the referenced work, so
+       '4d6~kh3' greys the dice and colours the modifier.
+       form: atom inserts as written; suffix hangs the coloured part off the
+       term the caret is in; wrap wraps that term. */
   const REFERENCE = [
     ['Dice', [
-      ['d20', 'one twenty-sided die', 'atom'],
-      ['4d6', 'four six-sided dice, summed', 'atom'],
-      ['(2+2)d6', 'computed quantity', 'atom'],
-      ['3d(2*6)', 'computed number of sides', 'atom']
+      ['~d20', 'one twenty-sided die', 'atom'],
+      ['~4d6', 'four six-sided dice, summed', 'atom'],
+      ['~(2+2)~d6', 'computed quantity', 'atom'],
+      ['3d~(2*6)', 'computed number of sides', 'atom']
     ]],
     ['Exploding', [
-      ['(_)!', 're-roll and add on the highest face', 'suffix'],
-      ['(_)!>4', 'explode on anything over 4', 'suffix'],
-      ['(_)!p', 'penetrating: extra dice take -1', 'suffix'],
-      ['(_)e6', 'explode once on 6 or more', 'suffix'],
-      ['(_)ie6', 'explode repeatedly on 6 or more', 'suffix']
-    ]],
-    ['Keep & drop', [
-      ['(_)kh3', 'keep the highest 3', 'suffix'],
-      ['(_)kl1', 'keep the lowest 1 (disadvantage)', 'suffix'],
-      ['(_)dl1', 'drop the lowest 1', 'suffix'],
-      ['(_)dh1', 'drop the highest 1', 'suffix']
+      ['d6~e', 'roll again and add when it lands on 6', 'suffix'],
+      ['d6~ei', 'keep exploding for as long as it hits 6', 'suffix'],
+      ['d6~e5', 'explode on 5 or more', 'suffix'],
+      ['d6~ep', 'penetrating: the extra die takes -1', 'suffix'],
+      ['d6~epi', 'penetrating, repeated', 'suffix']
     ]],
     ['Re-rolling', [
-      ['(_)r', 're-roll 1s until they are not 1s', 'suffix'],
-      ['(_)r<3', 're-roll anything under 3', 'suffix'],
-      ['(_)ro1', 're-roll 1s exactly once', 'suffix'],
-      ['(_)u', 'force every die to be unique', 'suffix'],
-      ['(_)uo', 're-roll duplicates once', 'suffix']
+      ['4d6~r', 're-roll a 1, once', 'suffix'],
+      ['4d6~ri', 're-roll 1s until they stop', 'suffix'],
+      ['4d6~r2', 're-roll 2 and below, once', 'suffix'],
+      ['4d6~ri2', 're-roll 2 and below until they stop', 'suffix']
+    ]],
+    ['Unique', [
+      ['4d10~u', 'force every die to a different value', 'suffix'],
+      ['4d10~uo', 're-roll a duplicate once, then accept it', 'suffix']
+    ]],
+    ['Keep & drop', [
+      ['4d6~kh3', 'keep the highest 3', 'suffix'],
+      ['2d20~kl1', 'keep the lowest — disadvantage', 'suffix'],
+      ['4d6~dl1', 'drop the lowest', 'suffix'],
+      ['4d6~dh1', 'drop the highest', 'suffix']
     ]],
     ['Successes', [
-      ['(_)>=8', 'count each 8+ as a success', 'suffix'],
-      ['(_)f<=1', 'each 1 or less cancels a success', 'suffix'],
-      ['(_)t8', 'alias for >=8', 'suffix'],
-      ['(_)cs>=19', 'flag 19+ as a critical success', 'suffix'],
-      ['(_)cf<=2', 'flag 2 or less as a critical fail', 'suffix']
+      ['10d10~>=8', 'count each 8 or more as a success', 'suffix'],
+      ['10d10>=8~f<=1', 'each 1 cancels a success', 'suffix'],
+      ['2d20~cs19', 'flag 19 and up as a critical success', 'suffix'],
+      ['2d20~cf2', 'flag 2 and under as a critical fail', 'suffix']
     ]],
     ['Clamp', [
-      ['(_)min2', 'treat anything below 2 as 2', 'suffix'],
-      ['(_)max5', 'treat anything above 5 as 5', 'suffix']
+      ['4d6~min2', 'treat anything below 2 as 2', 'suffix'],
+      ['4d6~max5', 'treat anything above 5 as 5', 'suffix']
     ]],
     ['Bracket groups', [
-      ['(3d6+2d8)kh3', 'keep the best 3 dice across the group', 'atom'],
-      ['(4d6+2d10)dl2', 'drop the worst 2 overall', 'atom'],
-      ['(2d6+3d8)>=5', 'count every die of 5 or more', 'atom'],
-      ['(2d20+2d12)kl1', 'keep the single worst die', 'atom']
+      ['~(~3d6+2d8~)kh3', 'keep the best 3 dice across the group', 'atom'],
+      ['~(~4d6+2d10~)dl2', 'drop the worst 2 overall', 'atom'],
+      ['~(~2d6+3d8~)>=5', 'count every die of 5 or more', 'atom'],
+      ['~(~2d20+2d12~)kl1', 'keep the single worst die', 'atom']
     ]],
     ['Maths', [
-      ['(_)+2', 'add', 'suffix'],
-      ['(_)-2', 'subtract', 'suffix'],
-      ['(_)*2', 'multiply', 'suffix'],
-      ['(_)/2', 'divide', 'suffix'],
-      ['(_)%2', 'remainder', 'suffix'],
-      ['(_)^2', 'raise to a power', 'suffix']
+      ['2d6~+2', 'add', 'suffix'],
+      ['2d6~-2', 'subtract', 'suffix'],
+      ['2d6~*2', 'multiply', 'suffix'],
+      ['2d6~/2', 'divide', 'suffix'],
+      ['2d6~%2', 'remainder', 'suffix'],
+      ['2d6~^2', 'raise to a power', 'suffix']
     ]],
     ['Functions', [
-      ['floor(_)', 'round down', 'wrap'],
-      ['ceil(_)', 'round up', 'wrap'],
-      ['round(_)', 'round to nearest', 'wrap'],
-      ['abs(_)', 'absolute value', 'wrap'],
-      ['sqrt(_)', 'square root', 'wrap'],
-      ['sign(_)', 'sign: -1, 0 or 1', 'wrap'],
-      ['log(_)', 'natural logarithm', 'wrap'],
-      ['exp(_)', 'e to the power of', 'wrap'],
-      ['sin(_)', 'sine', 'wrap'],
-      ['cos(_)', 'cosine', 'wrap'],
-      ['tan(_)', 'tangent', 'wrap'],
-      ['max(_, 1)', 'the largest argument', 'wrap'],
-      ['min(_, 1)', 'the smallest argument', 'wrap'],
-      ['pow(_, 2)', 'raise to a power', 'wrap']
+      ['~floor(~3d6/2~)', 'round down', 'wrap'],
+      ['~ceil(~3d6/2~)', 'round up', 'wrap'],
+      ['~round(~3d6/2~)', 'round to nearest', 'wrap'],
+      ['~abs(~d6-4~)', 'absolute value', 'wrap'],
+      ['~sqrt(~4d6~)', 'square root', 'wrap'],
+      ['~sign(~d6-4~)', 'sign: -1, 0 or 1', 'wrap'],
+      ['~log(~4d6~)', 'natural logarithm', 'wrap'],
+      ['~exp(~d6~)', 'e to the power of', 'wrap'],
+      ['~sin(~d6~)', 'sine', 'wrap'],
+      ['~cos(~d6~)', 'cosine', 'wrap'],
+      ['~tan(~d6~)', 'tangent', 'wrap'],
+      ['~max(~d20~, 10)', 'the largest argument', 'wrap'],
+      ['~min(~d20~, 10)', 'the smallest argument', 'wrap'],
+      ['~pow(~d6~, 2)', 'raise to a power', 'wrap']
     ]],
     ['Whole roll', [
-      ['6x ', 'repeat the expression 6 times', 'prefix'],
-      [' # note', 'label, ignored by the maths', 'append']
+      ['~6x ~4d6dl1', 'repeat the whole expression 6 times', 'prefix'],
+      ['2d6~, 3d8', 'separate rolls, reported together', 'append'],
+      ['2d20kh1~ # attack', 'label, ignored by the maths', 'append']
     ]],
     ['Comparisons', [
-      ['= != < > <= >=', 'usable after !, r, u, f, cs, cf', null]
+      ['d6e~=6', 'exactly', 'suffix'],
+      ['d6e~>=5', 'at least', 'suffix'],
+      ['4d6r~<=2', 'at most', 'suffix'],
+      ['4d6r~!=3', 'anything but', 'suffix']
     ]]
   ];
 
@@ -192,18 +198,38 @@
   /* ---------------------------------------------------------- hover link
      The expression, the Explain list and the rolled dice all tag their pieces
      with the same data-x, so lighting one lights the other two. */
-  function setHot(id) {
-    if (state.hot === id) return;
-    state.hot = id;
-    document.querySelectorAll('.hot').forEach((n) => n.classList.remove('hot'));
-    if (!id) return;
-    const sel = '[data-x="' + id + '"]';
-    el.hl.querySelectorAll(sel).forEach((n) => n.classList.add('hot'));
-    el.explain.querySelectorAll('.exrow' + sel).forEach((n) => n.classList.add('hot'));
-    const roll = '.r-term' + sel + ', .r-grp' + sel + ', .r-op' + sel;
-    el.result.querySelectorAll(roll).forEach((n) => n.classList.add('hot'));
-    el.preview.querySelectorAll(roll).forEach((n) => n.classList.add('hot'));
+  /* Node ids are only meaningful within one expression, so hovering is scoped.
+     Identical expressions share a scope id, which means the editor and a history
+     entry of the same roll light each other up, while unrelated rolls stay put. */
+  const scopeIds = new Map();
+  function scopeFor(expr) {
+    const key = String(expr || '').trim();
+    if (!scopeIds.has(key)) scopeIds.set(key, 's' + (scopeIds.size + 1));
+    return scopeIds.get(key);
   }
+
+  function setHot(id, scope) {
+    if (state.hot === id && state.hotScope === scope) return;
+    state.hot = id; state.hotScope = scope;
+    document.querySelectorAll('.hot').forEach((n) => n.classList.remove('hot'));
+    if (!id || !scope) return;
+    const within = '[data-scope="' + scope + '"] ';
+    const sel = '[data-x="' + id + '"]';
+    document.querySelectorAll(
+      within + '.t-brk' + sel + ', ' + within + '.t-dice' + sel + ', ' +
+      within + '.t-mod' + sel + ', ' + within + '.t-op' + sel + ', ' +
+      within + '.exrow' + sel + ', ' + within + '.r-term' + sel + ', ' +
+      within + '.r-grp' + sel + ', ' + within + '.r-op' + sel + ', ' +
+      within + '.r-brk' + sel + ', ' + within + '.sumbar' + sel
+    ).forEach((n) => n.classList.add('hot'));
+  }
+
+  const hotFrom = (node) => {
+    const t = node && node.closest('[data-x]');
+    const s = node && node.closest('[data-scope]');
+    if (t && s) setHot(t.getAttribute('data-x'), s.getAttribute('data-scope'));
+    else setHot(null, null);
+  };
 
   /** the expression is a textarea, so hit-test the highlight layer by hand */
   function spanAtPoint(x, y) {
@@ -263,8 +289,8 @@
     state.curRow = null;
     el.explain.querySelectorAll('.exrow').forEach((row) => {
       const id = row.getAttribute('data-x');
-      row.addEventListener('mouseenter', () => setHot(id));
-      row.addEventListener('mouseleave', () => setHot(null));
+      row.addEventListener('mouseenter', () => setHot(id, el.explain.getAttribute('data-scope')));
+      row.addEventListener('mouseleave', () => setHot(null, null));
       row.addEventListener('click', () => {
         const s = state.spans.find((x) => x.id === id);
         if (!s) return;
@@ -288,7 +314,8 @@
     const name = roll.label
       ? '<span class="ll">' + esc(roll.label) + '</span>'
       : '<span class="lx">' + esc(roll.notation) + '</span>';
-    return '<div class="line" data-open="' + idx + '" title="show the breakdown">' +
+    return '<div class="line" data-open="' + idx + '" data-scope="' + scopeFor(roll.input) +
+      '" title="show the breakdown">' +
       '<span class="lt">' + esc(totalText(roll)) + '</span>' + name +
       '<span class="ldice">' + roll.sets[0].html(roll.diceCount > DENSITY.plain ? { plain: true } : null) + '</span>' +
       '<span class="lm">' + esc(roll.time) + '</span>' +
@@ -331,7 +358,8 @@
     else meta.push(roll.time);
     meta.push('<button class="again" data-again="' + idx + '">roll again</button>');
 
-    return '<div class="card' + (live ? ' live' : '') + '" data-card="' + idx + '">' +
+    return '<div class="card' + (live ? ' live' : '') + '" data-card="' + idx +
+      '" data-scope="' + scopeFor(roll.input) + '">' +
       '<div class="top">' +
         '<div class="total">' + esc(totalText(roll)) + '</div>' +
         '<div class="meta">' +
@@ -467,14 +495,28 @@
       '<div class="refrow"><span>Sizes without a solid of their own borrow the nearest one.</span></div></div>';
   }
 
+  /* '4d6~kh3' -> grey '4d6', coloured 'kh3'. Odd segments are the coloured
+     part; what gets inserted depends on the form. */
+  function snippet(code) {
+    const seg = code.split('~');
+    const html = seg.map((t, i) =>
+      t ? '<i class="' + (i % 2 ? 'on' : 'off') + '">' + esc(t) + '</i>' : '').join('');
+    const active = seg.filter((t, i) => i % 2).join('');
+    const plain = seg.join('');
+    // for a wrapper the grey part is the placeholder: floor( 3d6/2 ) -> floor(_)
+    const template = seg.map((t, i) => (i % 2 ? t : (t ? '_' : ''))).join('');
+    return { html, active, plain, template };
+  }
+
   function renderReference() {
     const html = '<div class="refgrid">' + galleryHTML() + REFERENCE.map(([name, items]) =>
       '<div class="refgroup"><h3>' + esc(name) + '</h3>' + items.map(([code, desc, form]) => {
-        // entries with no placement rule are documentation only, not insertable
+        const s = snippet(code);
+        const ins = form === 'wrap' ? s.template : (form === 'atom' ? s.plain : s.active);
         const tag = form
-          ? ' data-ins="' + esc(code) + '" data-form="' + form + '"'
+          ? ' data-ins="' + esc(ins) + '" data-form="' + form + '"'
           : ' class="inert"';
-        return '<div class="refrow"><code' + tag + '>' + esc(code) + '</code>' +
+        return '<div class="refrow"><code' + tag + '>' + s.html + '</code>' +
           '<span>' + esc(desc) + '</span></div>';
       }).join('') + '</div>').join('') + '</div>';
 
@@ -588,7 +630,8 @@
           p = p.parentElement;
         }
         const r = n.getBoundingClientRect();
-        return { depth, left: r.left - base.left, width: r.width, sum: n.getAttribute('data-sum') };
+        return { depth, left: r.left - base.left, width: r.width,
+                 sum: n.getAttribute('data-sum'), x: n.getAttribute('data-x') };
       });
       const maxDepth = items.reduce((a, i) => Math.max(a, i.depth), 0);
 
@@ -598,6 +641,7 @@
       for (const it of items) {
         const bar = document.createElement('div');
         bar.className = 'sumbar';
+        if (it.x) bar.setAttribute('data-x', it.x);
         bar.style.left = it.left + 'px';
         bar.style.width = Math.max(it.width, 20) + 'px';
         bar.style.top = ((maxDepth - it.depth) * SUM_ROW) + 'px';
@@ -719,6 +763,11 @@
       el.wrap.classList.remove('ok');
     }
 
+    const sc = scopeFor(raw);
+    el.wrap.setAttribute('data-scope', sc);
+    el.preview.setAttribute('data-scope', sc);
+    el.explain.setAttribute('data-scope', sc);
+
     paint();
     renderExplain();
     syncCaret(true);
@@ -765,18 +814,13 @@
 
     el.rollBtn.addEventListener('click', () => { commitRoll(); el.ta.focus(); });
 
-    el.wrap.addEventListener('mousemove', (ev) => setHot(spanAtPoint(ev.clientX, ev.clientY)));
-    el.wrap.addEventListener('mouseleave', () => setHot(null));
-    el.result.addEventListener('mouseover', (ev) => {
-      const n = ev.target.closest('[data-x]');
-      setHot(n ? n.getAttribute('data-x') : null);
-    });
-    el.result.addEventListener('mouseleave', () => setHot(null));
-    el.preview.addEventListener('mouseover', (ev) => {
-      const n = ev.target.closest('[data-x]');
-      setHot(n ? n.getAttribute('data-x') : null);
-    });
-    el.preview.addEventListener('mouseleave', () => setHot(null));
+    el.wrap.addEventListener('mousemove', (ev) =>
+      setHot(spanAtPoint(ev.clientX, ev.clientY), el.wrap.getAttribute('data-scope')));
+    el.wrap.addEventListener('mouseleave', () => setHot(null, null));
+    el.result.addEventListener('mouseover', (ev) => hotFrom(ev.target));
+    el.result.addEventListener('mouseleave', () => setHot(null, null));
+    el.preview.addEventListener('mouseover', (ev) => hotFrom(ev.target));
+    el.preview.addEventListener('mouseleave', () => setHot(null, null));
 
     wide.addEventListener('change', () => {
       renderReference();

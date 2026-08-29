@@ -24,7 +24,8 @@ The syntax is the one popularised by the Discord dice bots — **Sidekick** and
 **Dice Maiden** — in the form later formalised by
 [rpg-dice-roller](https://dice-roller.github.io/documentation/), which is the most
 complete and least ambiguous version of that family. A few Dice Maiden shorthands
-(`e6`, `ie6`, `t8`, `f1`) are accepted as aliases on top.
+(`e6`, `f1`) are accepted as aliases on top, and the repeat modifiers were regularised
+into the `e`/`ei`, `r`/`ri` pairs described below.
 
 ## Syntax
 
@@ -40,30 +41,34 @@ complete and least ambiguous version of that family. A few Dice Maiden shorthand
 ### Modifiers
 
 Modifiers chain onto a dice term in any written order — they are always **applied** in the
-fixed order below, so `4d6kh3!` and `4d6!kh3` mean the same thing. A term may only
-explode once; `!!` is rejected rather than quietly exploding twice.
+fixed order below, so `4d6kh3e` and `4d6ekh3` mean the same thing. A term may only carry
+one explode modifier.
+
+Anything that can repeat follows one rule: **the plain letter does it once, a trailing
+`i` does it for as long as it keeps qualifying** — `e` / `ei`, `r` / `ri`. `u` is exempt:
+it narrows the set of allowed values rather than repeating a roll.
 
 | # | Notation | Meaning |
 |---|---|---|
 | 1 | `min2` | any roll below 2 counts as 2 |
 | 2 | `max5` | any roll above 5 counts as 5 |
-| 3 | `!` | exploding: re-roll and add on the highest face |
-| 3 | `!>4`, `!=6`, `!6` | explode on a specific comparison |
-| 3 | `!p` | penetrating: every extra roll takes −1 |
-| 3 | `e6` / `ie6` | Dice Maiden: explode once / repeatedly on 6+ |
-| 4 | `r`, `r<3`, `r1` | re-roll until the die no longer qualifies |
-| 4 | `ro`, `ro1` | re-roll at most once |
+| 3 | `e` | exploding: roll again and add on the highest face |
+| 3 | `e5`, `e>=5` | explode on a comparison |
+| 3 | `ei`, `epi` | the same, repeated while it keeps qualifying |
+| 3 | `ep` | penetrating: every extra roll takes −1 |
+| 4 | `r`, `r2`, `r<=2` | re-roll once |
+| 4 | `ri`, `ri2` | re-roll until it no longer qualifies |
 | 5 | `u`, `uo` | force unique results (`uo` re-rolls duplicates once) |
 | 6 | `kh3`, `kl1` | keep the highest / lowest N |
 | 7 | `dl1`, `dh1` | drop the lowest / highest N |
-| 8 | `>=8`, `t8` | stop summing; count each qualifying die as a success |
-| 8 | `f<=1`, `f1` | each qualifying die cancels one success |
+| 8 | `>=8` | stop summing; count each qualifying die as a success |
+| 8 | `f1`, `f<=1` | each qualifying die cancels one success |
 | 9 | `cs>=19` | flag critical successes (display only) |
 | 10 | `cf<=2` | flag critical failures (display only) |
 
-Comparison points are `=`, `!=`, `<`, `>`, `<=`, `>=`. A bare number after `!`, `r`, `ro`,
-`u`, `uo`, `cs` or `cf` means "equal to" (`r1` == `r=1`); after `f` it means "or less"
-(`f1` == `f<=1`), matching Dice Maiden.
+Comparison points are `=`, `!=`, `<`, `>`, `<=`, `>=`. A bare number reads in whichever
+direction the modifier naturally means: `e5` explodes on 5 **or more**, `r2` re-rolls 2
+**and below**, `cs19` flags 19+, `cf2` and `f1` flag the low end, `u3` matches exactly 3.
 
 ### Bracket groups
 
@@ -138,20 +143,20 @@ pow round sign sin sqrt tan`. `round()` rounds half away from zero.
   past 240 dice they fall back to plain text chips so typing never stalls. Those
   thresholds live in `DENSITY` at the top of `app.js`.
 * **Explain** — one row per token. Click a row to select that token in the field; moving
-  the caret highlights the matching row. Hovering the expression, a row, an operator, a
-  previewed die or a rolled one lights up every copy — they share a `data-x` tag assigned
-  at parse time.
+  the caret highlights the matching row. Hovering any piece — a die, an operator, either
+  half of a bracket pair, or a subtotal — lights up its counterparts everywhere. Node ids
+  only mean something within one expression, so hovering is scoped: identical expressions
+  share a scope and link to each other, while unrelated history entries stay put.
 * **Details** — Monte-Carlo distribution of the total (min / mean / median / max / std dev
   / percentiles) with a histogram. Sample size adapts to keep it responsive.
 * **Reference** — a gallery of every die that has a solid of its own, plus the full cheat
   sheet. From 1000px up it sits in a permanent rail on the left; below that it folds back
   into the drawer as a tab. That breakpoint is the single `wide` media query in `app.js`.
 
-  Snippets show where they attach, with `(_)` standing for the expression they act on:
-  `(_)kh3` hangs off a term, `floor(_)` wraps one. Clicking finds the innermost dice term
-  or bracket the caret is in and edits *that*, so `2d6+3d8` with the caret in the first
-  term becomes `2d6!+3d8` rather than gaining a stray fragment. Entries with no sensible
-  placement are shown greyed and are not clickable.
+  Every entry is a complete, valid expression with the part that does the work picked out
+  in colour and the scaffolding greyed — `4d6`**`kh3`**. Clicking applies only the coloured
+  part, to the innermost dice term or bracket the caret is in, so `2d6+3d8` with the caret
+  in the first term becomes `2d6ri+3d8` rather than gaining a stray fragment.
 * **Saved** — expressions kept in `localStorage`. <kbd>Ctrl</kbd>+<kbd>S</kbd> to save.
 * **Copy link** — puts the expression in the URL hash so it can be shared.
 

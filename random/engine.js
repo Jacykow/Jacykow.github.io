@@ -220,7 +220,7 @@
             core: [a, closeEnd], sp: [a, this.i], uid: ++this.uid
           };
         }
-        return { t: 'paren', v: inner, brk, sp: [a, this.i] };
+        return { t: 'paren', v: inner, brk, sp: [a, this.i], uid: ++this.uid };
       }
 
       const nA = this.mark();
@@ -275,6 +275,15 @@
 
     cpAny() { return this.comparePoint() || this.bareCp(); }
 
+    /** an explicit comparison, or a bare number read in the modifier's
+        natural direction: e6 explodes on 6+, r2 re-rolls 2 and below */
+    cpDir(dir) {
+      const cp = this.comparePoint();
+      if (cp) return cp;
+      const n = this.digits();
+      return n === null ? null : { op: dir, v: n };
+    }
+
     /* ---------------------------------------------------------- modifiers */
     modifiers() {
       const mods = [];
@@ -306,27 +315,24 @@
         return n === null ? back() : this.fin(start, { t: 'max', n });
       }
 
-      // -- exploding --------------------------------------------------------
-      if (this.lit('!p')) return this.fin(start, { t: 'explode', pen: true, cp: this.cpAny() });
-      if (this.lit('!')) return this.fin(start, { t: 'explode', pen: false, cp: this.cpAny() });
+      /* Anything that can repeat follows one rule: the plain letter does it
+         once, a trailing `i` does it for as long as it keeps qualifying.
+         `u` is exempt — it narrows the set of allowed values rather than
+         repeating a roll. */
 
-      // Dice Maiden aliases: ie6 explodes indefinitely on >=6, e6 explodes once
-      if (this.lit('ie')) {
-        const n = this.digits();
-        return n === null ? back() : this.fin(start, { t: 'explode', pen: false, alias: true, cp: { op: '>=', v: n } });
-      }
-      if (this.lit('e')) {
-        const n = this.digits();
-        return n === null ? back() : this.fin(start, { t: 'explode', pen: false, once: true, alias: true, cp: { op: '>=', v: n } });
-      }
+      // -- exploding: e, ei, and the penetrating pair ep, epi ---------------
+      if (this.lit('epi')) return this.fin(start, { t: 'explode', pen: true, inf: true, cp: this.cpDir('>=') });
+      if (this.lit('ep')) return this.fin(start, { t: 'explode', pen: true, inf: false, cp: this.cpDir('>=') });
+      if (this.lit('ei')) return this.fin(start, { t: 'explode', pen: false, inf: true, cp: this.cpDir('>=') });
+      if (this.lit('e')) return this.fin(start, { t: 'explode', pen: false, inf: false, cp: this.cpDir('>=') });
 
       // -- reroll -----------------------------------------------------------
-      if (this.lit('ro')) return this.fin(start, { t: 'reroll', once: true, cp: this.cpAny() });
-      if (this.lit('r')) return this.fin(start, { t: 'reroll', once: false, cp: this.cpAny() });
+      if (this.lit('ri')) return this.fin(start, { t: 'reroll', inf: true, cp: this.cpDir('<=') });
+      if (this.lit('r')) return this.fin(start, { t: 'reroll', inf: false, cp: this.cpDir('<=') });
 
       // -- unique -----------------------------------------------------------
-      if (this.lit('uo')) return this.fin(start, { t: 'unique', once: true, cp: this.cpAny() });
-      if (this.lit('u')) return this.fin(start, { t: 'unique', once: false, cp: this.cpAny() });
+      if (this.lit('uo')) return this.fin(start, { t: 'unique', once: true, cp: this.cpDir('=') });
+      if (this.lit('u')) return this.fin(start, { t: 'unique', once: false, cp: this.cpDir('=') });
 
       // -- keep / drop ------------------------------------------------------
       if (this.lit('kh')) return this.fin(start, { t: 'keep', end: 'h', n: this.digits() ?? 1 });
@@ -339,23 +345,13 @@
       }
 
       // -- criticals --------------------------------------------------------
-      if (this.lit('cs')) return this.fin(start, { t: 'critSuccess', cp: this.cpAny() });
-      if (this.lit('cf')) return this.fin(start, { t: 'critFail', cp: this.cpAny() });
+      if (this.lit('cs')) return this.fin(start, { t: 'critSuccess', cp: this.cpDir('>=') });
+      if (this.lit('cf')) return this.fin(start, { t: 'critFail', cp: this.cpDir('<=') });
 
-      // -- successes / failures ---------------------------------------------
+      // -- failures ---------------------------------------------------------
       if (this.lit('f')) {
-        let cp = this.comparePoint();
-        if (!cp) {                                  // Dice Maiden alias: f1 == f<=1
-          const n = this.digits();
-          if (n === null) return back();
-          cp = { op: '<=', v: n };
-          return this.fin(start, { t: 'failure', alias: true, cp });
-        }
-        return this.fin(start, { t: 'failure', cp });
-      }
-      if (this.lit('t')) {                       // Dice Maiden alias: t8
-        const n = this.digits();
-        return n === null ? back() : this.fin(start, { t: 'target', alias: true, cp: { op: '>=', v: n } });
+        const cp = this.cpDir('<=');
+        return cp ? this.fin(start, { t: 'failure', cp }) : back();
       }
 
       // -- bare comparison = target success ---------------------------------
@@ -483,11 +479,13 @@
     html: (o) => '<span class="r-op">-</span>' + v.html(o)
   });
 
-  const ParenResult = (v) => ({
+  const ParenResult = (v, uid) => ({
     k: 'paren', inner: v, children: [v], total: () => v.total(),
     html(o) {
-      return '<span class="r-grp" data-sum="' + esc(fmt(this.total())) + '">' +
-        '<span class="r-brk">(</span>' + v.html(o) + '<span class="r-brk">)</span></span>';
+      const tag = uid ? ' data-x="p' + uid + '"' : '';
+      return '<span class="r-grp"' + tag + ' data-sum="' + esc(fmt(this.total())) + '">' +
+        '<span class="r-brk"' + tag + '>(</span>' + v.html(o) +
+        '<span class="r-brk"' + tag + '>)</span></span>';
     }
   });
 
@@ -544,7 +542,7 @@
               last = raw;
               const val = m.pen ? raw - 1 : raw;
               out.push({ v: val, tags: ['exploded'], from: null });
-              if (m.once) break;
+              if (!m.inf) break;
             }
             if (n > 0) tag(r, 'exploded');
           }
@@ -561,7 +559,7 @@
               r.v = makeDie(sides);
               tag(r, 'rerolled');
               n++;
-              if (m.once) break;
+              if (!m.inf) break;
             }
           }
           break;
@@ -701,7 +699,8 @@
       html(o) {
         const tag = this.uid ? ' data-x="g' + this.uid + '"' : '';
         return '<span class="r-grp"' + tag + ' data-sum="' + esc(fmt(this.total())) + '">' +
-          '<span class="r-brk">(</span>' + sub.html(o) + '<span class="r-brk">)</span></span>';
+          '<span class="r-brk"' + tag + '>(</span>' + sub.html(o) +
+          '<span class="r-brk"' + tag + '>)</span></span>';
       }
     };
   }
@@ -717,7 +716,7 @@
     switch (node.t) {
       case 'num': return NumResult(node.v);
       case 'neg': return NegResult(evalNode(node.v, ctx));
-      case 'paren': return ParenResult(evalNode(node.v, ctx));
+      case 'paren': return ParenResult(evalNode(node.v, ctx), node.uid);
       case 'bin': return BinResult(node.op, evalNode(node.l, ctx), evalNode(node.r, ctx), node.uid);
       case 'func': return FuncResult(node.name, node.args.map((a) => evalNode(a, ctx)));
       case 'dice': return rollDice(node, ctx);
@@ -739,15 +738,13 @@
     switch (m.t) {
       case 'min': return 'min' + m.n;
       case 'max': return 'max' + m.n;
-      case 'explode':
-        if (m.alias) return (m.once ? 'e' : 'ie') + m.cp.v;
-        return '!' + (m.pen ? 'p' : '') + cpText(m.cp);
-      case 'reroll': return (m.once ? 'ro' : 'r') + cpText(m.cp);
+      case 'explode': return 'e' + (m.pen ? 'p' : '') + (m.inf ? 'i' : '') + cpText(m.cp);
+      case 'reroll': return 'r' + (m.inf ? 'i' : '') + cpText(m.cp);
       case 'unique': return (m.once ? 'uo' : 'u') + cpText(m.cp);
       case 'keep': return 'k' + m.end + m.n;
       case 'drop': return 'd' + m.end + m.n;
-      case 'target': return m.alias ? 't' + m.cp.v : cpText(m.cp);
-      case 'failure': return m.alias ? 'f' + m.cp.v : 'f' + cpText(m.cp);
+      case 'target': return cpText(m.cp);
+      case 'failure': return 'f' + cpText(m.cp);
       case 'critSuccess': return 'cs' + cpText(m.cp);
       case 'critFail': return 'cf' + cpText(m.cp);
     }
@@ -795,13 +792,13 @@
         const on = m.cp ? cpPhrase(m.cp) : 'its highest face';
         let how = 'roll an extra ' + d + ' and add it alongside';
         if (m.pen) how += ', subtracting 1 from every extra roll';
-        const times = m.once ? ' Only one extra roll per die.' : ' Repeats as long as it keeps happening.';
+        const times = m.inf ? ' Repeats as long as it keeps happening.' : ' One extra roll per die.';
         return [m.pen ? 'Penetrating explode' : 'Exploding',
                 'When a ' + d + ' rolls ' + on + ', ' + how + '.' + times];
       }
       case 'reroll': return ['Re-roll',
         'Any ' + d + ' showing ' + cpPhrase(m.cp, 'its lowest face') + ' is re-rolled' +
-        (m.once ? ' once (the new value stands).' : ' until it no longer qualifies.')];
+        (m.inf ? ' until it no longer qualifies.' : ' once — the new value stands.')];
       case 'unique': return ['Unique',
         'Duplicate results are re-rolled' + (m.once ? ' once' : '') + ' so every ' + d + ' shows a different value' +
         (m.cp ? ', but only for dice showing ' + cpPhrase(m.cp) + '.' : '.')];
@@ -871,11 +868,14 @@
           walk(node.v, depth + 1);
           break;
 
-        case 'paren':
-          push(node.brk[0], 't-brk', { title: 'Group', desc: 'Everything inside the parentheses is worked out first.', depth });
+        case 'paren': {
+          const pid = node.uid ? 'p' + node.uid : null;
+          push(node.brk[0], 't-brk', { title: 'Group', desc: 'Everything inside the parentheses is worked out first.', depth }, pid);
           walk(node.v, depth + 1);
-          push(node.brk[1], 't-brk');
+          push(node.brk[1], 't-brk', null, pid);
+          if (pid) spans[spans.length - 1].id = pid;
           break;
+        }
 
         case 'bin': {
           walk(node.l, depth);
@@ -915,6 +915,7 @@
           }, 'g' + node.uid);
           walk(node.sub, depth + 1);
           push(node.brk[1], 't-brk');
+          if (node.uid) spans[spans.length - 1].id = 'g' + node.uid;
           for (const m of node.mods) {
             const [title, desc] = modExplain(m, 'die');
             push(m.sp, 't-mod', { title, desc, depth: depth + 1 });
@@ -1117,9 +1118,11 @@
     switch (node.t) {
       case 'num': return '<span class="r-num">' + fmt(node.v) + '</span>';
       case 'neg': return '<span class="r-op">-</span>' + previewNode(node.v);
-      case 'paren':
-        return '<span class="r-grp"><span class="r-brk">(</span>' + previewNode(node.v) +
-          '<span class="r-brk">)</span></span>';
+      case 'paren': {
+        const tag = node.uid ? ' data-x="p' + node.uid + '"' : '';
+        return '<span class="r-grp"' + tag + '><span class="r-brk"' + tag + '>(</span>' +
+          previewNode(node.v) + '<span class="r-brk"' + tag + '>)</span></span>';
+      }
       case 'group':
         return '<span class="r-grp"' + (node.uid ? ' data-x="g' + node.uid + '"' : '') + '>' +
           '<span class="r-brk">(</span>' + previewNode(node.sub) + '<span class="r-brk">)</span></span>';

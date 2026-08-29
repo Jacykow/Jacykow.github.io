@@ -295,6 +295,9 @@ kbd{
 .r-term.hot, .r-grp.hot{background:rgba(240,180,41,.13); box-shadow:0 0 0 1px rgba(240,180,41,.4)}
 .r-op.hot{background:rgba(240,180,41,.2); border-radius:3px; color:var(--accent)}
 .exrow.hot{background:rgba(240,180,41,.13)}
+.r-brk.hot{background:rgba(240,180,41,.2); border-radius:3px; color:var(--accent)}
+.sumbar.hot{border-top-color:var(--accent)}
+.sumbar.hot .sumval{color:var(--accent); font-weight:700}
 .hl .hot{background:rgba(240,180,41,.22); border-radius:3px; box-shadow:0 0 0 1px rgba(240,180,41,.35)}
 .r-fn{color:var(--purple)}
 .r-notn{color:var(--dimmer); margin-right:4px}
@@ -368,13 +371,17 @@ kbd{
   margin:0 0 5px; font-weight:600;
 }
 .refrow{display:grid; grid-template-columns:minmax(78px,auto) minmax(0,1fr); gap:9px; padding:2px 0; align-items:baseline}
+.refrow code i{font-style:normal}
+.refrow code .off{color:var(--dimmer)}
+.refrow code .on{color:var(--accent)}
+.refrow code:hover .on{color:#ffd469}
 .refrow code{
   font-family:var(--mono); font-size:12px; color:var(--accent); background:#0a0c11;
   border:1px solid var(--border); border-radius:4px; padding:1px 6px; cursor:pointer; white-space:nowrap;
 }
-.refrow code:hover{color:#ffd469; border-color:var(--accent)}
-.refrow code.inert{color:var(--dim); cursor:default}
-.refrow code.inert:hover{color:var(--dim); border-color:var(--border)}
+.refrow code:hover{border-color:var(--accent)}
+.refrow code.inert{cursor:default}
+.refrow code.inert:hover{border-color:var(--border)}
 .refrow span{font-size:12px; color:var(--dim)}
 
 /* the dice gallery at the top of the reference */
