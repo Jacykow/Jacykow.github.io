@@ -75,7 +75,8 @@
     ]],
     ['Unique', [
       ['4d10~u', 'force every die to a different value', 'suffix'],
-      ['4d10~uo', 're-roll a duplicate once, then accept it', 'suffix']
+      ['4d10~u1', 're-roll a duplicate once, then accept it', 'suffix'],
+      ['4d10~u3', 'give up after three attempts', 'suffix']
     ]],
     ['Keep & drop', [
       ['4d6~kh3', 'keep the highest 3', 'suffix'],
@@ -119,14 +120,14 @@
       ['~sin(~d6~)', 'sine', 'wrap'],
       ['~cos(~d6~)', 'cosine', 'wrap'],
       ['~tan(~d6~)', 'tangent', 'wrap'],
-      ['~max(~d20~, 10)', 'the largest argument', 'wrap'],
-      ['~min(~d20~, 10)', 'the smallest argument', 'wrap'],
-      ['~pow(~d6~, 2)', 'raise to a power', 'wrap']
+      ['~max(~d20~,10)', 'the largest argument', 'wrap'],
+      ['~min(~d20~,10)', 'the smallest argument', 'wrap'],
+      ['~pow(~d6~,2)', 'raise to a power', 'wrap']
     ]],
     ['Whole roll', [
-      ['~6x ~4d6dl1', 'repeat the whole expression 6 times', 'prefix'],
-      ['2d6~, 3d8', 'separate rolls, reported together', 'append'],
-      ['2d20kh1~ # attack', 'label, ignored by the maths', 'append']
+      ['~6x~4d6dl1', 'repeat the whole expression 6 times', 'prefix'],
+      ['2d6~,3d8', 'separate rolls, reported together', 'append'],
+      ['2d20kh1~#attack', 'label, ignored by the maths', 'append']
     ]],
     ['Comparisons', [
       ['d6e~=6', 'exactly', 'suffix'],
@@ -512,10 +513,7 @@
     const html = '<div class="refgrid">' + galleryHTML() + REFERENCE.map(([name, items]) =>
       '<div class="refgroup"><h3>' + esc(name) + '</h3>' + items.map(([code, desc, form]) => {
         const s = snippet(code);
-        const ins = form === 'wrap' ? s.template : (form === 'atom' ? s.plain : s.active);
-        const tag = form
-          ? ' data-ins="' + esc(ins) + '" data-form="' + form + '"'
-          : ' class="inert"';
+        const tag = form ? ' data-ins="' + esc(code) + '" data-form="' + form + '"' : ' class="inert"';
         return '<div class="refrow"><code' + tag + '>' + s.html + '</code>' +
           '<span>' + esc(desc) + '</span></div>';
       }).join('') + '</div>').join('') + '</div>';
@@ -536,7 +534,10 @@
     host.querySelectorAll('[data-ins]').forEach((c) => {
       const form = c.getAttribute('data-form') || 'atom';
       c.title = HINT[form] || HINT.atom;
-      c.addEventListener('click', () => applySnippet(c.getAttribute('data-ins'), form));
+      const parts = snippet(c.getAttribute('data-ins'));
+      c.addEventListener('click', () => applySnippet({
+        form, plain: parts.plain, active: parts.active, template: parts.template
+      }));
     });
   }
 
@@ -576,42 +577,55 @@
     return { a: node.sp[0] + off, b: node.sp[1] + off, whole: false };
   }
 
-  function applySnippet(code, form) {
-    const t = el.ta;
-    if (!form || form === 'atom') return insertAtCaret(code.replace(/\(_\)/g, ''));
+  /* Clicking the reference must never leave the field unparseable. Each form
+     builds candidates in order of preference, every candidate is parsed, and
+     the first one that survives wins. An empty field falls back to the whole
+     example, since there is nothing there to attach to. */
+  const parses = (v) => {
+    if (!v.trim()) return false;
+    try { E.parse(v); return true; } catch (e) { return false; }
+  };
 
-    if (form === 'prefix') {
-      t.value = code + t.value;
-      t.focus(); t.setSelectionRange(code.length, code.length);
+  function applySnippet(item) {
+    const t = el.ta, cur = t.value;
+    const tries = [];
+
+    if (!cur.trim()) {
+      tries.push([item.plain, item.plain.length]);          // nothing to build on
+    } else if (item.form === 'atom') {
+      const a = t.selectionStart, b = t.selectionEnd;
+      tries.push([cur.slice(0, a) + item.plain + cur.slice(b), a + item.plain.length]);
+    } else if (item.form === 'prefix') {
+      tries.push([item.active + cur, item.active.length]);
+    } else if (item.form === 'append') {
+      tries.push([cur + item.active, cur.length + item.active.length]);
+    } else {
+      const sp = targetSpan();
+      if (sp) {
+        const inner = cur.slice(sp.a, sp.b);
+        if (item.form === 'suffix') {
+          // a modifier binds to a die or a bracket, so bracket anything else
+          tries.push([cur.slice(0, sp.a) + inner + item.active + cur.slice(sp.b),
+                      sp.a + inner.length + item.active.length]);
+          tries.push([cur.slice(0, sp.a) + '(' + inner + ')' + item.active + cur.slice(sp.b),
+                      sp.a + inner.length + item.active.length + 2]);
+        } else {
+          const wrapped = item.template.replace('_', inner);
+          tries.push([cur.slice(0, sp.a) + wrapped + cur.slice(sp.b), sp.a + wrapped.length]);
+        }
+      }
+    }
+    // last resort: the example on its own, as a separate roll after a comma
+    if (cur.trim()) tries.push([cur + ', ' + item.plain, cur.length + 2 + item.plain.length]);
+
+    for (const [candidate, caret] of tries) {
+      if (!parses(candidate)) continue;
+      t.value = candidate;
+      t.focus();
+      t.setSelectionRange(caret, caret);
       return onInput();
     }
-    if (form === 'append') {
-      const at = t.value.length;
-      t.value = t.value + code;
-      t.focus(); t.setSelectionRange(at + code.length, at + code.length);
-      return onInput();
-    }
-
-    const sp = targetSpan();
-    if (!sp) return insertAtCaret(code.replace(/\(_\)/g, ''));
-    const inner = t.value.slice(sp.a, sp.b);
-
-    let replacement, caret;
-    if (form === 'suffix') {
-      // modifiers only bind to a die or a bracket, so bracket anything else
-      const tail = code.replace(/^\(_\)/, '');
-      const base = sp.whole ? '(' + inner + ')' : inner;
-      replacement = base + tail;
-      caret = sp.a + replacement.length;
-    } else {                                   // wrap
-      replacement = code.replace('_', inner);
-      caret = sp.a + replacement.length;
-    }
-
-    t.value = t.value.slice(0, sp.a) + replacement + t.value.slice(sp.b);
-    t.focus();
-    t.setSelectionRange(caret, caret);
-    onInput();
+    toast('that snippet does not fit here');
   }
 
   /* ------------------------------------------------------------ sum tree
@@ -845,7 +859,7 @@
       const card = ev.target.closest('[data-card]');
       if (card && !ev.target.closest('button, a, input')) {
         const i = +card.getAttribute('data-card');
-        if (i > 0 && state.log[i]) { state.log[i].expanded = false; renderResult(); }
+        if (state.log[i]) { state.log[i].expanded = false; renderResult(); }
       }
     });
     $('btnClear').addEventListener('click', () => {

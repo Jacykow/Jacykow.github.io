@@ -168,7 +168,7 @@ kbd{
   padding:1px 8px; border-radius:999px; font-family:var(--sans);
 }
 .card .sub .again:hover{color:var(--accent); border-color:var(--accent)}
-.card[data-card]:not([data-card="0"]){cursor:zoom-out}
+.card[data-card]{cursor:zoom-out}
 
 /* collapsed history entry: one line, newest entry excepted */
 .line{

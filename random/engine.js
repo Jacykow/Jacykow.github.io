@@ -331,8 +331,13 @@
       if (this.lit('r')) return this.fin(start, { t: 'reroll', inf: false, cp: this.cpDir('<=') });
 
       // -- unique -----------------------------------------------------------
-      if (this.lit('uo')) return this.fin(start, { t: 'unique', once: true, cp: this.cpDir('=') });
-      if (this.lit('u')) return this.fin(start, { t: 'unique', once: false, cp: this.cpDir('=') });
+      // u on its own keeps re-rolling until every die differs; uN caps the
+      // attempts at N. An explicit comparison still limits which dice take part.
+      if (this.lit('u')) {
+        const cp = this.comparePoint();
+        const tries = cp ? 0 : (this.digits() || 0);
+        return this.fin(start, { t: 'unique', tries, cp });
+      }
 
       // -- keep / drop ------------------------------------------------------
       if (this.lit('kh')) return this.fin(start, { t: 'keep', end: 'h', n: this.digits() ?? 1 });
@@ -569,12 +574,12 @@
           const seen = new Set();
           for (const r of rolls) {
             let n = 0;
-            while (seen.has(r.v) && (!m.cp || cpTest(m.cp, r.v)) && n < LIMIT.reroll) {
+            const cap = m.tries || LIMIT.reroll;
+            while (seen.has(r.v) && (!m.cp || cpTest(m.cp, r.v)) && n < cap) {
               if (r.from === null) r.from = r.v;
               r.v = makeDie(sides);
               tag(r, 'rerolled');
               n++;
-              if (m.once) break;
             }
             seen.add(r.v);
           }
@@ -740,7 +745,7 @@
       case 'max': return 'max' + m.n;
       case 'explode': return 'e' + (m.pen ? 'p' : '') + (m.inf ? 'i' : '') + cpText(m.cp);
       case 'reroll': return 'r' + (m.inf ? 'i' : '') + cpText(m.cp);
-      case 'unique': return (m.once ? 'uo' : 'u') + cpText(m.cp);
+      case 'unique': return 'u' + (m.tries || '') + cpText(m.cp);
       case 'keep': return 'k' + m.end + m.n;
       case 'drop': return 'd' + m.end + m.n;
       case 'target': return cpText(m.cp);
@@ -800,7 +805,8 @@
         'Any ' + d + ' showing ' + cpPhrase(m.cp, 'its lowest face') + ' is re-rolled' +
         (m.inf ? ' until it no longer qualifies.' : ' once — the new value stands.')];
       case 'unique': return ['Unique',
-        'Duplicate results are re-rolled' + (m.once ? ' once' : '') + ' so every ' + d + ' shows a different value' +
+        'Duplicate results are re-rolled' + (m.tries ? ' up to ' + m.tries + ' times' : '') +
+        ' so every ' + d + ' shows a different value' +
         (m.cp ? ', but only for dice showing ' + cpPhrase(m.cp) + '.' : '.')];
       case 'keep': return ['Keep ' + (m.end === 'h' ? 'highest' : 'lowest'),
         'Keep only the ' + ord(m.n) + (m.end === 'h' ? 'highest' : 'lowest') + (m.n === 1 ? ' result' : ' results') + '; the rest are struck out.'];

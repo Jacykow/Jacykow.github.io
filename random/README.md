@@ -58,7 +58,7 @@ it narrows the set of allowed values rather than repeating a roll.
 | 3 | `ep` | penetrating: every extra roll takes −1 |
 | 4 | `r`, `r2`, `r<=2` | re-roll once |
 | 4 | `ri`, `ri2` | re-roll until it no longer qualifies |
-| 5 | `u`, `uo` | force unique results (`uo` re-rolls duplicates once) |
+| 5 | `u`, `u3` | force unique results (`u3` gives up after 3 attempts) |
 | 6 | `kh3`, `kl1` | keep the highest / lowest N |
 | 7 | `dl1`, `dh1` | drop the lowest / highest N |
 | 8 | `>=8` | stop summing; count each qualifying die as a success |
@@ -157,6 +157,11 @@ pow round sign sin sqrt tan`. `round()` rounds half away from zero.
   in colour and the scaffolding greyed — `4d6`**`kh3`**. Clicking applies only the coloured
   part, to the innermost dice term or bracket the caret is in, so `2d6+3d8` with the caret
   in the first term becomes `2d6ri+3d8` rather than gaining a stray fragment.
+
+  A click can never leave the field unparseable. Each form builds candidates in order of
+  preference — attach directly, bracket the target first, append as a separate roll — and
+  the first one that parses wins. An empty field gets the whole example, since there is
+  nothing to attach to. If nothing fits, the click is refused.
 * **Saved** — expressions kept in `localStorage`. <kbd>Ctrl</kbd>+<kbd>S</kbd> to save.
 * **Copy link** — puts the expression in the URL hash so it can be shared.
 
