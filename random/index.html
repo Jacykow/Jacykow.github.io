@@ -19,43 +19,44 @@
     <!-- coin -->
     <symbol id="sh-d2">
       <circle cx="32" cy="32" r="27"/>
-      <circle cx="32" cy="32" r="20.5" class="e" fill="none" stroke-width="1.6" stroke-opacity=".5"/>
+      <circle cx="32" cy="32" r="20.5" fill="none" stroke-width="2" stroke-opacity=".65"/>
     </symbol>
-    <!-- tetrahedron: edges kept clear of the digit, which sits low in the face -->
+    <!-- tetrahedron: the two visible edges converge below the digit -->
     <symbol id="sh-d4">
       <path d="M32 4 L58 52 L6 52 Z"/>
-      <path d="M32 52 L20.5 30.5 M32 52 L43.5 30.5" fill="none" stroke-width="1.6" stroke-opacity=".45"/>
+      <path d="M32 52 L20.5 30.5 M32 52 L43.5 30.5" fill="none" stroke-width="2" stroke-opacity=".7"/>
     </symbol>
     <!-- cube (also used for Fudge dice) -->
     <symbol id="sh-d6">
       <rect x="7" y="7" width="50" height="50" rx="10"/>
     </symbol>
-    <!-- octahedron -->
+    <!-- octahedron, seen edge-on: a diamond. Seams sit in the top half only,
+         so the digit gets the clear lower face. -->
     <symbol id="sh-d8">
-      <path d="M32 3 L58 19 L58 45 L32 61 L6 45 L6 19 Z"/>
-      <path d="M32 12 L51 45 L13 45 Z" fill="none" stroke-width="1.6" stroke-opacity=".45"/>
+      <path d="M32 2 L59 32 L32 62 L5 32 Z"/>
+      <path d="M5 32 L59 32 M32 2 L32 32" fill="none" stroke-width="2" stroke-opacity=".7"/>
     </symbol>
     <!-- pentagonal trapezohedron: kite-shaped front face -->
     <symbol id="sh-d10">
       <path d="M32 2 L59 23 L52 51 L32 62 L12 51 L5 23 Z"/>
-      <path d="M32 9 L49 27 L32 52 L15 27 Z" fill="none" stroke-width="1.6" stroke-opacity=".45"/>
+      <path d="M32 9 L49 27 L32 52 L15 27 Z" fill="none" stroke-width="2" stroke-opacity=".7"/>
     </symbol>
     <!-- dodecahedron: pentagonal front face -->
     <symbol id="sh-d12">
       <path d="M32 3 L48 8 L58 21 L58 38 L48 52 L32 58 L16 52 L6 38 L6 21 L16 8 Z"/>
-      <path d="M32 12 L51 26 L43.5 49 L20.5 49 L13 26 Z" fill="none" stroke-width="1.6" stroke-opacity=".45"/>
+      <path d="M32 12 L51 26 L43.5 49 L20.5 49 L13 26 Z" fill="none" stroke-width="2" stroke-opacity=".7"/>
     </symbol>
-    <!-- icosahedron -->
+    <!-- icosahedron: hexagonal outline, triangular front face -->
     <symbol id="sh-d20">
       <path d="M32 3 L57 17.5 L57 46.5 L32 61 L7 46.5 L7 17.5 Z"/>
-      <path d="M50 19 L14 19 L32 51 Z M50 19 L57 17.5 M14 19 L7 17.5 M32 51 L32 61"
-            fill="none" stroke-width="1.6" stroke-opacity=".45"/>
+      <path d="M50 19 L14 19 L32 51 Z" fill="none" stroke-width="2" stroke-opacity=".7"/>
+      <path d="M50 19 L57 17.5 M14 19 L7 17.5 M32 51 L32 61" fill="none" stroke-width="2" stroke-opacity=".45"/>
     </symbol>
-    <!-- zocchihedron: facets hugging the rim so the three digits stay clear -->
+    <!-- zocchihedron: facets hug the rim so the three digits stay clear -->
     <symbol id="sh-d100">
       <circle cx="32" cy="32" r="27"/>
       <path d="M11 21 L20 26 L15 37 M53 21 L44 26 L49 37 M20 52 L26 45 M44 52 L38 45"
-            fill="none" stroke-width="1.6" stroke-opacity=".45"/>
+            fill="none" stroke-width="2" stroke-opacity=".6"/>
     </symbol>
     <!-- no standard solid for this size -->
     <symbol id="sh-gen">

@@ -139,6 +139,23 @@ kbd{
 .card .lbl{color:var(--purple); font-size:12.5px}
 .card .sub{font-size:11.5px; color:var(--dimmer); margin-top:2px; display:flex; gap:10px; flex-wrap:wrap}
 .card .sub .pulse{color:var(--accent)}
+.card .sub .fold{
+  background:none; border:none; color:var(--dimmer); font-size:11.5px; padding:0;
+  text-decoration:underline dotted; font-family:var(--sans);
+}
+.card .sub .fold:hover{color:var(--text)}
+
+/* collapsed history entry: one line, newest entry excepted */
+.line{
+  display:flex; align-items:baseline; gap:10px; padding:6px 11px; margin-bottom:3px;
+  border:1px solid transparent; border-radius:6px; cursor:pointer;
+  font-family:var(--mono); font-size:12.5px; white-space:nowrap; overflow:hidden;
+}
+.line:hover{background:var(--pane); border-color:var(--border)}
+.line .lt{color:var(--accent); font-weight:700; flex:none; min-width:46px; text-align:right}
+.line .lx{color:var(--dim); flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis}
+.line .ll{color:var(--purple); flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis}
+.line .lm{color:var(--dimmer); font-size:11px; flex:none; margin-left:auto; padding-left:8px}
 .card .rows{
   margin-top:9px; padding-top:9px; border-top:1px dashed var(--border);
   font-family:var(--mono); font-size:13px; color:var(--dim); word-break:break-word;
@@ -187,7 +204,8 @@ kbd{
 .s-d4 .dieval{transform:translateY(13%); font-size:calc(var(--dsz) * .32)}
 .s-d4 .dieval.v2{font-size:calc(var(--dsz) * .26)}
 .s-d100 .dieval.v3{font-size:calc(var(--dsz) * .30)}
-.s-d8 .dieval{transform:translateY(5%); font-size:calc(var(--dsz) * .36)}
+.s-d8 .dieval{transform:translateY(17%); font-size:calc(var(--dsz) * .34)}
+.s-d8 .dieval.v2{font-size:calc(var(--dsz) * .28)}
 .s-d20 .dieval{transform:translateY(-4%); font-size:calc(var(--dsz) * .36)}
 .s-d10 .dieval{transform:translateY(-2%)}
 .s-d12 .dieval{transform:translateY(2%)}

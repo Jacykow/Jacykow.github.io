@@ -21,6 +21,7 @@
 
   /* dice-count thresholds where the result display steps down a size */
   const DENSITY = { dense: 18, denser: 60, plain: 240 };
+  const LOG_MAX = 60;
 
   const DEFAULT_EXPR = '4d6dl1 # ability score';
   const LS_SAVED = 're.saved.v1';
@@ -31,10 +32,11 @@
     inspect: null,     // last successful DiceEngine.inspect()
     spans: [],         // spans actually painted (overlaps removed)
     error: null,
-    log: [],           // [{html, ...}] newest first
+    log: [],           // [{roll, expanded}] newest first
     topIsLive: true,
     activeTab: 'explain',
-    statsToken: 0
+    statsToken: 0,
+    curRow: null       // Explain row the caret last sat on
   };
 
   /* ======================================================== reference data */
@@ -163,21 +165,30 @@
     if (n) n.classList.add('lit');
   }
 
-  function syncCaret() {
+  /**
+   * Mark the token under the caret, in the editor and in the Explain list.
+   * `chase` scrolls the list to that row — only ever from a real caret move, and
+   * only when the token actually changed. Doing it on every call fought the user
+   * for control of the scrollbar.
+   */
+  function syncCaret(chase) {
     const s = spanAtCaret();
     const id = s ? s.id : null;
     highlightSpan(id);
     el.explain.querySelectorAll('.exrow.cur').forEach((n) => n.classList.remove('cur'));
-    if (id) {
-      const row = el.explain.querySelector('.exrow[data-x="' + id + '"]');
-      if (row) {
-        row.classList.add('cur');
-        const pt = el.explain, top = row.offsetTop, bot = top + row.offsetHeight;
-        if (top < pt.scrollTop || bot > pt.scrollTop + pt.clientHeight) {
-          pt.scrollTop = top - pt.clientHeight / 2 + row.offsetHeight / 2;
-        }
+    if (!id) { state.curRow = null; return; }
+
+    const row = el.explain.querySelector('.exrow[data-x="' + id + '"]');
+    if (!row) { state.curRow = null; return; }
+    row.classList.add('cur');
+
+    if (chase && id !== state.curRow) {
+      const pt = el.explain, top = row.offsetTop, bot = top + row.offsetHeight;
+      if (top < pt.scrollTop || bot > pt.scrollTop + pt.clientHeight) {
+        pt.scrollTop = top - pt.clientHeight / 2 + row.offsetHeight / 2;
       }
     }
+    state.curRow = id;
   }
 
   /* ============================================================== explain */
@@ -197,26 +208,41 @@
       '</div>'
     ).join('');
 
+    state.curRow = null;
     el.explain.querySelectorAll('.exrow').forEach((row) => {
       const id = row.getAttribute('data-x');
       row.addEventListener('mouseenter', () => highlightSpan(id));
-      row.addEventListener('mouseleave', () => syncCaret());
+      // restore the caret's highlight without touching the scroll position
+      row.addEventListener('mouseleave', () => syncCaret(false));
       row.addEventListener('click', () => {
         const s = state.spans.find((x) => x.id === id);
         if (!s) return;
         el.ta.focus();
         el.ta.setSelectionRange(s.a, s.b);
-        syncCaret();
+        syncCaret(true);
       });
     });
   }
 
   /* =============================================================== result */
-  function cardHTML(roll, live) {
-    const many = roll.sets.length > 1;
-    const totalText = roll.successMode
+  function totalText(roll) {
+    return roll.successMode
       ? E.fmt(roll.total) + (Math.abs(roll.total) === 1 ? ' hit' : ' hits')
       : E.fmt(roll.total);
+  }
+
+  /** history entries below the newest collapse to a single line */
+  function lineHTML(roll, idx) {
+    return '<div class="line" data-open="' + idx + '" title="show the dice">' +
+      '<span class="lt">' + esc(totalText(roll)) + '</span>' +
+      '<span class="lx">' + esc(roll.notation) + '</span>' +
+      (roll.label ? '<span class="ll">#&nbsp;' + esc(roll.label) + '</span>' : '') +
+      '<span class="lm">' + esc(roll.time) + '</span>' +
+    '</div>';
+  }
+
+  function cardHTML(roll, live, idx) {
+    const many = roll.sets.length > 1;
 
     // Dice are drawn as shapes; they shrink as the count climbs and fall back to
     // plain chips past the point where thousands of SVG nodes would stall typing.
@@ -249,10 +275,11 @@
     if (many) meta.push(roll.sets.length + ' sets, summed');
     if (live) meta.push('<span class="pulse">live &mdash; Enter to keep</span>');
     else meta.push(roll.time);
+    if (idx > 0) meta.push('<button class="fold" data-fold="' + idx + '">collapse</button>');
 
     return '<div class="card' + (live ? ' live' : '') + '">' +
       '<div class="top">' +
-        '<div class="total">' + totalText + '</div>' +
+        '<div class="total">' + esc(totalText(roll)) + '</div>' +
         '<div class="meta">' +
           '<div class="expr">' + esc(roll.notation) + '</div>' +
           (roll.label ? '<div class="lbl"># ' + esc(roll.label) + '</div>' : '') +
@@ -268,36 +295,42 @@
       el.result.innerHTML = '<div class="muted">nothing rolled yet</div>';
       return;
     }
-    el.result.innerHTML = state.log.map((c) => c.html).join('');
+    // Only the newest entry keeps the full breakdown; the rest are one-liners
+    // until the user opens them.
+    el.result.innerHTML = state.log.map((e, i) =>
+      (i === 0 || e.expanded)
+        ? cardHTML(e.roll, i === 0 && state.topIsLive, i)
+        : lineHTML(e.roll, i)
+    ).join('');
   }
 
-  function makeRoll(live) {
+  function makeRoll() {
     let roll;
     try { roll = E.roll(el.ta.value); }
     catch (e) { return null; }
     roll.time = new Date().toLocaleTimeString();
-    return { html: cardHTML(roll, live), total: roll.total };
+    return { roll, expanded: false };
   }
 
   /** re-roll the live (top) card in place */
   function refreshLive() {
-    const c = makeRoll(true);
-    if (!c) return;
-    if (state.topIsLive && state.log.length) state.log[0] = c;
-    else { state.log.unshift(c); state.topIsLive = true; }
-    if (state.log.length > 80) state.log.length = 80;
+    const e = makeRoll();
+    if (!e) return;
+    if (state.topIsLive && state.log.length) state.log[0] = e;
+    else { state.log.unshift(e); state.topIsLive = true; }
+    if (state.log.length > LOG_MAX) state.log.length = LOG_MAX;
     renderResult();
   }
 
   /** commit: freeze what is on screen and roll a fresh live card on top */
   function commitRoll() {
     if (state.error) { flashError(); return; }
-    const frozen = makeRoll(false);
+    const frozen = makeRoll();
     if (!frozen) { flashError(); return; }
     if (state.topIsLive && state.log.length) state.log.shift();   // drop the preview
     state.log.unshift(frozen);
     state.topIsLive = false;
-    if (state.log.length > 80) state.log.length = 80;
+    if (state.log.length > LOG_MAX) state.log.length = LOG_MAX;
     renderResult();
     el.result.scrollTop = 0;
   }
@@ -506,7 +539,7 @@
 
     paint();
     renderExplain();
-    syncCaret();
+    syncCaret(true);
 
     if (!state.error) refreshLive();
     if (submitted) commitRoll();
@@ -540,7 +573,7 @@
     el.ta.addEventListener('input', onInput);
     el.ta.addEventListener('scroll', () => { el.hl.scrollLeft = el.ta.scrollLeft; });
     ['keyup', 'click', 'select', 'focus'].forEach((ev) =>
-      el.ta.addEventListener(ev, () => setTimeout(syncCaret, 0)));
+      el.ta.addEventListener(ev, () => setTimeout(() => syncCaret(true), 0)));
 
     el.ta.addEventListener('keydown', (ev) => {
       if (ev.key === 'Enter') { ev.preventDefault(); commitRoll(); return; }
@@ -549,6 +582,20 @@
     });
 
     el.rollBtn.addEventListener('click', () => { commitRoll(); el.ta.focus(); });
+
+    el.result.addEventListener('click', (ev) => {
+      const open = ev.target.closest('[data-open]');
+      if (open) {
+        const e = state.log[+open.getAttribute('data-open')];
+        if (e) { e.expanded = true; renderResult(); }
+        return;
+      }
+      const fold = ev.target.closest('[data-fold]');
+      if (fold) {
+        const e = state.log[+fold.getAttribute('data-fold')];
+        if (e) { e.expanded = false; renderResult(); }
+      }
+    });
     $('btnClear').addEventListener('click', () => {
       state.log = []; state.topIsLive = true; renderResult(); refreshLive();
     });
