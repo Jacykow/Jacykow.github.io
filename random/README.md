@@ -159,8 +159,14 @@ Lambert term. The result is baked into the SVG sprite; there is no 3D at runtime
 static paths.
 
 Only two things differ between shapes: **which face rests on the ground**, and the
-**yaw** it is spun to. The camera's pitch, position and scale are constants — the
-projection never looks at the shape. Every solid is normalised to a circumradius of 1,
+**yaw** it is turned to. The camera's pitch, position and scale are constants — the
+projection never looks at the shape.
+
+Yaw comes from the resting face, the same rule everywhere: present that face's widest
+side to the camera rather than one of its corners, then turn off square by `YAW` to open
+up the side faces. The d4 overrides `YAW` to 0 — its silhouette *is* its base triangle,
+so any off-square rotation stands it on a corner, and it is the only die with no face
+parallel to the one it rests on to correct the impression. Every solid is normalised to a circumradius of 1,
 so apparent size falls out of the geometry itself rather than a per-shape fit; a die
 that is genuinely squatter renders smaller. To resize one deliberately, give it a `size`
 in the shape list, which scales the solid in 3D before the camera ever sees it.

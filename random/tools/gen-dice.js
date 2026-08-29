@@ -230,6 +230,10 @@ const LIGHT = norm([-0.34, 0.70, 0.63]);
    elevation above the table: too low and the top face foreshortens away, too
    high and the sides vanish and it reads flat again. */
 const PITCH = 63 * Math.PI / 180;
+
+/* How far the die is turned off square to the camera. 0 shows a face dead-on
+   and hides the sides; this opens them up without foreshortening the top. */
+const YAW = 32;
 const BOX = 64, MARGIN = 2.2;
 
 const tilt = (v) => [v[0],
@@ -276,39 +280,26 @@ function build(name, rawVerts, opts) {
   // 2. spin about the (vertical) resting axis until the silhouette is
   //    symmetric on screen. This keeps the die flat on the floor while
   //    stopping it from looking randomly slewed.
-  let bestSpin = 0;
-  if (opts.axisAlongX) {
-    // A barrel lying on a side face can still point anywhere in the ground
-    // plane, and both the across-view and end-on orientations are symmetric.
-    // Aim its long axis across the view directly so every odd die matches.
-    const ax = align([0, 1, 0], faces[rest].normal, [0, -1, 0]);
-    bestSpin = Math.atan2(ax[2], ax[0]) * 180 / Math.PI;
-  } else if (opts.spinSearch !== false) {
-    let bestScore = Infinity;
-    for (let deg = 0; deg < 360; deg += 0.5) {
-      const t = deg * Math.PI / 180;
-      const V = laid.map((v) => tilt(spinY(v, t)));
-      const F = facesOf(V);
-      const pts = [].concat.apply([], F.filter((f) => f.nr[2] > 0.001).map((f) => f.pts))
-        .map((p) => [p[0], -p[1]]);
-      const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
-      // A barrel is symmetric both across the view and end-on. Keep only the
-      // across-the-view answer so every odd die lies the same way.
-      if (opts.preferWide) {
-        const xr = Math.max.apply(null, pts.map((p) => p[0])) - Math.min.apply(null, pts.map((p) => p[0]));
-        const yr = Math.max.apply(null, pts.map((p) => p[1])) - Math.min.apply(null, pts.map((p) => p[1]));
-        if (yr > xr) continue;
-      }
-      let asym = 0;
-      for (const p of pts) {
-        let m = Infinity;
-        for (const q of pts) m = Math.min(m, Math.hypot((p[0] - cx) + (q[0] - cx), p[1] - q[1]));
-        asym += m;
-      }
-      if (asym < bestScore - 1e-6) { bestScore = asym; bestSpin = deg; }
-    }
+  /* 2. Yaw the die about the vertical. Derived from the face it rests on, the
+        same rule for every shape: present that face's widest side to the
+        camera rather than one of its corners. For the tetrahedron this is what
+        puts a base edge at the front and its lone apex up — it is the only die
+        with no face parallel to the one it rests on, so nothing else can fix
+        its orientation. For a barrel it lays the long axis across the view.
+        YAW then turns everything off square by a constant, which is what
+        opens up the side faces. */
+  const restPts = faces[rest].idx.map((i) => laid[i]);
+  const rc = centroid(restPts);
+  let near = null;
+  for (let i = 0; i < restPts.length; i++) {
+    const a = restPts[i], b = restPts[(i + 1) % restPts.length];
+    const m = sub(scl(add(a, b), 0.5), rc);
+    const d = Math.hypot(m[0], m[2]);
+    if (d > 1e-6 && (!near || d < near.d)) near = { m, d };
   }
-  const spin = (bestSpin + (opts.spin || 0)) * Math.PI / 180;
+  const base = near ? Math.atan2(-near.m[0], near.m[2]) * 180 / Math.PI : 0;
+  const bestSpin = base + (opts.yaw == null ? YAW : opts.yaw);
+  const spin = bestSpin * Math.PI / 180;
 
   // 3. apply the shared camera
   const V = laid.map((v) => tilt(spinY(v, spin)));
@@ -354,21 +345,23 @@ const BARREL = 1.35;   // half-length: long enough never to land on an end
 const BIPY = 1.18;     // apex height above the equator
 
 const SHAPES = [
-  build('d2', prism(28, 0.16), { restSides: 28, spinSearch: false }),
-  build('d4', tetrahedron(), { spin: 60 }),
-  build('d5', prism(5, BARREL), { restSides: 4, axisAlongX: true }),
+  build('d2', prism(28, 0.16), { restSides: 28 }),
+  // The d4's silhouette *is* its base triangle, so any off-square yaw stands it
+  // on a corner. It is the one die that has to face the camera square on.
+  build('d4', tetrahedron(), { yaw: 0 }),
+  build('d5', prism(5, BARREL), { restSides: 4 }),
   build('d6', cube(), {}),
-  build('d7', prism(7, BARREL), { restSides: 4, axisAlongX: true }),
+  build('d7', prism(7, BARREL), { restSides: 4 }),
   build('d8', octahedron(), {}),
-  build('d9', prism(9, BARREL), { restSides: 4, axisAlongX: true }),
+  build('d9', prism(9, BARREL), { restSides: 4 }),
   build('d10', trapezohedron(), {}),
-  build('d11', prism(11, BARREL), { restSides: 4, axisAlongX: true }),
+  build('d11', prism(11, BARREL), { restSides: 4 }),
   build('d12', dodecahedron(), {}),
   build('d14', bipyramid(7, BIPY), {}),
   build('d16', bipyramid(8, BIPY), {}),
   build('d18', bipyramid(9, BIPY), {}),
   build('d20', icosahedron(), {}),
-  build('d100', icosphere(), { spinSearch: false })
+  build('d100', icosphere(), {})
 ];
 
 /* ------------------------------------------------------------------ output */
