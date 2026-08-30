@@ -190,6 +190,14 @@ A variable is named by the `# name` at the end of its own expression, so `0 # mo
 is a variable called `modifier` holding `0`. Saved rolls are named the same way, and
 saving refuses an expression that has no name.
 
+What a thing is called and what it is written as are two questions. A `{name}` inside the
+label answers the second when they differ, and is not shown:
+
+```
+0 # Modyfikatory {mod}      shows as Modyfikatory, written as mod
+2d6 # 2x <d6>               <dN> in a name draws the die instead of spelling it
+```
+
 ```
 d20+5 # atk             a variable, set in the Vars panel
 2atk>13                 the same as atk>13, atk>13
@@ -332,8 +340,9 @@ A variable that refers back to itself is caught at a fixed depth rather than han
   editing, under its `# name`.
 * **undo / redo** sit under the expression, for a screen with no keyboard to reach them
   from.
-* **Setup** — export and import. A *setup* is your saved rolls and your variables
-  together, carried in one link.
+* **Transfer** — a link carrying your saved rolls and variables together. Opening one,
+  or pasting one in, offers what it holds with everything ticked; what you take is added
+  to what you already have, and one button offers the same list back to undo it.
 
 ### Two kinds of link
 

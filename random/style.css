@@ -675,3 +675,55 @@ kbd{
 }
 .refdoc:hover{text-decoration:underline}
 .refrow{cursor:default}
+
+/* ------------------------------------------------- undo / redo, and Roll */
+button.roll.sec{background:#20252f; color:var(--dim); border:1px solid var(--border)}
+button.roll.sec:hover{color:var(--text); border-color:#3b4356; filter:none}
+button.roll.sec kbd{background:#171b23; color:var(--dimmer)}
+.onphone{display:none}
+@media(max-width:820px){ .onpc{display:none} .onphone{display:inline-block} }
+
+/* a die drawn inside a name */
+.die.inline{--dsz:19px; vertical-align:-4px; margin:0 1px}
+
+/* the last thing in a scrolling panel needs room to be reached */
+.tailroom{height:28px}
+#sidebar .sidebody, .tabpane{padding-bottom:24px}
+
+/* ----------------------------------------------------------- the picker */
+.modal{
+  position:fixed; inset:0; background:rgba(6,8,12,.72); z-index:40;
+  display:flex; align-items:center; justify-content:center; padding:20px;
+}
+.sheet{
+  background:var(--pane); border:1px solid var(--border); border-radius:10px;
+  padding:16px 18px; width:min(560px,100%); max-height:80vh; overflow-y:auto;
+}
+.sheet h3{margin:0 0 4px; font-size:15px; font-weight:600}
+.sheet p{margin:0 0 12px; font-size:12px; color:var(--dimmer); line-height:1.5}
+.sheet h4{
+  margin:12px 0 5px; font-size:10.5px; text-transform:uppercase;
+  letter-spacing:.12em; color:var(--dim);
+}
+.pickrow{
+  display:flex; align-items:center; gap:9px; padding:5px 6px; border-radius:6px;
+  font-family:var(--mono); font-size:12px; cursor:pointer;
+}
+.pickrow:hover{background:var(--pane-2)}
+.pickrow input{accent-color:var(--accent); flex:none}
+.pickrow b{color:var(--purple); font-weight:600; flex:none; max-width:40%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.pickrow code{color:var(--dim); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.sheetend{display:flex; gap:8px; margin-top:14px}
+
+/* ------------------------------------------------- results that are words */
+.wordhist{margin:4px 0 2px}
+.wrow{display:flex; align-items:center; gap:8px; padding:2px 0; font-size:12px}
+.wname{
+  font-family:var(--mono); color:var(--text); width:38%; flex:none;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.wbar{flex:1; min-width:0; height:12px; background:var(--pane-2); border-radius:3px; overflow:hidden}
+.wbar i{display:block; height:100%; background:var(--accent); border-radius:3px; min-width:1px}
+.wpct{font-family:var(--mono); color:var(--dimmer); font-size:11px; width:46px; text-align:right; flex:none}
+.stat.wide{grid-column:span 2}
+.hist .bar.empty{background:var(--border)}

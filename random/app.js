@@ -215,7 +215,7 @@
   function setupLink() {
     return here() + '#' + SETUP_TAG + b64.enc(JSON.stringify({
       v: loadVars().filter((v) => nameOf(v.expr)).map((v) => [v.expr, v.mark ? 1 : 0]),
-      s: loadSaved().filter((x) => nameOf(x.expr)).map((x) => [x.expr, x.mark ? 1 : 0])
+      s: loadSaved().filter((x) => titleOf(x.expr)).map((x) => [x.expr, x.mark ? 1 : 0])
     }));
   }
 
@@ -230,7 +230,7 @@
         .map((row) => normalise(row.length > 2
           ? { name: String(row[0]), expr: String(row[1]), mark: !!row[2] }
           : { expr: String(row[0]), mark: !!row[1] }))
-        .filter((x) => nameOf(x.expr));
+        .filter((x) => titleOf(x.expr));
       return { vars: pairs(d.v), saved: pairs(d.s) };
     } catch (e) { return null; }
   }
@@ -244,23 +244,44 @@
 
   /* A setup is adopted whole rather than merged: it is a setup, not an
      addition. The one it replaced is kept so it can be had back. */
-  function adoptSetup(st) {
-    if (!st) return false;
-    store.write(LS_UNDO, { v: loadVars(), s: loadSaved() });
-    pushVars(st.vars);
-    store.write(LS_SAVED, st.saved);
+  /* An import adds to what you already have rather than taking its place, and
+     nothing is added without being picked out first. What one added is written
+     down, so undoing it is the same act with the ticks the other way round. */
+  function addSetup(pick) {
+    const vars = loadVars(), saved = loadSaved();
+    const added = { v: [], s: [] };
+    for (const v of pick.vars) {
+      if (vars.some((x) => nameOf(x.expr) === nameOf(v.expr))) continue;
+      vars.push(v); added.v.push(v.expr);
+    }
+    for (const x of pick.saved) {
+      if (saved.some((y) => y.expr === x.expr)) continue;
+      saved.push(x); added.s.push(x.expr);
+    }
+    pushVars(vars);
+    store.write(LS_SAVED, saved);
+    store.write(LS_UNDO, added);
     renderVars(); renderSaved(); renderShortcuts();
-    return true;
+    return added.v.length + added.s.length;
   }
 
-  function restoreSetup() {
-    const prev = store.read(LS_UNDO, null);
-    if (!prev) return false;
-    store.write(LS_UNDO, { v: loadVars(), s: loadSaved() });
-    pushVars(Array.isArray(prev.v) ? prev.v : []);
-    store.write(LS_SAVED, Array.isArray(prev.s) ? prev.s : []);
+  function dropSetup(pick) {
+    const gone = new Set(pick.vars.concat(pick.saved).map((x) => x.expr));
+    pushVars(loadVars().filter((v) => !gone.has(v.expr)));
+    store.write(LS_SAVED, loadSaved().filter((x) => !gone.has(x.expr)));
+    store.write(LS_UNDO, null);
     renderVars(); renderSaved(); renderShortcuts();
-    return true;
+    return gone.size;
+  }
+
+  /** what the last import brought in, as a setup shape */
+  function lastImport() {
+    const a = store.read(LS_UNDO, null);
+    if (!a || (!(a.v || []).length && !(a.s || []).length)) return null;
+    return {
+      vars: (a.v || []).map((expr) => ({ expr, mark: false })),
+      saved: (a.s || []).map((expr) => ({ expr, mark: false }))
+    };
   }
 
   /* ================================================================ names
@@ -269,8 +290,35 @@
      lets one field hold the whole thing, and the engine already strips it
      before parsing, so a variable's name is drawn once — on its subtotal
      bracket — and never twice. */
-  const nameOf = (expr) => E.splitLabel(expr).label;
+  /* What a thing is called and what it is called *by* are two questions. The
+     label answers the first; a `{name}` inside it answers the second when they
+     differ, so "Modyfikatory {mod}" shows as Modyfikatory and is written as mod.
+     When the label is already a plain word it serves as both. */
+  const REF_RE = /\{([a-zA-Z_]+)\}/;
+  const labelOf = (expr) => E.splitLabel(expr).label || '';
   const bodyOf = (expr) => E.splitLabel(expr).body.trim();
+
+  function nameOf(expr) {
+    const l = labelOf(expr);
+    const m = REF_RE.exec(l);
+    if (m) return m[1];
+    return /^[a-zA-Z_]+$/.test(l.trim()) ? l.trim() : null;
+  }
+  const titleOf = (expr) =>
+    labelOf(expr).replace(REF_RE, '').replace(/\s+/g, ' ').trim() || nameOf(expr) || '';
+
+  /* `<d6>` in a name draws the die instead of spelling it out, so a bar of
+     shortcuts reads at a glance. */
+  const dieChip = (n) => {
+    const shape = E.shapeFor(n);
+    const size = String(n).length >= 3 ? ' v3' : (String(n).length === 2 ? ' v2' : '');
+    return '<span class="die inline s-' + shape + '">' +
+      '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
+      '<use href="#sh-' + shape + '"/></svg>' +
+      '<span class="dieval' + size + '">' + n + '</span></span>';
+  };
+  const titleHTML = (expr) =>
+    esc(titleOf(expr)).replace(/&lt;d(\d+)&gt;/gi, (m, n) => dieChip(+n));
 
   /** swap the expression, keep the name */
   function withBody(expr, body) {
@@ -287,9 +335,9 @@
   /* A first visit gets the three rolls almost everyone starts from, rather than
      an empty bar that says nothing about what the bar is for. */
   const FIRST_ROLLS = [
-    { expr: 'd6 # d6', mark: true },
-    { expr: '2d6 # 2d6', mark: true },
-    { expr: 'd20 # d20', mark: true }
+    { expr: 'd6 # <d6>', mark: true },
+    { expr: '2d6 # 2x <d6>', mark: true },
+    { expr: 'd20 # <d20>', mark: true }
   ];
   const loadSaved = () => {
     const v = store.read(LS_SAVED, null);
@@ -342,14 +390,14 @@
           a: act.selectionStart, b: act.selectionEnd }
       : null;
 
-    const rolls = loadSaved().filter((x) => x.mark && nameOf(x.expr));
+    const rolls = loadSaved().filter((x) => x.mark && titleOf(x.expr));
     const vars = loadVars().filter((v) => v.mark && nameOf(v.expr));
     if (!rolls.length && !vars.length) { el.shortcuts.innerHTML = ''; return; }
 
     el.shortcuts.innerHTML =
       rolls.map((r, i) =>
         '<button class="sc roll" data-roll="' + i + '" title="' + esc(r.expr) + '">' +
-          esc(nameOf(r.expr)) + '</button>').join('') +
+          titleHTML(r.expr) + '</button>').join('') +
       vars.map((v) => {
         const body = bodyOf(v.expr);
         const step = (cls, sign, label) =>
@@ -357,7 +405,7 @@
           ' with shift or the right button">' + sign + '</button>';
         return '<span class="sc var' + (isInt(body) ? '' : ' plain') +
           '" data-var="' + esc(nameOf(v.expr)) + '">' +
-          '<i>' + esc(nameOf(v.expr)) + '</i>' + step('vdec', '&minus;', '&minus;') +
+          '<i>' + titleHTML(v.expr) + '</i>' + step('vdec', '&minus;', '&minus;') +
           '<input class="vval" value="' + esc(body) + '" spellcheck="false" ' +
                  'size="' + Math.max(2, Math.min(14, body.length)) + '">' +
           step('vinc', '+', '+') +
@@ -417,9 +465,10 @@
       if (s) return stepVar(s.b, s.by);
       const r = ev.target.closest('[data-roll]');
       if (!r) return;
-      const item = loadSaved().filter((x) => x.mark && nameOf(x.expr))[+r.getAttribute('data-roll')];
+      const item = loadSaved().filter((x) => x.mark && titleOf(x.expr))[+r.getAttribute('data-roll')];
       if (!item) return;
       typeInto(item.expr, true);
+      commitRoll();              // a bookmark is a roll, not a thing to load
     });
     // the right button is the quick way to move by ten without a keyboard
     el.shortcuts.addEventListener('contextmenu', (ev) => {
@@ -757,38 +806,76 @@
     }, 0);
   }
 
+  /* A simulation only shows what turned up, so every chart here says what could
+     have: each word the expression can produce gets a bar even at nought, and a
+     numeric run is bracketed by the smallest and largest it could ever reach —
+     worked out from the expression rather than watched for. */
   function statsHTML(s) {
+    const parts = [];
+
+    if (s.words.length) {
+      const total = s.n;
+      const peak = Math.max.apply(null, s.words.map((w) => s.tally[w] || 0)) || 1;
+      parts.push('<div class="wordhist">' + s.words.map((w) => {
+        const c = s.tally[w] || 0;
+        const pct = (c / total) * 100;
+        return '<div class="wrow" title="' + esc(w) + ': ' + pct.toFixed(2) + '%">' +
+          '<span class="wname">' + esc(w) + '</span>' +
+          '<span class="wbar"><i style="width:' + ((c / peak) * 100).toFixed(2) + '%"></i></span>' +
+          '<span class="wpct">' + pct.toFixed(1) + '%</span></div>';
+      }).join('') + '</div>');
+      if (!s.numeric) {
+        parts.push('<div class="histaxis"><span>' + s.n.toLocaleString() + ' rolls</span>' +
+          '<span>every result the expression can give</span></div>');
+        return parts.join('');
+      }
+      parts.push('<div class="histaxis"><span>&nbsp;</span>' +
+        '<span>and ' + s.numeric.toLocaleString() + ' of ' + s.n.toLocaleString() +
+        ' came to a number</span></div>');
+    }
+
+    const bounded = s.canMin !== null && s.canMax !== null;
     const cells = [
       ['min', E.fmt(s.min)], ['mean', s.mean.toFixed(2)], ['median', E.fmt(s.median)],
       ['max', E.fmt(s.max)], ['std dev', s.stdev.toFixed(2)],
-      ['10th %', E.fmt(s.p10)], ['90th %', E.fmt(s.p90)], ['samples', s.n.toLocaleString()]
+      ['10th %', E.fmt(s.p10)], ['90th %', E.fmt(s.p90)],
+      ['samples', s.numeric.toLocaleString()]
     ];
-    const grid = '<div class="statgrid">' + cells.map(([k, v]) =>
-      '<div class="stat"><b>' + esc(v) + '</b><i>' + esc(k) + '</i></div>').join('') + '</div>';
+    if (bounded) {
+      cells.push(['can be', E.fmt(s.canMin) + ' … ' + E.fmt(s.canMax)]);
+    }
+    parts.push('<div class="statgrid">' + cells.map(([k, v]) =>
+      '<div class="stat' + (k === 'can be' ? ' wide' : '') + '"><b>' + esc(v) +
+      '</b><i>' + esc(k) + '</i></div>').join('') + '</div>');
 
-    // histogram
-    const span = s.max - s.min;
+    // the chart spans everything possible, not just everything seen
+    const lo = bounded ? Math.min(s.canMin, s.min) : s.min;
+    const hi = bounded ? Math.max(s.canMax, s.max) : s.max;
+    const span = hi - lo;
     const bins = Math.max(1, Math.min(60, Math.round(span) + 1));
     const w = span === 0 ? 1 : span / bins;
     const counts = new Array(bins).fill(0);
     for (const t of s.totals) {
-      let b = span === 0 ? 0 : Math.floor((t - s.min) / w);
+      let b = span === 0 ? 0 : Math.floor((t - lo) / w);
       if (b >= bins) b = bins - 1;
       if (b < 0) b = 0;
       counts[b]++;
     }
     const peak = Math.max.apply(null, counts) || 1;
     const bars = counts.map((c, i) => {
-      const lo = s.min + i * w, hi = lo + w;
-      const pct = ((c / s.n) * 100).toFixed(1);
-      return '<div class="bar" style="height:' + Math.max(1, (c / peak) * 100) + '%" title="' +
-        E.fmt(Math.round(lo * 100) / 100) + (w > 1 ? '–' + E.fmt(Math.round(hi * 100) / 100) : '') +
+      const a = lo + i * w, b = a + w;
+      const pct = ((c / s.numeric) * 100).toFixed(1);
+      return '<div class="bar' + (c ? '' : ' empty') + '" style="height:' +
+        Math.max(1, (c / peak) * 100) + '%" title="' +
+        E.fmt(Math.round(a * 100) / 100) + (w > 1 ? '–' + E.fmt(Math.round(b * 100) / 100) : '') +
         ': ' + pct + '%"></div>';
     }).join('');
 
-    return grid + '<div class="hist">' + bars + '</div>' +
-      '<div class="histaxis"><span>' + E.fmt(s.min) + '</span>' +
-      '<span>distribution of the total</span><span>' + E.fmt(s.max) + '</span></div>';
+    parts.push('<div class="hist">' + bars + '</div>' +
+      '<div class="histaxis"><span>' + E.fmt(lo) + '</span>' +
+      '<span>' + (bounded ? 'everything it can come to' : 'distribution of the total') +
+      '</span><span>' + E.fmt(hi) + '</span></div>');
+    return parts.join('');
   }
 
   /* ============================================================ reference */
@@ -1093,7 +1180,7 @@
             '<button class="pin' + (it.mark ? ' on' : '') + '" tabindex="-1" ' +
               'title="show as a shortcut under the expression">★</button>' +
             '<button class="lname" title="' + esc(L.nameHint) + '">' +
-              esc(nameOf(it.expr) || '—') + '</button>' +
+              (titleOf(it.expr) ? titleHTML(it.expr) : '—') + '</button>' +
             '<input class="lexpr" value="' + esc(it.expr) + '" spellcheck="false" ' +
               'placeholder="' + esc(L.placeholder) + '">' +
             '<span class="step' + (isInt(bodyOf(it.expr)) ? '' : ' off') + '">' +
@@ -1135,7 +1222,7 @@
       const box = row.querySelector('.lerr');
       box.textContent = err || '';
       box.classList.toggle('on', !!err);
-      row.querySelector('.lname').textContent = nameOf(it.expr) || '—';
+      row.querySelector('.lname').innerHTML = titleOf(it.expr) ? titleHTML(it.expr) : '—';
       row.querySelector('.step').classList.toggle('off', !isInt(bodyOf(it.expr)));
     });
     renderShortcuts();
@@ -1190,11 +1277,11 @@
   function saveCurrent() {
     const expr = el.ta.value.trim();
     if (!expr) return;
-    if (!nameOf(expr)) {
+    if (!titleOf(expr)) {
       toast('name it first — add # a name to the end');
       return;
     }
-    const items = loadSaved().filter((x) => nameOf(x.expr) !== nameOf(expr));
+    const items = loadSaved().filter((x) => titleOf(x.expr) !== titleOf(expr));
     items.unshift({ expr, mark: false });
     store.write(LS_SAVED, items.slice(0, 60));
     renderSaved(); renderShortcuts();
@@ -1251,59 +1338,79 @@
     return null;
   }
 
-  /* ================================================================ setup */
+  /* ============================================================= transfer */
   function renderSetup() {
     const link = setupLink();
-    const prev = store.read(LS_UNDO, null);
+    const back = lastImport();
     $('tab-setup').innerHTML =
-      '<div class="varhint">A <b>setup</b> is your saved rolls and your variables together. ' +
-      'The link below carries them: opening it takes on that setup whole, or paste one ' +
-      'into the box to look it over first. The expression link in the top bar is a ' +
-      'different thing — it holds only the roll you last made.</div>' +
-      '<div class="setrowb"><label>Your setup</label>' +
+      '<div class="varhint">Your saved rolls and variables together. The link below ' +
+      'carries them: open it anywhere, or paste one here to look it over and pick what ' +
+      'to take. The expression link in the top bar is a different thing — it holds only ' +
+      'the roll you last made.</div>' +
+      '<div class="setrowb"><label>Yours</label>' +
         '<textarea class="setbox" id="setOut" readonly rows="2">' + esc(link) + '</textarea>' +
         '<button class="varadd" id="setCopy">copy</button></div>' +
       '<div class="setrowb"><label>Paste one</label>' +
         '<textarea class="setbox" id="setIn" rows="2" spellcheck="false" ' +
-          'placeholder="paste a setup link here"></textarea>' +
+          'placeholder="paste a link here"></textarea>' +
         '<button class="varadd" id="setLoad">look</button></div>' +
-      '<div id="setPreview"></div>' +
-      (prev ? '<button class="varadd" id="setBack">restore the setup this replaced</button>' : '');
+      (back ? '<button class="varadd" id="setBack">undo the last import&hellip;</button>' : '') +
+      '<div class="tailroom"></div>';
 
-    $('setCopy').addEventListener('click', () => copy(link, 'setup link copied', 'could not copy'));
-    $('setLoad').addEventListener('click', showImport);
-    if (prev) $('setBack').addEventListener('click', () => {
-      if (restoreSetup()) { toast('setup restored'); renderSetup(); onInput(); }
+    $('setCopy').addEventListener('click', () => copy(link, 'link copied', 'could not copy'));
+    $('setLoad').addEventListener('click', () => {
+      const st = readSetup($('setIn').value);
+      if (!st || (!st.vars.length && !st.saved.length)) { toast('that is not a setup link'); return; }
+      pickDialog('add', st);
     });
+    if (back) $('setBack').addEventListener('click', () => pickDialog('remove', back));
   }
 
-  /** nothing is taken on until the list of what it holds has been shown */
-  function showImport() {
-    const st = readSetup($('setIn').value);
-    const box = $('setPreview');
-    if (!st || (!st.vars.length && !st.saved.length)) {
-      box.innerHTML = '<div class="varerr on">that is not a setup link</div>';
-      return;
-    }
-    const row = (x) => '<li><b>' + esc(nameOf(x.expr)) + '</b> ' + esc(bodyOf(x.expr)) + '</li>';
-    box.innerHTML =
-      '<div class="setlist">' +
-        (st.saved.length ? '<h4>' + st.saved.length + ' saved ' +
-          (st.saved.length === 1 ? 'roll' : 'rolls') + '</h4><ul>' +
-          st.saved.map(row).join('') + '</ul>' : '') +
-        (st.vars.length ? '<h4>' + st.vars.length + ' variable' +
-          (st.vars.length === 1 ? '' : 's') + '</h4><ul>' +
-          st.vars.map(row).join('') + '</ul>' : '') +
-        '<div class="setwarn">This replaces everything you have now. ' +
-        'You can put it back afterwards.</div>' +
-        '<button class="varadd" id="setGo">take this setup</button>' +
+  /* One dialog for both directions: adding what a link holds, and taking back
+     out what the last one added. Everything is ticked to begin with, because
+     that is what was asked for either way. */
+  function pickDialog(mode, st) {
+    const adding = mode === 'add';
+    const rows = (list, kind) => list.map((x, i) =>
+      '<label class="pickrow"><input type="checkbox" checked data-kind="' + kind +
+        '" data-i="' + i + '">' +
+        '<b>' + (titleOf(x.expr) ? titleHTML(x.expr) : '—') + '</b>' +
+        '<code>' + esc(bodyOf(x.expr)) + '</code></label>').join('');
+
+    const host = document.createElement('div');
+    host.className = 'modal';
+    host.innerHTML =
+      '<div class="sheet">' +
+        '<h3>' + (adding ? 'Take what you want' : 'Put back what you do not') + '</h3>' +
+        '<p>' + (adding
+          ? 'These are added to what you already have. Anything you already own is skipped.'
+          : 'These came in with the last import. Whatever stays ticked is removed.') + '</p>' +
+        (st.saved.length ? '<h4>Saved rolls</h4>' + rows(st.saved, 's') : '') +
+        (st.vars.length ? '<h4>Variables</h4>' + rows(st.vars, 'v') : '') +
+        '<div class="sheetend">' +
+          '<button class="varadd" data-go="1">' +
+            (adding ? 'add the ticked' : 'remove the ticked') + '</button>' +
+          '<button class="varadd" data-close="1">cancel</button>' +
+        '</div>' +
       '</div>';
-    $('setGo').addEventListener('click', () => {
-      adoptSetup(st);
-      $('setIn').value = '';
+    document.body.appendChild(host);
+
+    const shut = () => host.remove();
+    host.addEventListener('click', (ev) => {
+      if (ev.target === host || ev.target.closest('[data-close]')) { shut(); return; }
+      if (!ev.target.closest('[data-go]')) return;
+      const pick = { vars: [], saved: [] };
+      host.querySelectorAll('input:checked').forEach((c) => {
+        const list = c.getAttribute('data-kind') === 'v' ? st.vars : st.saved;
+        const item = list[+c.getAttribute('data-i')];
+        if (item) (c.getAttribute('data-kind') === 'v' ? pick.vars : pick.saved).push(item);
+      });
+      const n = adding ? addSetup(pick) : dropSetup(pick);
+      shut();
+      $('setIn') && ($('setIn').value = '');
       renderSetup();
       onInput();
-      toast('setup loaded');
+      toast(n ? (adding ? n + ' added' : n + ' removed') : 'nothing to do');
     });
   }
 
@@ -1351,7 +1458,7 @@
       state.inspect = E.inspect(raw);
       state.error = null;
       const p = state.inspect.parsed;
-      el.notation.textContent = (p.repeat > 1 ? p.repeat + '× ' : '') + state.inspect.notation;
+      el.notation.textContent = p.label || '';
       el.status.classList.remove('err');
       el.status.textContent = summarise(p);
       el.wrap.classList.remove('bad');
@@ -1359,7 +1466,6 @@
     } catch (err) {
       state.error = err;
       state.inspect = null;
-      el.notation.textContent = '';
       el.status.classList.add('err');
       el.status.textContent = errorLine(err, raw);
       el.wrap.classList.add('bad');
@@ -1409,7 +1515,7 @@
     switchTab(state.activeTab);   // on a phone that is the reference, not Explain
 
     // a setup link is adopted whole; anything else in the bar is an expression
-    if (adoptSetup(readSetup())) toast('setup loaded');
+    const fromLink = readSetup();
     el.ta.value = readExpr() || store.read(LS_LAST, '') || DEFAULT_EXPR;
 
     el.ta.addEventListener('input', onInput);
@@ -1483,7 +1589,8 @@
 
     // only a person can cause this: replaceState never fires it
     window.addEventListener('hashchange', () => {
-      if (adoptSetup(readSetup())) { toast('setup loaded'); renderSetup(); onInput(); return; }
+      const st = readSetup();
+      if (st && (st.vars.length || st.saved.length)) { switchTab('setup'); pickDialog('add', st); return; }
       const e = readExpr();
       if (e !== null && e !== el.ta.value) { el.ta.value = e; onInput(); }
     });
@@ -1491,6 +1598,10 @@
     onInput();
     el.ta.focus();
     el.ta.setSelectionRange(el.ta.value.length, el.ta.value.length);
+    if (fromLink && (fromLink.vars.length || fromLink.saved.length)) {
+      switchTab('setup');
+      pickDialog('add', fromLink);
+    }
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

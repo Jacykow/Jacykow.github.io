@@ -2186,34 +2186,228 @@
     return p.rolls.map((part) => previewNode(part.ast, ctx)).join('<span class="r-op">,</span>');
   }
 
+  /* ==========================================================================
+     WHAT AN EXPRESSION CAN COME TO
+     A simulation only ever shows what turned up. These say what could: every
+     word it might end on, and how small or large a number it might reach.
+     ========================================================================== */
+
+  /** every word the result could be, in the order they are written */
+  function wordsOf(node, out, ctx) {
+    if (!node || typeof node !== 'object') return;
+    switch (node.t) {
+      case 'str': if (out.indexOf(node.v) < 0) out.push(node.v); return;
+      case 'word': {
+        const fixed = ctx.fixed && ctx.fixed[node.name];
+        if (fixed) return wordsOf(fixed, out, ctx);
+        const src = varSrc(node.name, ctx);
+        if (src === undefined) {
+          if (out.indexOf(node.name) < 0) out.push(node.name);
+          return;
+        }
+        const key = node.name + '::' + src;
+        if (ctx.seen.has(key)) return;
+        ctx.seen.add(key);
+        try { wordsOf(varAst(node.name, src), out, ctx); } catch (e) { /* unparseable */ }
+        return;
+      }
+      case 'ternary': wordsOf(node.yes, out, ctx); wordsOf(node.no, out, ctx); return;
+      case 'band':
+        node.arms.forEach((a) => wordsOf(a.then, out, ctx));
+        wordsOf(node.otherwise, out, ctx);
+        return;
+      case 'paren': wordsOf(node.v, out, ctx); return;
+      case 'set': case 'rep': case 'custom':
+        node.items.forEach((i) => wordsOf(i, out, ctx));
+        return;
+    }
+  }
+
+  /* Interval arithmetic over the same tree. null means "cannot say" — an
+     exploding die has no ceiling worth quoting, and a word has no number. */
+  const span = (a, b) => ({ min: Math.min(a, b), max: Math.max(a, b) });
+  function pair(l, r, f) {
+    if (!l || !r) return null;
+    const c = [f(l.min, r.min), f(l.min, r.max), f(l.max, r.min), f(l.max, r.max)];
+    if (c.some((x) => !isFinite(x))) return null;
+    return { min: Math.min.apply(null, c), max: Math.max.apply(null, c) };
+  }
+
+  function boundsOf(node, ctx) {
+    if (!node || typeof node !== 'object') return null;
+    const mods = node.mods || [];
+    const adv = mods.filter((m) => m.t === 'adv');
+    // best or worst of several attempts still lands inside one attempt's range
+    const inner = adv.length
+      ? boundsOf(Object.assign({}, node, { mods: mods.filter((m) => m.t !== 'adv') }), ctx)
+      : rawBounds(node, ctx);
+    return inner;
+  }
+
+  function rawBounds(node, ctx) {
+    const mods = node.mods || [];
+    let b = null;
+
+    switch (node.t) {
+      case 'num': b = span(node.v, node.v); break;
+      case 'neg': { const v = boundsOf(node.v, ctx); b = v && span(-v.min, -v.max); break; }
+      case 'paren': b = boundsOf(node.v, ctx); break;
+      case 'bin': {
+        const l = boundsOf(node.l, ctx), r = boundsOf(node.r, ctx);
+        if (node.op === '+') b = pair(l, r, (x, y) => x + y);
+        else if (node.op === '-') b = pair(l, r, (x, y) => x - y);
+        else if (node.op === '*') b = pair(l, r, (x, y) => x * y);
+        else if (node.op === '/') b = (r && r.min <= 0 && r.max >= 0) ? null : pair(l, r, (x, y) => x / y);
+        else b = null;                      // % and ^ are not worth guessing at
+        break;
+      }
+      case 'func': {
+        const parts = node.args.map((a) => boundsOf(a, ctx));
+        if (parts.some((x) => !x)) return null;
+        b = node.name === 'max'
+          ? { min: Math.max.apply(null, parts.map((x) => x.min)),
+              max: Math.max.apply(null, parts.map((x) => x.max)) }
+          : { min: Math.min.apply(null, parts.map((x) => x.min)),
+              max: Math.min.apply(null, parts.map((x) => x.max)) };
+        break;
+      }
+      case 'set': case 'rep': {
+        const parts = node.items.map((i) => boundsOf(i, ctx));
+        if (parts.some((x) => !x)) return null;
+        let lo = 0, hi = 0;
+        for (const x of parts) { lo += x.min; hi += x.max; }
+        const times = node.t === 'rep' ? constOf(node.count) : 1;
+        if (times === null || !(times >= 0)) return null;
+        b = span(lo * times, hi * times);
+        break;
+      }
+      case 'custom': {
+        const parts = node.items.map((i) => boundsOf(i, ctx));
+        if (parts.some((x) => !x)) return null;
+        b = { min: Math.min.apply(null, parts.map((x) => x.min)),
+              max: Math.max.apply(null, parts.map((x) => x.max)) };
+        break;
+      }
+      case 'ternary': {
+        const y = boundsOf(node.yes, ctx), n = boundsOf(node.no, ctx);
+        if (!y || !n) return null;
+        b = { min: Math.min(y.min, n.min), max: Math.max(y.max, n.max) };
+        break;
+      }
+      case 'band': {
+        const parts = node.arms.map((a) => boundsOf(a.then, ctx))
+          .concat([boundsOf(node.otherwise, ctx)]);
+        if (parts.some((x) => !x)) return null;
+        b = { min: Math.min.apply(null, parts.map((x) => x.min)),
+              max: Math.max.apply(null, parts.map((x) => x.max)) };
+        break;
+      }
+      case 'word': {
+        const fixed = ctx.fixed && ctx.fixed[node.name];
+        if (fixed) return boundsOf(fixed, ctx);
+        const src = varSrc(node.name, ctx);
+        if (src === undefined) return null;              // a plain word has no number
+        const key = 'b' + node.name + '::' + src;
+        if (ctx.seen.has(key)) return null;
+        ctx.seen.add(key);
+        try { b = boundsOf(varAst(node.name, src), ctx); } catch (e) { return null; }
+        break;
+      }
+      case 'dice': {
+        const sides = constOf(node.sides), qty = node.qty === null ? 1 : constOf(node.qty);
+        if (sides === null || qty === null || !(qty >= 0) || !(sides >= 1)) return null;
+        let lo = 1, hi = Math.floor(sides), n = Math.floor(qty);
+        for (const m of mods) {
+          if (m.t === 'explode') return null;            // no ceiling worth quoting
+          if (m.t === 'min') lo = Math.max(lo, m.n);
+          if (m.t === 'max') hi = Math.min(hi, m.n);
+          if (m.t === 'keep') n = Math.min(n, m.n);
+          if (m.t === 'drop') n = Math.max(0, n - m.n);
+        }
+        if (hi < lo) hi = lo;
+        b = span(n * lo, n * hi);
+        break;
+      }
+      default: return null;
+    }
+
+    // a check replaces the number with a count of hits
+    const chk = mods.filter((m) => m.t === 'check').pop();
+    if (chk) {
+      if (!CHECKS[chk.check].castable) return null;
+      const n = node.t === 'dice' && node.qty !== null ? constOf(node.qty) : 1;
+      return (n === null || !(n >= 0)) ? null : span(0, Math.floor(n));
+    }
+    return b;
+  }
+
+  /** what the whole expression could produce, without rolling anything */
+  function outcomes(input) {
+    const p = parse(input);
+    const ctx = { vars: p.vars, fixed: p.fixed, seen: new Set() };
+    const words = [];
+    for (const part of p.rolls) wordsOf(part.ast, words, ctx);
+
+    let lo = 0, hi = 0, numeric = true;
+    for (const part of p.rolls) {
+      const b = boundsOf(part.ast, { vars: p.vars, fixed: p.fixed, seen: new Set() });
+      if (!b) { numeric = false; break; }
+      lo += b.min; hi += b.max;
+    }
+    const reps = p.repeat > 1 ? p.repeat : 1;
+    return {
+      words,
+      min: numeric ? lo * reps : null,
+      max: numeric ? hi * reps : null
+    };
+  }
+
+  /* A roll that lands on a word has no total, so the run counts words instead
+     of summing them. Both may happen in the same expression. */
   function analyse(input, n) {
     const p = parse(input);
     n = n || 20000;
-    const totals = new Array(n);
-    let sum = 0, min = Infinity, max = -Infinity;
+    const can = outcomes(input);
+    const totals = [];
+    const tally = {};
+    for (const w of can.words) tally[w] = 0;
+
     for (let i = 0; i < n; i++) {
-      let t = 0;
+      let t = 0, word = null;
       for (let r = 0; r < p.repeat; r++) {
-        for (const part of p.rolls) t += evaluate(part.ast, p.vars, p.fixed).total();
+        for (const part of p.rolls) {
+          const v = evaluate(part.ast, p.vars, p.fixed);
+          try { t += v.total(); }
+          catch (e) { word = wordText(v) || word; }
+        }
       }
-      totals[i] = t; sum += t;
-      if (t < min) min = t;
-      if (t > max) max = t;
+      if (word !== null) tally[word] = (tally[word] || 0) + 1;
+      else totals.push(t);
     }
-    const mean = sum / n;
-    let varsum = 0;
-    for (let i = 0; i < n; i++) varsum += (totals[i] - mean) * (totals[i] - mean);
-    const sorted = totals.slice().sort((a, b) => a - b);
-    return {
-      n, min, max, mean, stdev: Math.sqrt(varsum / n),
-      median: sorted[Math.floor(n / 2)],
-      p10: sorted[Math.floor(n * 0.10)], p90: sorted[Math.floor(n * 0.90)],
-      totals, notation: p.notation
+
+    const out = {
+      n, notation: p.notation, totals, tally,
+      words: can.words.concat(Object.keys(tally).filter((w) => can.words.indexOf(w) < 0)),
+      canMin: can.min, canMax: can.max
     };
+    if (!totals.length) return Object.assign(out, { numeric: 0 });
+
+    let sum = 0, min = Infinity, max = -Infinity;
+    for (const t of totals) { sum += t; if (t < min) min = t; if (t > max) max = t; }
+    const mean = sum / totals.length;
+    let varsum = 0;
+    for (const t of totals) varsum += (t - mean) * (t - mean);
+    const sorted = totals.slice().sort((a, b) => a - b);
+    return Object.assign(out, {
+      numeric: totals.length, min, max, mean, stdev: Math.sqrt(varsum / totals.length),
+      median: sorted[Math.floor(sorted.length / 2)],
+      p10: sorted[Math.floor(sorted.length * 0.10)],
+      p90: sorted[Math.floor(sorted.length * 0.90)]
+    });
   }
 
   global.DiceEngine = {
     parse, inspect, evaluate, roll, analyse, preview, setVars, fmt, esc, shapeFor,
-    splitLabel, DiceError, LIMIT, FUNCS, CHECKS, MARK_ORDER
+    splitLabel, outcomes, DiceError, LIMIT, FUNCS, CHECKS, MARK_ORDER
   };
 }(window));

@@ -253,9 +253,11 @@
   <section class="pane" id="paneExpr">
     <div class="panehead">
       <span class="ttl">Expression</span>
+      <button class="roll sec" id="btnUndo" title="Undo">undo<kbd class="onpc">Ctrl Z</kbd><kbd class="onphone">&#8630;</kbd></button>
+      <button class="roll sec" id="btnRedo" title="Redo">redo<kbd class="onpc">Ctrl Y</kbd><kbd class="onphone">&#8631;</kbd></button>
       <span class="spacer"></span>
       <span class="notation" id="notation"></span>
-      <button class="roll" id="rollBtn">Roll<kbd>&crarr;</kbd></button>
+      <button class="roll" id="rollBtn">Roll<kbd class="onpc">&crarr;</kbd><kbd class="onphone">&crarr;</kbd></button>
     </div>
     <!-- what the expression would roll, by die name; updates as you type -->
     <div class="preview" id="preview"></div>
@@ -266,10 +268,6 @@
                 placeholder="4d6dl1 &nbsp; 2d20kh1+5 &nbsp; {2d6, 3d8}kh1 &nbsp; 10d10>=7f<=1 &nbsp; 6x 4d6dl1 # stats"></textarea>
     </div>
     <div class="status" id="status">&nbsp;</div>
-    <div class="undoredo">
-      <button class="mini" id="btnUndo" title="Undo (Ctrl+Z)">&#8630; undo</button>
-      <button class="mini" id="btnRedo" title="Redo (Ctrl+Y)">&#8631; redo</button>
-    </div>
     <div class="shortcuts" id="shortcuts"></div>
   </section>
 
@@ -293,7 +291,7 @@
         <button data-tab="details">Details</button>
         <button data-tab="vars">Vars</button>
         <button data-tab="saved">Saved</button>
-        <button data-tab="setup">Setup</button>
+        <button data-tab="setup">Transfer</button>
       </div>
       <button class="drawer" id="drawerToggle" aria-label="Collapse panel" aria-expanded="true">&#9662;</button>
     </div>

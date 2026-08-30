@@ -66,7 +66,15 @@ otherwise match its first letter and abandon the whole modifier.
 expression whose `# name` says what it is called; nothing stores a name beside
 one. That is what lets a single field hold the whole thing, and why nothing can
 drift out of step. `varAst` strips the label before parsing, so a variable's
-name is drawn once — on its subtotal bracket — and never twice.
+name is drawn once — on its subtotal bracket — and never twice. A `{name}` in
+the label is the identifier expressions use when that differs from the title;
+`<dN>` in a title draws the die (`nameOf` / `titleOf` / `titleHTML`).
+
+**Details says what could happen, not only what did.** `outcomes()` reads the
+tree rather than the run: `wordsOf` lists every word the result could be, in
+source order, and `boundsOf` is interval arithmetic giving the smallest and
+largest number reachable. `null` means it cannot be said — an exploding die has
+no ceiling worth quoting — and the chart falls back to what was observed.
 
 **A chain of comparisons works its subject out once.** `d6>4?yes:>2?maybe:no`
 parses as a `band`, not nested ternaries, by lifting the first comparison back
