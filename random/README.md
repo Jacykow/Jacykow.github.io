@@ -341,7 +341,7 @@ A variable that refers back to itself is caught at a fixed depth rather than han
 * **undo / redo** sit under the expression, for a screen with no keyboard to reach them
   from.
 * **Transfer** — a link carrying your saved rolls and variables together. Opening one,
-  or pasting one in, offers what it holds with everything ticked; what you take is added
+  or pasting one in, offers what it holds with everything selected; what you take is added
   to what you already have, and one button offers the same list back to undo it.
 
 ### Two kinds of link

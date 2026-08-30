@@ -1367,8 +1367,8 @@
   }
 
   /* One dialog for both directions: adding what a link holds, and taking back
-     out what the last one added. Everything is ticked to begin with, because
-     that is what was asked for either way. */
+     out what the last one added. Everything starts selected, because that is
+     what was asked for either way. */
   function pickDialog(mode, st) {
     const adding = mode === 'add';
     const rows = (list, kind) => list.map((x, i) =>
@@ -1384,12 +1384,12 @@
         '<h3>' + (adding ? 'Take what you want' : 'Put back what you do not') + '</h3>' +
         '<p>' + (adding
           ? 'These are added to what you already have. Anything you already own is skipped.'
-          : 'These came in with the last import. Whatever stays ticked is removed.') + '</p>' +
+          : 'These came in with the last import. Whatever stays selected is removed.') + '</p>' +
         (st.saved.length ? '<h4>Saved rolls</h4>' + rows(st.saved, 's') : '') +
         (st.vars.length ? '<h4>Variables</h4>' + rows(st.vars, 'v') : '') +
         '<div class="sheetend">' +
           '<button class="varadd" data-go="1">' +
-            (adding ? 'add the ticked' : 'remove the ticked') + '</button>' +
+            (adding ? 'add selected' : 'remove selected') + '</button>' +
           '<button class="varadd" data-close="1">cancel</button>' +
         '</div>' +
       '</div>';
