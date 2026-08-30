@@ -114,6 +114,12 @@ rendered as a `Ref` that holds no `inner`, so its dice are counted once.
   is being typed into does not get rebuilt — the other does. Stepping a number
   never rebuilds the bar either, or the button would move out from under the
   cursor as the number gains a digit.
+- **The subtotal tree is an overlay, not a strip underneath.** Bars are placed
+  from `getClientRects()`, one per line a node runs onto, so it survives content
+  that wraps — which it does on a desktop, where the expression and its preview
+  wrap rather than scroll. Room comes from the line-height, set to fit the
+  deepest stack. A bracket over a single value (`data-lone`) becomes a line from
+  its name to it when the name will not fit inside.
 - **Subtotal rows are assigned deepest-first.** An enclosing bracket sits above
   everything it encloses, so it has to be settled after the things inside it
   have finished rising, or two brackets land on the same row.

@@ -840,10 +840,19 @@
   const noteAttr = (name, list) =>
     list.length ? ' ' + name + '="' + esc(list.join('|')) + '"' : '';
 
+  /* A bracket spanning one value has nothing to span. Saying so lets the
+     display draw a line from the name to it instead of a bracket over it. */
+  function isLone(item) {
+    if (item.inner) return !!item.inner.atom;
+    if (item.set) { const live = item.live(); return live.length === 1 && !!live[0].atom; }
+    return false;
+  }
+
   /** what the subtotal bracket needs to know beyond its number */
   function stateAttr(o, item) {
     const mark = markOf(item);
     return (isDropped(o, item) ? ' data-drop="1"' : '') +
+      (isLone(item) ? ' data-lone="1"' : '') +
       (mark ? ' data-mark="' + mark + '"' : '') +
       noteAttr('data-note', item.note ? [item.note] : []) +
       noteAttr('data-steps', noteList(item.mods, false));
@@ -1869,8 +1878,8 @@
         // as in the result: nothing to bracket when it is a single value
         const open = atomAst(ast) ? '' : '<span class="r-brk"' + tag + '>(</span>';
         const close = atomAst(ast) ? '' : '<span class="r-brk"' + tag + '>)</span>';
-        return '<span class="r-grp"' + tag + noteAttr('data-note', [node.name]) + steps + '>' +
-          open + inner + close + '</span>' + cmp;
+        return '<span class="r-grp"' + tag + noteAttr('data-note', [node.name]) + steps +
+          (atomAst(ast) ? ' data-lone="1"' : '') + '>' + open + inner + close + '</span>' + cmp;
       }
       /* being edited, both answers are still open, so both are spelled out */
       case 'ternary':

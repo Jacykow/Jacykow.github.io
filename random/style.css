@@ -684,7 +684,8 @@ button.roll.sec kbd{background:#171b23; color:var(--dimmer)}
 @media(max-width:820px){ .onpc{display:none} .onphone{display:inline-block} }
 
 /* a die drawn inside a name */
-.die.inline{--dsz:19px; vertical-align:-4px; margin:0 1px}
+.die.inline{--dsz:25px; vertical-align:-7px; margin:0 1px}
+.die.inline .dieval{font-weight:700}
 
 /* the last thing in a scrolling panel needs room to be reached */
 .tailroom{height:28px}
@@ -727,3 +728,36 @@ button.roll.sec kbd{background:#171b23; color:var(--dimmer)}
 .wpct{font-family:var(--mono); color:var(--dimmer); font-size:11px; width:46px; text-align:right; flex:none}
 .stat.wide{grid-column:span 2}
 .hist .bar.empty{background:var(--border)}
+
+/* ------------------------------------------------- wrapping on a desktop
+   A phone has no room to wrap into, so there the line scrolls sideways. A
+   desktop has the width, and reading beats scrolling. */
+@media(min-width:1000px){
+  .editor .hl, .editor textarea{
+    white-space:pre-wrap; overflow-x:hidden; word-break:break-word;
+  }
+  .editor textarea{height:auto; min-height:62px; overflow-y:hidden}
+  .preview{white-space:normal; overflow-x:hidden}
+  .preview .treehost{display:block}
+}
+
+/* a bracket over one value becomes a line from its name across to it */
+.sumbar.lone.leader{border-top:none}
+.sumbar.lone.leader::before{height:9px; top:-9px}
+.sumbar.lone.leader::after{display:none}
+.sumbar.lone.leader .sumval{left:0; transform:none; padding-left:7px}
+
+/* the roll button wears a die on a phone, where a return key means nothing */
+.rolldie{width:15px; height:15px; line-height:0}
+.rolldie svg{width:15px; height:15px; fill:#3a2c05; color:#3a2c05; stroke:#3a2c05}
+
+/* how an incoming preset item stands against what is already here */
+.pickrow .tag{
+  font-style:normal; font-size:10px; text-transform:uppercase; letter-spacing:.08em;
+  padding:1px 6px; border-radius:999px; flex:none; margin-left:auto;
+}
+.pickrow.new .tag{background:rgba(95,214,138,.15); color:var(--green)}
+.pickrow.update .tag{background:rgba(240,180,41,.15); color:var(--accent)}
+.pickrow.same .tag{background:var(--pane-2); color:var(--dimmer)}
+.pickrow.same{opacity:.6}
+.sheet p b{color:var(--dim); font-weight:600}

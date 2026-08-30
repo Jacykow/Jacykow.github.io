@@ -251,12 +251,16 @@
     const vars = loadVars(), saved = loadSaved();
     const added = { v: [], s: [] };
     for (const v of pick.vars) {
-      if (vars.some((x) => nameOf(x.expr) === nameOf(v.expr))) continue;
-      vars.push(v); added.v.push(v.expr);
+      const at = vars.findIndex((x) => nameOf(x.expr) === nameOf(v.expr));
+      if (at >= 0 && vars[at].expr === v.expr) continue;      // already exactly this
+      if (at >= 0) vars[at] = v; else vars.push(v);
+      added.v.push(v.expr);
     }
     for (const x of pick.saved) {
-      if (saved.some((y) => y.expr === x.expr)) continue;
-      saved.push(x); added.s.push(x.expr);
+      const at = saved.findIndex((y) => titleOf(y.expr) === titleOf(x.expr));
+      if (at >= 0 && saved[at].expr === x.expr) continue;
+      if (at >= 0) saved[at] = x; else saved.push(x);
+      added.s.push(x.expr);
     }
     pushVars(vars);
     store.write(LS_SAVED, saved);
@@ -311,14 +315,17 @@
      shortcuts reads at a glance. */
   const dieChip = (n) => {
     const shape = E.shapeFor(n);
-    const size = String(n).length >= 3 ? ' v3' : (String(n).length === 2 ? ' v2' : '');
-    return '<span class="die inline s-' + shape + '">' +
+    const face = 'D' + n;
+    const size = face.length >= 4 ? ' v4' : (face.length === 3 ? ' v3' : ' v2');
+    return '<span class="die inline ghost s-' + shape + '">' +
       '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
       '<use href="#sh-' + shape + '"/></svg>' +
-      '<span class="dieval' + size + '">' + n + '</span></span>';
+      '<span class="dieval' + size + '">' + face + '</span></span>';
   };
-  const titleHTML = (expr) =>
-    esc(titleOf(expr)).replace(/&lt;d(\d+)&gt;/gi, (m, n) => dieChip(+n));
+  /** one place turns `<dN>` into a die, wherever a name or a label is shown */
+  const dieText = (s) =>
+    esc(s == null ? '' : s).replace(/&lt;d(\d+)&gt;/gi, (m, n) => dieChip(+n));
+  const titleHTML = (expr) => dieText(titleOf(expr));
 
   /** swap the expression, keep the name */
   function withBody(expr, body) {
@@ -475,6 +482,14 @@
       const s = step(ev);
       if (s) stepVar(s.b, s.by);
     });
+  }
+
+  /* Where the line wraps, the field has to grow to hold it — and the <pre>
+     under it follows, since the two only line up while they are the same size. */
+  function growEditor() {
+    if (!wide.matches) { el.ta.style.removeProperty('height'); return; }
+    el.ta.style.height = 'auto';
+    el.ta.style.height = el.ta.scrollHeight + 'px';
   }
 
   /* ==================================================== syntax highlighting */
@@ -671,7 +686,7 @@
   function lineHTML(roll, idx) {
     // the label replaces the expression when there is one; showing both is noise
     const name = roll.label
-      ? '<span class="ll">' + esc(roll.label) + '</span>'
+      ? '<span class="ll">' + dieText(roll.label) + '</span>'
       : '<span class="lx">' + esc(roll.notation) + '</span>';
     return '<div class="line" data-open="' + idx + '" data-scope="' + scopeFor(roll.input) +
       '" title="show the breakdown">' +
@@ -722,7 +737,7 @@
         '<div class="total">' + totalHTML(roll) + '</div>' +
         '<div class="meta">' +
           '<div class="expr">' + esc(roll.notation) + '</div>' +
-          (roll.label ? '<div class="lbl"># ' + esc(roll.label) + '</div>' : '') +
+          (roll.label ? '<div class="lbl"># ' + dieText(roll.label) + '</div>' : '') +
           '<div class="sub">' + meta.join('<span>&middot;</span>') + '</div>' +
         '</div>' +
       '</div>' +
@@ -1034,6 +1049,7 @@
      Every summing node carries data-sum. Measure where each one sits over the
      dice and draw it as a bracket underneath, innermost nearest the dice. */
   const SUM_ROW = 17;
+  const TREE_TOP = 4;        // clearance between a line and the first bracket
   const SEL_TREE = '[data-sum], [data-steps], [data-note]';
 
   /* What each node draws, innermost first: one bar per modifier step, then one
@@ -1050,21 +1066,22 @@
     return out;
   }
 
+  /* The tree is drawn as an overlay rather than a strip underneath, so it
+     survives content that wraps: a node that runs onto two lines has two
+     rectangles, and each gets its own bracket beneath its own line. Room for
+     them comes from the line-height, which is set to fit the deepest stack. */
   function drawTrees(root) {
     root.querySelectorAll('.setrow .body, .treehost').forEach((body) => {
       body.querySelectorAll('.sumtree').forEach((n) => n.remove());
+      body.style.removeProperty('line-height');
       const nodes = Array.prototype.slice.call(body.querySelectorAll(SEL_TREE));
       if (!nodes.length) return;
-      const base = body.getBoundingClientRect();
-      const items = nodes.map((n) => {
-        const r = n.getBoundingClientRect();
-        return {
-          node: n, bars: barsFor(n, body), row: 0,
-          left: r.left - base.left, width: r.width,
-          x: n.getAttribute('data-x'), drop: n.hasAttribute('data-drop'),
-          mark: n.getAttribute('data-mark')
-        };
-      }).filter((it) => it.bars.length);
+
+      const items = nodes.map((n) => ({
+        node: n, bars: barsFor(n, body), row: 0,
+        x: n.getAttribute('data-x'), drop: n.hasAttribute('data-drop'),
+        lone: n.hasAttribute('data-lone'), mark: n.getAttribute('data-mark')
+      })).filter((it) => it.bars.length);
       if (!items.length) return;
 
       /* An enclosing node starts above everything it encloses. Deepest first,
@@ -1080,30 +1097,40 @@
       }
       const rows = items.reduce((a, it) => Math.max(a, it.row + it.bars.length), 0);
 
+      // every line needs room under it for the deepest stack that can sit there
+      const lh = parseFloat(getComputedStyle(body).lineHeight) || 20;
+      body.style.lineHeight = Math.max(lh, TREE_TOP + rows * SUM_ROW) + 'px';
+
+      const base = body.getBoundingClientRect();
       const layer = document.createElement('div');
       layer.className = 'sumtree';
-      layer.style.height = (rows * SUM_ROW) + 'px';
       const drawn = [];
       for (const it of items) {
-        it.bars.forEach((b, k) => {
-          const bar = document.createElement('div');
-          bar.className = 'sumbar' + (it.drop ? ' dropped' : '') +
-            (it.mark && b.name ? ' ' + it.mark : '') + (b.name ? '' : ' step');
-          if (it.x) bar.setAttribute('data-x', it.x);
-          bar.style.left = it.left + 'px';
-          bar.style.width = Math.max(it.width, 20) + 'px';
-          bar.style.top = ((it.row + k) * SUM_ROW) + 'px';   // innermost nearest the dice
-          // the label leads, so you know what the number is before you read it
-          bar.innerHTML = '<span class="sumval">' + (b.label ? '<i></i>' : '') +
-            (b.sum === null ? '' : '<b>' + esc(b.sum) + '</b>') + '</span>';
-          layer.appendChild(bar);
-          drawn.push([bar, b]);
+        const rects = Array.prototype.slice.call(it.node.getClientRects());
+        if (!rects.length) continue;
+        rects.forEach((r, ri) => {
+          it.bars.forEach((b, k) => {
+            const bar = document.createElement('div');
+            const lone = it.lone && b.name;
+            bar.className = 'sumbar' + (it.drop ? ' dropped' : '') +
+              (it.mark && b.name ? ' ' + it.mark : '') + (b.name ? '' : ' step') +
+              (lone ? ' lone' : '');
+            if (it.x) bar.setAttribute('data-x', it.x);
+            bar.style.left = (r.left - base.left) + 'px';
+            bar.style.width = Math.max(r.width, 20) + 'px';
+            bar.style.top = ((r.bottom - base.top) + (it.row + k) * SUM_ROW) + 'px';
+            // the label leads, so you know what the number is before you read it
+            bar.innerHTML = '<span class="sumval">' + (b.label ? '<i></i>' : '') +
+              (b.sum === null ? '' : '<b>' + esc(b.sum) + '</b>') + '</span>';
+            layer.appendChild(bar);
+            if (ri === 0) drawn.push([bar, b, it]);
+          });
         });
       }
       body.appendChild(layer);
 
-      for (const [bar, b] of drawn) {
-        if (b.label) fitLabel(bar, b.label, b.name);
+      for (const [bar, b, it] of drawn) {
+        if (b.label) fitLabel(bar, b.label, b.name, it.lone);
       }
     });
   }
@@ -1113,12 +1140,22 @@
      disappears entirely: it gives up letters instead, down to a stub. */
   const NAME_STUB = 3;
   const NAME_ROOM = 76;      // a short name is worth spilling past its bracket for
-  function fitLabel(bar, label, named) {
+  function fitLabel(bar, label, named, lone) {
     const val = bar.querySelector('.sumval');
     const tag = val.querySelector('i');
     const room = () =>
       Math.max(bar.getBoundingClientRect().width, named ? NAME_ROOM : 0);
     const fits = () => val.getBoundingClientRect().width <= room();
+
+    /* A bracket over one value has nothing to span. When the name will not sit
+       inside it, it becomes a line from the name across to the value. */
+    if (lone && named) {
+      tag.textContent = label;
+      if (val.getBoundingClientRect().width > bar.getBoundingClientRect().width) {
+        bar.classList.add('leader');
+      }
+      return;
+    }
 
     const words = label.split(' ');
     for (let k = words.length; k > 0; k--) {
@@ -1338,44 +1375,69 @@
     return null;
   }
 
-  /* ============================================================= transfer */
+  /* =============================================================== preset
+     A preset is everything you have set up — the saved rolls and the
+     variables — carried in one link. It lives in localStorage between visits
+     like everything else, so a link is only ever a way of moving one about. */
+  const DEFAULT_PRESET = {
+    vars: [],
+    saved: FIRST_ROLLS.map((x) => ({ expr: x.expr, mark: true }))
+  };
+
   function renderSetup() {
     const link = setupLink();
     const back = lastImport();
     $('tab-setup').innerHTML =
-      '<div class="varhint">Your saved rolls and variables together. The link below ' +
-      'carries them: open it anywhere, or paste one here to look it over and pick what ' +
-      'to take. The expression link in the top bar is a different thing — it holds only ' +
-      'the roll you last made.</div>' +
+      '<div class="varhint">Your saved rolls and variables together, kept in this ' +
+      'browser between visits. The link below carries them somewhere else: open it there, ' +
+      'or paste one here to look it over first. The expression link in the top bar is a ' +
+      'different thing — it holds only the roll you last made.</div>' +
       '<div class="setrowb"><label>Yours</label>' +
         '<textarea class="setbox" id="setOut" readonly rows="2">' + esc(link) + '</textarea>' +
-        '<button class="varadd" id="setCopy">copy</button></div>' +
+        '<button class="varadd" id="setCopy">export</button></div>' +
       '<div class="setrowb"><label>Paste one</label>' +
         '<textarea class="setbox" id="setIn" rows="2" spellcheck="false" ' +
           'placeholder="paste a link here"></textarea>' +
-        '<button class="varadd" id="setLoad">look</button></div>' +
+        '<button class="varadd" id="setLoad">import</button></div>' +
+      '<div class="setrowb"><label>Or start from</label>' +
+        '<button class="varadd" id="setDefault">the starting preset</button></div>' +
       (back ? '<button class="varadd" id="setBack">undo the last import&hellip;</button>' : '') +
       '<div class="tailroom"></div>';
 
     $('setCopy').addEventListener('click', () => copy(link, 'link copied', 'could not copy'));
     $('setLoad').addEventListener('click', () => {
       const st = readSetup($('setIn').value);
-      if (!st || (!st.vars.length && !st.saved.length)) { toast('that is not a setup link'); return; }
+      if (!st || (!st.vars.length && !st.saved.length)) { toast('that is not a preset link'); return; }
       pickDialog('add', st);
     });
+    $('setDefault').addEventListener('click', () => pickDialog('add', DEFAULT_PRESET));
     if (back) $('setBack').addEventListener('click', () => pickDialog('remove', back));
   }
 
+  /** how an incoming item stands against what is already here */
+  function standing(item, kind) {
+    const mine = kind === 'v' ? loadVars() : loadSaved();
+    const key = (x) => kind === 'v' ? nameOf(x.expr) : titleOf(x.expr);
+    const match = mine.find((x) => key(x) === key(item));
+    if (!match) return 'new';
+    return match.expr === item.expr ? 'same' : 'update';
+  }
+
   /* One dialog for both directions: adding what a link holds, and taking back
-     out what the last one added. Everything starts selected, because that is
-     what was asked for either way. */
+     out what the last one added. Anything new or changed starts selected;
+     something already here exactly as it is does not, since taking it would
+     do nothing. */
   function pickDialog(mode, st) {
     const adding = mode === 'add';
-    const rows = (list, kind) => list.map((x, i) =>
-      '<label class="pickrow"><input type="checkbox" checked data-kind="' + kind +
-        '" data-i="' + i + '">' +
+    const rows = (list, kind) => list.map((x, i) => {
+      const how = adding ? standing(x, kind) : 'new';
+      return '<label class="pickrow ' + how + '">' +
+        '<input type="checkbox"' + (how === 'same' ? '' : ' checked') +
+          ' data-kind="' + kind + '" data-i="' + i + '">' +
         '<b>' + (titleOf(x.expr) ? titleHTML(x.expr) : '—') + '</b>' +
-        '<code>' + esc(bodyOf(x.expr)) + '</code></label>').join('');
+        '<code>' + esc(bodyOf(x.expr)) + '</code>' +
+        (adding ? '<em class="tag">' + how + '</em>' : '') + '</label>';
+    }).join('');
 
     const host = document.createElement('div');
     host.className = 'modal';
@@ -1383,7 +1445,9 @@
       '<div class="sheet">' +
         '<h3>' + (adding ? 'Take what you want' : 'Put back what you do not') + '</h3>' +
         '<p>' + (adding
-          ? 'These are added to what you already have. Anything you already own is skipped.'
+          ? 'Added to what you already have. <b>new</b> is not here yet, ' +
+            '<b>update</b> is here but says something different, <b>same</b> is already ' +
+            'exactly this.'
           : 'These came in with the last import. Whatever stays selected is removed.') + '</p>' +
         (st.saved.length ? '<h4>Saved rolls</h4>' + rows(st.saved, 's') : '') +
         (st.vars.length ? '<h4>Variables</h4>' + rows(st.vars, 'v') : '') +
@@ -1401,13 +1465,13 @@
       if (!ev.target.closest('[data-go]')) return;
       const pick = { vars: [], saved: [] };
       host.querySelectorAll('input:checked').forEach((c) => {
-        const list = c.getAttribute('data-kind') === 'v' ? st.vars : st.saved;
-        const item = list[+c.getAttribute('data-i')];
-        if (item) (c.getAttribute('data-kind') === 'v' ? pick.vars : pick.saved).push(item);
+        const v = c.getAttribute('data-kind') === 'v';
+        const item = (v ? st.vars : st.saved)[+c.getAttribute('data-i')];
+        if (item) (v ? pick.vars : pick.saved).push(item);
       });
       const n = adding ? addSetup(pick) : dropSetup(pick);
       shut();
-      $('setIn') && ($('setIn').value = '');
+      if ($('setIn')) $('setIn').value = '';
       renderSetup();
       onInput();
       toast(n ? (adding ? n + ' added' : n + ' removed') : 'nothing to do');
@@ -1447,7 +1511,7 @@
       state.inspect = null; state.error = null;
       el.status.textContent = ' ';
       el.status.classList.remove('err');
-      el.notation.textContent = '';
+      el.notation.innerHTML = '';
       el.wrap.classList.remove('bad', 'ok');
       paint(); renderExplain(); renderPreview();
       if (state.activeTab === 'details') renderDetails();
@@ -1458,7 +1522,7 @@
       state.inspect = E.inspect(raw);
       state.error = null;
       const p = state.inspect.parsed;
-      el.notation.textContent = p.label || '';
+      el.notation.innerHTML = dieText(p.label || '');
       el.status.classList.remove('err');
       el.status.textContent = summarise(p);
       el.wrap.classList.remove('bad');
@@ -1478,6 +1542,7 @@
     el.explain.setAttribute('data-scope', sc);
 
     paint();
+    growEditor();
     renderExplain();
     syncCaret(true);
 
@@ -1488,12 +1553,7 @@
     if (state.activeTab === 'details') detailsTimer = setTimeout(renderDetails, 300);
   }
 
-  function summarise(p) {
-    const bits = [];
-    if (p.repeat > 1) bits.push(p.repeat + ' sets');
-    if (p.label) bits.push('label "' + p.label + '"');
-    return bits.length ? '✓  ' + bits.join('  ·  ') : '✓  ready';
-  }
+  const summarise = () => '✓  syntax valid';
 
   function errorLine(err, raw) {
     if (typeof err.pos !== 'number') return '✗  ' + err.message;
@@ -1541,6 +1601,8 @@
 
     wide.addEventListener('change', () => {
       renderReference();
+      growEditor();
+      renderPreview();
       if (!wide.matches && state.activeTab === 'reference') switchTab('explain');
       else if (wide.matches && state.activeTab === 'reference') switchTab('explain');
     });
@@ -1590,7 +1652,12 @@
     // only a person can cause this: replaceState never fires it
     window.addEventListener('hashchange', () => {
       const st = readSetup();
-      if (st && (st.vars.length || st.saved.length)) { switchTab('setup'); pickDialog('add', st); return; }
+      if (st && (st.vars.length || st.saved.length)) {
+        const n = addSetup(st);
+        toast(n ? 'preset loaded — ' + n + ' added' : 'preset already loaded');
+        renderSetup(); onInput();
+        return;
+      }
       const e = readExpr();
       if (e !== null && e !== el.ta.value) { el.ta.value = e; onInput(); }
     });
@@ -1599,8 +1666,9 @@
     el.ta.focus();
     el.ta.setSelectionRange(el.ta.value.length, el.ta.value.length);
     if (fromLink && (fromLink.vars.length || fromLink.saved.length)) {
-      switchTab('setup');
-      pickDialog('add', fromLink);
+      const n = addSetup(fromLink);
+      toast(n ? 'preset loaded — ' + n + ' added' : 'preset already loaded');
+      renderSetup();
     }
   }
 

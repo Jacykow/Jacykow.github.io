@@ -195,8 +195,11 @@ label answers the second when they differ, and is not shown:
 
 ```
 0 # Modyfikatory {mod}      shows as Modyfikatory, written as mod
-2d6 # 2x <d6>               <dN> in a name draws the die instead of spelling it
+2d6 # 2x <d6>               <dN> draws the die instead of spelling it
 ```
+
+`<dN>` works in any label, not only a name — `2d6 # Rzut <d6><d6>` labels the roll with
+two dice wherever that label is shown.
 
 ```
 d20+5 # atk             a variable, set in the Vars panel
@@ -340,9 +343,12 @@ A variable that refers back to itself is caught at a fixed depth rather than han
   editing, under its `# name`.
 * **undo / redo** sit under the expression, for a screen with no keyboard to reach them
   from.
-* **Transfer** — a link carrying your saved rolls and variables together. Opening one,
-  or pasting one in, offers what it holds with everything selected; what you take is added
-  to what you already have, and one button offers the same list back to undo it.
+* **Preset** — your saved rolls and variables together. They live in this browser's
+  `localStorage` between visits, like the rest; a preset link is only a way of moving them
+  to another browser. Opening one loads it straight away. Pasting one into the panel
+  instead offers what it holds first, marking each entry **new**, **update** or **same**,
+  with everything but the sames selected; what you take is added to what you already have,
+  and one button offers the same list back to undo it. A button loads the starting preset.
 
 ### Two kinds of link
 

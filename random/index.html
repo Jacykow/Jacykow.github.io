@@ -232,7 +232,7 @@
 
 <header id="topbar">
   <div class="brand">Random<span>Engine</span></div>
-  <div class="tagline">advanced dice notation, explained as you type</div>
+  <div class="tagline">advanced dice notation</div>
   <div class="spacer"></div>
   <button class="tb" id="btnSave" title="Save the current expression under its # name">Save</button>
   <button class="tb" id="btnLink" title="Copy a link to this expression">Copy link</button>
@@ -257,7 +257,7 @@
       <button class="roll sec" id="btnRedo" title="Redo">redo<kbd class="onpc">Ctrl Y</kbd><kbd class="onphone">&#8631;</kbd></button>
       <span class="spacer"></span>
       <span class="notation" id="notation"></span>
-      <button class="roll" id="rollBtn">Roll<kbd class="onpc">&crarr;</kbd><kbd class="onphone">&crarr;</kbd></button>
+      <button class="roll" id="rollBtn">Roll<kbd class="onpc">&crarr;</kbd><span class="onphone rolldie"><svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><use href="#sh-d6"/></svg></span></button>
     </div>
     <!-- what the expression would roll, by die name; updates as you type -->
     <div class="preview" id="preview"></div>
@@ -291,7 +291,7 @@
         <button data-tab="details">Details</button>
         <button data-tab="vars">Vars</button>
         <button data-tab="saved">Saved</button>
-        <button data-tab="setup">Transfer</button>
+        <button data-tab="setup">Preset</button>
       </div>
       <button class="drawer" id="drawerToggle" aria-label="Collapse panel" aria-expanded="true">&#9662;</button>
     </div>
