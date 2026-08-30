@@ -55,6 +55,13 @@ reaches the dice under it through the options object, closest check winning
 (`ctxFor` / `inheritClass` / `isDropped`). This is why `Expr` keeps its parts
 instead of a baked HTML string — bake it and nothing can reach inside afterwards.
 
+**Advantage is the one modifier that re-rolls rather than reshapes.** `a` / `da`
+roll the whole term again and keep the best or worst *total*, so they hook the
+top of `evalNode` instead of joining `applyMods`, and have to be written last —
+anything after them would apply to each attempt rather than to the winner.
+`da` must be tested before the `d` that starts `dh`/`dl`/drop, which would
+otherwise match its first letter and abandon the whole modifier.
+
 **Variables hold source text**, re-parsed and re-rolled at every occurrence, so
 `2atk` really is two rolls. Their nodes are deliberately left untagged
 (`ctx.mute`): they have no span in the expression being edited, so linking them
@@ -69,6 +76,11 @@ there would be a lie. Hovering one lights the variable as a whole instead.
   padding and line height must match exactly or the caret drifts.
 - **Cutting the source up happens before the parser sees it** (`splitParts`,
   `labelAt`), so those two have to know about brackets and quotes independently.
+- **The URL is the state**, written through `replaceState` — Safari rate-limits
+  that to roughly a hundred calls per half minute, so the write is debounced and
+  must stay that way. A bare hash is an expression; a `~` hash is a packed
+  payload. Reading one merges, so a shared link cannot cost you your own saved
+  rolls.
 - **Reference clicks must never leave the field unparseable.** `applySnippet`
   builds candidates in preference order and takes the first that parses;
   refusing the click is an acceptable outcome.

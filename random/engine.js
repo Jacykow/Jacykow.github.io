@@ -23,6 +23,7 @@
      die       e, r, u                   need dice to re-roll
      element   min, max, s, f, cs, cf    applied to each member in turn
      set       kh, kl, dh, dl            need a collection, error on a value
+     repeat    a, da                     roll the whole term again and choose
 
    Element modifiers distribute, and so does `?:` — `4d20>5?hit:miss` is four
    comparisons and four choices, never one taken on the sum.
@@ -94,7 +95,11 @@
     unique: { kind: 'set', order: 5, dice: true },
     keep: { kind: 'set', order: 6 },
     drop: { kind: 'set', order: 7 },
-    check: { kind: 'element', order: 8 }
+    check: { kind: 'element', order: 8 },
+    /* Advantage is the odd one out: every other modifier reshapes what a roll
+       produced, while this one rolls the whole term again. It is handled where
+       evaluation begins rather than in applyMods, and has to be written last. */
+    adv: { kind: 'repeat', order: 9 }
   };
 
   /* The four checks. Only `s` carries a number through to arithmetic.
@@ -437,6 +442,15 @@
         if (m.t === 'explode' && mods.some((p) => p.t === 'explode')) {
           this.fail('a die can only explode once');
         }
+        if (mods.some((p) => p.t === 'adv')) {
+          // anything after it would apply to each attempt, not to the winner
+          this.fail('advantage rolls everything to its left, so it has to come last — ' +
+            'bracket it to carry on, like (2d6a)>=9');
+        }
+        if (m.t === 'adv') {
+          if (!(m.n >= 1)) this.fail('advantage needs at least one roll');
+          if (m.n > LIMIT.repeat) this.fail('too many rolls (max ' + LIMIT.repeat + ')');
+        }
         mods.push(m);
       }
     }
@@ -469,6 +483,11 @@
         const tries = cp ? 0 : (this.digits() || 0);
         return this.fin(start, { t: 'unique', tries, cp });
       }
+
+      /* `da` has to be tried before the `d` that starts dh/dl/drop, which would
+         otherwise match its first letter and give up on the whole modifier */
+      if (this.lit('da')) return this.fin(start, { t: 'adv', end: 'l', n: this.digits() ?? 2 });
+      if (this.lit('a')) return this.fin(start, { t: 'adv', end: 'h', n: this.digits() ?? 2 });
 
       if (this.lit('kh')) return this.fin(start, { t: 'keep', end: 'h', n: this.digits() ?? 1 });
       if (this.lit('kl')) return this.fin(start, { t: 'keep', end: 'l', n: this.digits() ?? 1 });
@@ -548,6 +567,14 @@
       if ((spec.kind === 'die' || spec.dice) && node.t !== 'dice') {
         throw new DiceError('"' + modText(m) + '" has to attach to dice — there is nothing to re-roll',
           m.sp && m.sp[0]);
+      }
+      // advantage sums each attempt before comparing, so it needs a number
+      if (m.t === 'adv') {
+        const c = checkOf(node);
+        if (c && !CHECKS[c].castable) {
+          throw new DiceError('advantage compares sums, and a ' + CHECKS[c].label.toLowerCase() +
+            ' carries no number', m.sp && m.sp[0]);
+        }
       }
       if (m.cp && m.cp.node) {
         if (isSet(m.cp.node)) {
@@ -717,6 +744,11 @@
       case 'keep': return w('keep ', 'kept ') + m.n + ' ' + end(m.end);
       case 'drop': return w('drop ', 'dropped ') + m.n + ' ' + end(m.end);
       case 'check': return CHECK_SHORT[m.check] + ' on ' + cpShort(m.cp);
+      case 'adv': {
+        const best = m.end === 'h';
+        if (m.n === 2) return best ? 'advantage' : 'disadvantage';
+        return (best ? 'best of ' : 'worst of ') + m.n;
+      }
     }
     return '';
   }
@@ -1171,7 +1203,24 @@
     return out;
   }
 
+  /* Advantage rolls the term again rather than reshaping one roll, so it wraps
+     evaluation instead of joining the modifier chain. Each attempt keeps its
+     own shape but is compared by its sum — that is what makes `2d6a` the better
+     of two totals rather than the best of four dice. */
+  function rollAdv(node, m, ctx) {
+    const once = Object.assign({}, node, { mods: node.mods.filter((x) => x !== m) });
+    const tries = [];
+    for (let i = 0; i < m.n; i++) tries.push(evalNode(once, ctx));
+    const out = SetVal(tries, { uid: uidOf(node, ctx), brackets: tries.length > 1 });
+    out.mods = [m];
+    applySet(out, { t: 'keep', end: m.end, n: 1 }, null, ctx);
+    return out;
+  }
+
   function evalNode(node, ctx) {
+    const adv = (node.mods || []).find((x) => x.t === 'adv');
+    if (adv) return rollAdv(node, adv, ctx);
+
     switch (node.t) {
       case 'num': return Val(node.v);
 
@@ -1320,6 +1369,7 @@
       case 'keep': return 'k' + m.end + m.n;
       case 'drop': return 'd' + m.end + m.n;
       case 'check': return (m.bare ? '' : m.check) + cpText(m.cp);
+      case 'adv': return (m.end === 'h' ? 'a' : 'da') + (m.n === 2 ? '' : m.n);
     }
     return '';
   }
@@ -1383,6 +1433,13 @@
       case 'drop': return ['Drop ' + (m.end === 'h' ? 'highest' : 'lowest'),
         'Throw away the ' + (m.n === 1 ? '' : m.n + ' ') + (m.end === 'h' ? 'highest' : 'lowest') +
         ' member. Needs a set.'];
+      case 'adv': {
+        const best = m.end === 'h' ? 'best' : 'worst';
+        return [m.end === 'h' ? 'Advantage' : 'Disadvantage',
+          'Roll everything to the left ' + (m.n === 2 ? 'twice' : m.n + ' times') +
+          ' and keep the ' + best + '. Each attempt is summed before they are compared, ' +
+          'so this is the ' + best + ' total rather than the ' + best + ' single die.'];
+      }
       case 'check': {
         const c = CHECKS[m.check];
         const miss = (m.bare && c.bareMiss) ? c.bareMiss : c.miss;

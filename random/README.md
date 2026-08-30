@@ -61,6 +61,8 @@ it narrows the set of allowed values rather than repeating a roll.
 | 5 | `u`, `u3` | force unique results (`u3` gives up after 3 attempts) |
 | 6 | `kh3`, `kl1` | keep the highest / lowest N |
 | 7 | `dl1`, `dh1` | drop the lowest / highest N |
+| 9 | `a`, `a3` | advantage: roll it all again and keep the best total |
+| 9 | `da`, `da3` | disadvantage: keep the worst |
 | 8 | `>=8` | a plain yes/no: each die reads success or failure |
 | 8 | `s>=8` | mark the hits and say nothing about the rest |
 | 8 | `f1`, `f<=1` | mark each qualifying die a failure |
@@ -86,6 +88,25 @@ A set there is refused before the roll.
 loot=gem                a word on the right
 4d20>=atk               a variable on the right
 ```
+
+### Advantage
+
+`a` rolls everything to its left a second time and keeps the better result; `da`
+keeps the worse. A number says how many attempts to make. Each attempt is summed
+before they are compared, so this is the best **total**, not the best single die
+— `2d6a` is the better of two 2d6 sums, while `2d6kh1` is the higher of two dice.
+
+```
+2d6a            the better of two 2d6 totals
+2d6da           the worse
+d20a            the familiar one
+2d6a3           best of three
+4d6dl1a         everything else happens first, then the better of two
+```
+
+Because it re-rolls everything before it, `a` has to be the last modifier on a
+term. Bracket it to carry on: `(2d6a)>=9` compares the winning total, where
+`2d6a>=9` would have compared each attempt.
 
 ### Bracket groups
 
@@ -275,7 +296,16 @@ A variable that refers back to itself is caught at a fixed depth rather than han
   underneath; an integer gets a −/+ pair. Remove sits ahead of the name, where it is an
   easy target, and only the two fields take <kbd>Tab</kbd>.
 * **Saved** — expressions kept in `localStorage`. <kbd>Ctrl</kbd>+<kbd>S</kbd> to save.
-* **Copy link** — puts the expression in the URL hash so it can be shared.
+* **Copy link** — the address bar already holds the whole state, so this only puts it
+  on the clipboard.
+
+The URL carries the expression being edited, every variable and every saved roll, and
+keeps up as you work. A bare hash is just an expression (`#4d6dl1`), readable and
+hand-editable; add a variable or a saved roll and it becomes a packed payload instead.
+Opening someone else's link merges their variables and saved rolls into yours rather
+than replacing them. The fragment never reaches the server, so length is only a
+question of what a browser holds — a full saved list of 60 comes to about 4KB, which
+is comfortable everywhere, though some chat clients truncate links near that size.
 
 The tool drawer collapses to just its tab strip via the chevron on the right, handing the
 full screen to the results — worth it on a phone. The choice is remembered. Layout uses

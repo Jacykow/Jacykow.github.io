@@ -67,9 +67,15 @@
       ['~2(~d10,2d6~)', 'sets inside sets unpack', 'atom'],
       ['(d10,~-~2d6)', 'a minus flips every member', 'atom']
     ]],
+    ['Advantage', [
+      ['2d6~a', 'roll it all again, keep the better total', 'suffix'],
+      ['2d6~da', 'keep the worse total', 'suffix'],
+      ['2d6~a3', 'best of three', 'suffix'],
+      ['d20~a', 'the familiar one', 'suffix']
+    ]],
     ['Keep & drop', [
       ['4d6~kh3', 'keep the highest 3 — needs a set', 'suffix'],
-      ['2d20~kl1', 'keep the lowest — disadvantage', 'suffix'],
+      ['2d20~kl1', 'keep the lowest die', 'suffix'],
       ['4d6~dl1', 'drop the lowest', 'suffix'],
       ['4d6~dh1', 'drop the highest', 'suffix'],
       ['(3d6,2d8)~kh3', 'best 3 across a listed set', 'suffix']
@@ -157,6 +163,92 @@
       try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private mode */ }
     }
   };
+
+  /* ================================================================== url
+     The address bar carries the whole state: the expression being edited, the
+     variables and the saved rolls. A bare hash is just an expression, so a
+     hand-written or older link still opens; anything more rides in a tagged
+     base64 payload. The fragment never reaches the server, so the only real
+     ceiling is what a browser will hold, which a saved list of 60 comes
+     nowhere near. */
+  const URL_TAG = '~';
+
+  const b64 = {
+    enc(s) {
+      let bin = '';
+      for (const b of new TextEncoder().encode(s)) bin += String.fromCharCode(b);
+      return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    },
+    dec(s) {
+      const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/'));
+      return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+    }
+  };
+
+  function urlPayload() {
+    const vars = loadVars().filter((v) => v.name);
+    const saved = store.read(LS_SAVED, []);
+    const expr = el.ta.value;
+    if (!vars.length && !saved.length) return encodeURIComponent(expr.trim());
+    return URL_TAG + b64.enc(JSON.stringify({
+      e: expr,
+      v: vars.map((v) => [v.name, v.expr]),
+      s: saved.map((x) => [x.name, x.expr])
+    }));
+  }
+
+  /* Safari rate-limits replaceState to about a hundred calls per half minute,
+     which typing would blow through, so the write waits for a pause. */
+  let urlTimer = null;
+  function syncURL(now) {
+    clearTimeout(urlTimer);
+    const write = () => {
+      const p = urlPayload();
+      try {
+        history.replaceState(null, '', p ? '#' + p : location.pathname + location.search);
+      } catch (e) { /* file:// refuses replaceState */ }
+    };
+    if (now) write(); else urlTimer = setTimeout(write, 400);
+  }
+
+  function readURL() {
+    const raw = location.hash.replace(/^#/, '');
+    if (!raw) return null;
+    if (raw[0] !== URL_TAG) {
+      try { return { expr: decodeURIComponent(raw) }; } catch (e) { return { expr: raw }; }
+    }
+    try {
+      const d = JSON.parse(b64.dec(raw.slice(1)));
+      const pairs = (a) => Array.isArray(a)
+        ? a.filter(Array.isArray).map(([name, expr]) => ({ name: String(name), expr: String(expr) }))
+        : null;
+      return { expr: typeof d.e === 'string' ? d.e : '', vars: pairs(d.v), saved: pairs(d.s) };
+    } catch (e) { return null; }
+  }
+
+  /** A link brings its own variables and saved rolls. They are merged rather
+      than swapped in, so opening someone else's link never costs you yours. */
+  function applyURL(st) {
+    if (!st) return false;
+    if (st.vars && st.vars.length) {
+      const by = new Map(loadVars().map((v) => [v.name, v]));
+      for (const v of st.vars) if (v.name) by.set(v.name, v);
+      pushVars(Array.from(by.values()));
+      renderVars();
+    }
+    if (st.saved && st.saved.length) {
+      const items = store.read(LS_SAVED, []);
+      const seen = new Set(items.map((x) => JSON.stringify([x.name, x.expr])));
+      for (const s of st.saved) {
+        const key = JSON.stringify([s.name, s.expr]);
+        if (!seen.has(key)) { items.push(s); seen.add(key); }
+      }
+      store.write(LS_SAVED, items.slice(0, 60));
+      renderSaved();
+    }
+    if (typeof st.expr === 'string') el.ta.value = st.expr;
+    return true;
+  }
 
   /* ==================================================== syntax highlighting */
   function paint() {
@@ -792,6 +884,7 @@
         items.splice(+b.getAttribute('data-del'), 1);
         store.write(LS_SAVED, items);
         renderSaved();
+        syncURL();
       });
     });
   }
@@ -805,6 +898,7 @@
     items.unshift({ name: name.trim() || expr, expr });
     store.write(LS_SAVED, items.slice(0, 60));
     renderSaved();
+    syncURL();
     switchTab('saved');
     toast('saved');
   }
@@ -957,6 +1051,7 @@
 
     const raw = el.ta.value;
     store.write(LS_LAST, raw);
+    syncURL();
 
     if (!raw.trim()) {
       state.inspect = null; state.error = null;
@@ -1026,8 +1121,9 @@
     renderVars();
     wireVars();
 
-    const hash = decodeURIComponent(location.hash.replace(/^#/, ''));
-    el.ta.value = hash || store.read(LS_LAST, '') || DEFAULT_EXPR;
+    // a link carries everything; without one, pick up where the last visit left off
+    const fromURL = applyURL(readURL());
+    if (!fromURL || !el.ta.value) el.ta.value = store.read(LS_LAST, '') || DEFAULT_EXPR;
 
     el.ta.addEventListener('input', onInput);
     el.ta.addEventListener('scroll', () => { el.hl.scrollLeft = el.ta.scrollLeft; });
@@ -1081,7 +1177,7 @@
     });
     $('btnSave').addEventListener('click', saveCurrent);
     $('btnLink').addEventListener('click', () => {
-      location.hash = encodeURIComponent(el.ta.value.trim());
+      syncURL(true);
       const url = location.href;
       if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => toast('link copied'), () => toast('link is in the address bar'));
       else toast('link is in the address bar');
@@ -1098,9 +1194,9 @@
       switchTab(b.getAttribute('data-tab'));
     });
 
+    // only a person can cause this: replaceState never fires it
     window.addEventListener('hashchange', () => {
-      const h = decodeURIComponent(location.hash.replace(/^#/, ''));
-      if (h && h !== el.ta.value) { el.ta.value = h; onInput(); }
+      if (applyURL(readURL())) onInput();
     });
 
     onInput();
