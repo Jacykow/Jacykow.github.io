@@ -938,3 +938,12 @@ button.roll.sec kbd{background:#171b23; color:var(--dimmer)}
 /* the ready-made presets, laid out to be picked from */
 .presets{display:flex; flex-wrap:wrap; gap:6px; flex:1; min-width:0}
 .presets .varadd{font-size:11.5px; padding:4px 10px}
+/* a ready-made preset and the short link that names it, as one control */
+.pset{display:inline-flex}
+.pset .varadd{border-top-right-radius:0; border-bottom-right-radius:0; border-right:none}
+.plink{
+  background:var(--pane-2); border:1px solid var(--border); color:var(--dimmer);
+  font-size:10.5px; padding:4px 7px; border-radius:0 6px 6px 0; line-height:1.35;
+}
+.plink:hover{color:var(--accent); border-color:var(--accent)}
+.pset:hover .varadd{border-color:var(--border)}

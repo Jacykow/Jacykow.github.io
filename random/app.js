@@ -86,16 +86,23 @@
      base64 payload. The fragment never reaches the server, so the only real
      ceiling is what a browser will hold, which a saved list of 60 comes
      nowhere near. */
-  /* There are two kinds of link, because they are for two different things.
+/* There are two kinds of link, because they are for two different things.
 
      The address bar holds only the expression, plainly readable and updated
      when you roll, so a link copied from the browser is a roll you can send
      someone. A setup link is asked for, and carries the saved rolls and the
-     variables: opening one adopts it whole, while pasting one into the Setup
+     variables: opening one adopts it whole, while pasting one into the Preset
      tab lists what it holds and waits to be told.
+
+     A setup link comes in two forms. One carries a setup that exists nowhere
+     else and so has to spell the whole thing out. The other names a ready-made
+     preset, which both ends already have, and needs nothing but the name —
+     `#preset=huberts-dream` rather than two kilobytes of base64. They are the
+     same kind of link and are read by the same code; only the length differs.
 
      Neither reaches the server — a fragment never leaves the browser. */
   const SETUP_TAG = 'setup=';
+  const PRESET_TAG = 'preset=';
   const LS_UNDO = 're.setup.prev';
 
   const b64 = {
@@ -122,6 +129,29 @@
     } catch (err) { /* file:// refuses replaceState */ }
   }
 
+  /* A name in a link has to survive being typed, mailed and lower-cased, so it
+     is reduced to letters, digits and hyphens at both ends before comparing. */
+  const slug = (s) => String(s).toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+  const presetLink = (p) => here() + '#' + PRESET_TAG + p.id;
+
+  /** the id a `#preset=` link names, or null when the text is not one */
+  function presetIdIn(text) {
+    const raw = String(text == null ? location.hash : text).trim();
+    const at = raw.indexOf(PRESET_TAG);
+    if (at < 0) return null;
+    const rest = raw.slice(at + PRESET_TAG.length).replace(/[#?].*$/, '');
+    try { return slug(decodeURIComponent(rest)); } catch (e) { return slug(rest); }
+  }
+
+  /* A ready-made preset, named. The id is what a link should carry, but a
+     slugged name is accepted too, since that is what someone typing one by
+     hand would reach for. */
+  const findPreset = (id) => id
+    ? PRESETS.find((p) => p.id === id || slug(p.name) === id) || null
+    : null;
+
   /* A category is written once in a list of its own and referred to by number,
      which keeps a long link from repeating a name on every row. Zero means
      none. `n` is what tells the two shapes apart: without it a row is a plain
@@ -136,8 +166,13 @@
     }));
   }
 
-  /** read a setup out of a link, a bare payload, or the address bar */
+  /* One question — what setup does this text describe? — and two ways of
+     answering it, so everything that loads a setup gets the short form free. */
   function readSetup(text) {
+    const named = findPreset(presetIdIn(text));
+    if (named) {
+      return { cats: named.cats.slice(), vars: named.vars.slice(), saved: named.saved.slice() };
+    }
     const raw = String(text == null ? location.hash : text).trim();
     const at = raw.indexOf(SETUP_TAG);
     if (at < 0) return null;
@@ -160,15 +195,16 @@
   /** what the address bar says to put in the field, if anything */
   function readExpr() {
     const raw = location.hash.replace(/^#/, '');
-    if (!raw || raw.indexOf(SETUP_TAG) === 0) return null;
+    // a setup link of either form is not an expression, even a broken one
+    if (!raw || raw.indexOf(SETUP_TAG) === 0 || raw.indexOf(PRESET_TAG) === 0) return null;
     try { return decodeURIComponent(raw); } catch (e) { return raw; }
   }
 
-  /* A setup is adopted whole rather than merged: it is a setup, not an
-     addition. The one it replaced is kept so it can be had back. */
   /* An import adds to what you already have rather than taking its place, and
-     nothing is added without being picked out first. What one added is written
-     down, so undoing it is the same act with the ticks the other way round. */
+     nothing is added without being picked out first — opening a link is the same
+     act with everything picked. What it added is written down, so undoing it is
+     that act again with the ticks the other way round. Replacing outright is a
+     button of its own, and keeps what it replaced so it can be had back. */
   function addSetup(pick) {
     const vars = loadVars(), saved = loadSaved();
     const added = { v: [], s: [], c: [] };
@@ -302,6 +338,7 @@
     : { expr: String(x), mark: true, cat: '' };
   const PRESETS = (window.RandomEnginePresets || []).map((x) => ({
     name: x.name,
+    id: x.id,
     note: x.note,
     cats: catsOf(x.cats || []),
     vars: (x.vars || []).map(presetItem),
@@ -1758,7 +1795,9 @@
     $('tab-setup').innerHTML =
       '<div class="varhint">Your saved rolls and variables together, kept in this ' +
       'browser between visits. The link below carries them somewhere else: open it there, ' +
-      'or paste one here to look it over first. The expression link in the top bar is a ' +
+      'or paste one here to look it over first. A ready-made preset has a short link of ' +
+      'its own, since both ends already have it — take one with its name, or copy that ' +
+      'link with the button beside it. The expression link in the top bar is a ' +
       'different thing — it holds only the roll you last made.</div>' +
       '<div class="setrowb"><label>Yours</label>' +
         '<textarea class="setbox" id="setOut" readonly rows="2">' + esc(link) + '</textarea>' +
@@ -1768,9 +1807,16 @@
           'placeholder="paste a link here"></textarea>' +
         '<button class="varadd" id="setLoad">import</button></div>' +
       '<div class="setrowb"><label>Or take one</label>' +
-        '<div class="presets">' + PRESETS.map((x, i) =>
-          '<button class="varadd" data-preset="' + i + '" title="' + esc(x.note || '') + '">' +
-          esc(x.name) + '</button>').join('') + '</div></div>' +
+        '<div class="presets">' + PRESETS.map((x, i) => {
+          const take = '<button class="varadd" data-preset="' + i + '" title="' +
+            esc(x.note || '') + '">' + esc(x.name) + '</button>';
+          // the first is what a browser with nothing stored already has, so
+          // there is nobody to send it to; its link still works if asked for
+          if (!i) return take;
+          return '<span class="pset">' + take +
+            '<button class="plink" data-link="' + i + '" title="copy a link to ' +
+            esc(x.name) + '">link</button></span>';
+        }).join('') + '</div></div>' +
       (back ? '<button class="varadd" id="setBack">' +
         (back.whole ? 'put back the preset this replaced' : 'undo the last import&hellip;') +
         '</button>' : '') +
@@ -1784,6 +1830,11 @@
     });
     $('tab-setup').querySelectorAll('[data-preset]').forEach((b) => {
       b.addEventListener('click', () => pickDialog('add', PRESETS[+b.getAttribute('data-preset')]));
+    });
+    $('tab-setup').querySelectorAll('[data-link]').forEach((b) => {
+      const p = PRESETS[+b.getAttribute('data-link')];
+      b.addEventListener('click', () =>
+        copy(presetLink(p), 'link to ' + p.name + ' copied', 'could not copy'));
     });
     if (back) $('setBack').addEventListener('click', () => {
       if (!back.whole) { pickDialog('remove', back); return; }
@@ -1958,6 +2009,7 @@
 
     // a setup link is adopted whole; anything else in the bar is an expression
     const fromLink = readSetup();
+    const missing = !fromLink && presetIdIn();
     el.ta.value = readExpr() || store.read(LS_LAST, '') || DEFAULT_EXPR;
 
     el.ta.addEventListener('input', onInput);
@@ -2042,6 +2094,8 @@
         renderSetup(); onInput();
         return;
       }
+      const gone = presetIdIn();
+      if (gone) { toast('no preset called "' + gone + '"'); return; }
       const e = readExpr();
       if (e !== null && e !== el.ta.value) { el.ta.value = e; onInput(); }
     });
@@ -2053,6 +2107,8 @@
       const n = addSetup(fromLink);
       toast(n ? 'preset loaded — ' + n + ' added' : 'preset already loaded');
       renderSetup();
+    } else if (missing) {
+      toast('no preset called "' + missing + '"');
     }
   }
 

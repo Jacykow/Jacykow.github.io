@@ -11,6 +11,10 @@
    is a place in the bar and the lists and nothing more — a variable under one
    is still written the same way from anywhere.
 
+   `id` is what a #preset= link names. It is written out rather than derived
+   from the name so that renaming a preset does not break links people are
+   already holding; it never changes once a preset has shipped.
+
    SYSTEMS.md records what each system needs and what the notation cannot yet
    say — read it before adding a preset for a system with unusual dice.
    ========================================================================== */
@@ -20,6 +24,7 @@
   global.RandomEnginePresets = [
     {
       name: 'Reset',
+      id: 'reset',
       note: 'Every solid on its own, and nothing else — where a browser with nothing stored starts.',
       cats: ['Dice'],
       vars: [],
@@ -33,6 +38,7 @@
 
     {
       name: 'D&D 5e',
+      id: 'dnd-5e',
       note: 'A d20 against a target, with advantage and disadvantage.',
       cats: ['Dice', 'Checks', 'Damage'],
       vars: [['0 # Modifier {mod}', 'Checks'], ['15 # Difficulty {dc}', 'Checks'],
@@ -56,6 +62,7 @@
 
     {
       name: 'Pathfinder 2e',
+      id: 'pathfinder-2e',
       note: 'Four degrees of success, ten either side of the DC.',
       cats: ['Dice', 'Checks'],
       vars: [['0 # Modifier {mod}', 'Checks'], ['15 # Difficulty {dc}', 'Checks']],
@@ -74,6 +81,7 @@
 
     {
       name: 'Call of Cthulhu 7e',
+      id: 'call-of-cthulhu-7e',
       note: 'Roll under your skill on d100; how far under is the degree.',
       cats: ['Dice', 'Checks'],
       vars: [['50 # Skill {skill}', 'Checks']],
@@ -91,6 +99,7 @@
 
     {
       name: 'World of Darkness',
+      id: 'world-of-darkness',
       note: 'A pool of d10s; every 8 or better is a success.',
       cats: ['Dice', 'Pools'],
       vars: [['5 # Dice pool {pool}', 'Pools']],
@@ -107,6 +116,7 @@
 
     {
       name: 'Blades in the Dark',
+      id: 'blades-in-the-dark',
       note: 'A pool of d6s; only the best one counts.',
       cats: ['Dice', 'Action rolls'],
       vars: [['2 # Dice pool {pool}', 'Action rolls']],
@@ -123,6 +133,7 @@
 
     {
       name: 'Savage Worlds',
+      id: 'savage-worlds',
       note: 'A trait die and a wild die, both exploding, best one wins.',
       cats: ['Dice', 'Trait rolls'],
       vars: [['0 # Modifier {mod}', 'Trait rolls']],
@@ -140,6 +151,7 @@
 
     {
       name: 'Shadowrun',
+      id: 'shadowrun',
       note: 'A pool of d6s; every 5 or 6 is a hit.',
       cats: ['Dice', 'Pools'],
       vars: [['8 # Dice pool {pool}', 'Pools']],
@@ -155,6 +167,7 @@
 
     {
       name: 'Fate',
+      id: 'fate',
       note: 'Four dice showing plus, blank or minus, against a ladder.',
       cats: ['Rolls'],
       vars: [['0 # Modifier {mod}', 'Rolls'], ['2 # Difficulty {dc}', 'Rolls']],
@@ -168,6 +181,7 @@
 
     {
       name: "Hubert's Dream",
+      id: 'huberts-dream',
       note: 'Two d6 and a modifier, banded four ways.',
       cats: ['Kości', 'Rzuty'],
       vars: [['0 # Modyfikatory {mod}', 'Rzuty']],
@@ -182,6 +196,7 @@
 
     {
       name: 'Awkward rolls',
+      id: 'awkward-rolls',
       note: 'Unusual dice from all over, for finding out what the notation cannot yet say.',
       cats: ['Two readings', 'Digits', 'Still out of reach'],
       vars: [['3 # Dice pool {pool}', 'Two readings'], ['0 # Modifier {mod}', 'Two readings']],
