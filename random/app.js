@@ -115,6 +115,10 @@
       ['~hit', 'a bare word — a variable if one is set', 'atom'],
       ['~{atk}', 'always the variable, never a word', 'atom']
     ]],
+    ['Variables', [
+      ['~atk:=d20+5,~2atk', 'set one for this expression only', 'prefix'],
+      ['~2atk', 'used twice means rolled twice', 'atom']
+    ]],
     ['Custom dice', [
       ['~[1,1,1,1,1,6]', 'six faces, mostly ones', 'atom'],
       ['~[hit,hit,miss]', 'faces can be words', 'atom'],
@@ -312,10 +316,28 @@
     });
   }
 
-  /** a roll that ends in a result type has no number to show, only its marks */
-  function totalText(roll) {
-    if (roll.numeric) return E.fmt(roll.total);
-    return roll.marks ? markList(roll.marks).join(', ') : '—';
+  /* A roll that produces result types reads like a game score — every type the
+     expression could produce, best to worst, so a critical that never turned up
+     still shows its nought. */
+  function scoreHTML(roll) {
+    const poss = roll.possible || [];
+    if (!poss.length) return null;
+    const m = roll.marks || {};
+    return '<span class="score">' + poss.map((k) =>
+      '<b class="' + k + '">' + (m[k] || 0) + '</b>').join('<i>-</i>') + '</span>';
+  }
+
+  /** the headline: a number, a score, or the word it landed on */
+  function totalHTML(roll) {
+    const score = scoreHTML(roll);
+    const plain = roll.numeric ? E.fmt(roll.total) : (roll.text || '—');
+    if (!score) return '<span class="tv">' + esc(plain) + '</span>';
+    // the number only earns its place when it says more than the score does
+    const hits = (roll.marks && roll.marks.success) || 0;
+    if (roll.numeric && roll.total !== hits) {
+      return '<span class="tv">' + esc(plain) + '</span><span class="tsc">' + score + '</span>';
+    }
+    return score;
   }
 
   const setTotal = (s) => { try { return E.fmt(s.total()); } catch (e) { return '—'; } };
@@ -328,7 +350,7 @@
       : '<span class="lx">' + esc(roll.notation) + '</span>';
     return '<div class="line" data-open="' + idx + '" data-scope="' + scopeFor(roll.input) +
       '" title="show the breakdown">' +
-      '<span class="lt">' + esc(totalText(roll)) + '</span>' + name +
+      '<span class="lt">' + totalHTML(roll) + '</span>' + name +
       '<span class="ldice">' + roll.sets[0].html(roll.diceCount > DENSITY.plain ? { plain: true } : null) + '</span>' +
       '<span class="lm">' + esc(roll.time) + '</span>' +
     '</div>';
@@ -372,7 +394,7 @@
     return '<div class="card' + (live ? ' live' : '') + '" data-card="' + idx +
       '" data-scope="' + scopeFor(roll.input) + '">' +
       '<div class="top">' +
-        '<div class="total">' + esc(totalText(roll)) + '</div>' +
+        '<div class="total">' + totalHTML(roll) + '</div>' +
         '<div class="meta">' +
           '<div class="expr">' + esc(roll.notation) + '</div>' +
           (roll.label ? '<div class="lbl"># ' + esc(roll.label) + '</div>' : '') +
@@ -655,24 +677,42 @@
         }
         const r = n.getBoundingClientRect();
         return { depth, left: r.left - base.left, width: r.width,
-                 sum: n.getAttribute('data-sum'), x: n.getAttribute('data-x') };
+                 sum: n.getAttribute('data-sum'), x: n.getAttribute('data-x'),
+                 note: n.getAttribute('data-note'), drop: n.hasAttribute('data-drop'),
+                 mark: n.getAttribute('data-mark') };
       });
       const maxDepth = items.reduce((a, i) => Math.max(a, i.depth), 0);
 
       const layer = document.createElement('div');
       layer.className = 'sumtree';
       layer.style.height = ((maxDepth + 1) * SUM_ROW) + 'px';
+      const bars = [];
       for (const it of items) {
         const bar = document.createElement('div');
-        bar.className = 'sumbar';
+        bar.className = 'sumbar' + (it.drop ? ' dropped' : '') + (it.mark ? ' ' + it.mark : '');
         if (it.x) bar.setAttribute('data-x', it.x);
         bar.style.left = it.left + 'px';
         bar.style.width = Math.max(it.width, 20) + 'px';
         bar.style.top = ((maxDepth - it.depth) * SUM_ROW) + 'px';
         bar.innerHTML = '<span class="sumval">' + esc(it.sum) + '</span>';
         layer.appendChild(bar);
+        bars.push([bar, it]);
       }
       body.appendChild(layer);
+      // Now the bars have a width, name the modifiers — as many as still fit,
+      // in the order they were applied, dropping from the end until they do.
+      for (const [bar, it] of bars) {
+        if (!it.note) continue;
+        const val = bar.querySelector('.sumval');
+        const notes = it.note.split('|');
+        const tag = document.createElement('i');
+        val.appendChild(tag);
+        for (let k = notes.length; k > 0; k--) {
+          tag.textContent = notes.slice(0, k).join(', ');
+          if (val.getBoundingClientRect().width <= bar.getBoundingClientRect().width) break;
+          if (k === 1) tag.remove();
+        }
+      }
     });
   }
 
@@ -744,53 +784,96 @@
     store.write(LS_VARS, list);
   }
 
+  const isInt = (s) => /^\s*-?\d+\s*$/.test(String(s == null ? '' : s));
+
+  /* Only the two inputs take Tab, so tabbing out of a name always lands on its
+     own expression rather than a button in between. */
   function renderVars() {
     const list = loadVars();
     el.vars.innerHTML =
       '<div class="varhint">A variable holds an expression and is worked out again at every ' +
-      'occurrence. Use the bare name, or <code>{name}</code> when a plain word would be ambiguous.</div>' +
+      'occurrence. Use the bare name, or <code>{name}</code> when a plain word would be ambiguous. ' +
+      'Inside an expression, <code>atk:=d20+5</code> as its own item sets one for that roll alone.</div>' +
       list.map((v, i) =>
-        '<div class="varrow" data-i="' + i + '">' +
-          '<input class="vname" value="' + esc(v.name) + '" spellcheck="false" placeholder="name">' +
-          '<input class="vexpr" value="' + esc(v.expr) + '" spellcheck="false" placeholder="expression">' +
-          '<button class="del" title="remove">&times;</button>' +
-        '</div>' +
-        (varError(v.expr) ? '<div class="varerr">' + esc(varError(v.expr)) + '</div>' : '')
-      ).join('') +
+        '<div class="varitem" data-i="' + i + '">' +
+          '<div class="varrow">' +
+            '<button class="del" title="remove" tabindex="-1">&times;</button>' +
+            '<input class="vname" value="' + esc(v.name) + '" spellcheck="false" placeholder="name">' +
+            '<input class="vexpr" value="' + esc(v.expr) + '" spellcheck="false" placeholder="expression">' +
+            '<span class="step' + (isInt(v.expr) ? '' : ' off') + '">' +
+              '<button class="vdec" title="subtract 1" tabindex="-1">&minus;</button>' +
+              '<button class="vinc" title="add 1" tabindex="-1">+</button>' +
+            '</span>' +
+          '</div>' +
+          '<div class="varerr' + (varError(v.expr) ? ' on' : '') + '">' +
+            esc(varError(v.expr) || '') + '</div>' +
+        '</div>').join('') +
       '<button class="varadd">+ add a variable</button>';
 
-    const commit = () => {
-      const next = [];
-      el.vars.querySelectorAll('.varrow').forEach((row) => {
-        next.push({
-          name: row.querySelector('.vname').value.replace(/[^a-zA-Z_]/g, ''),
-          expr: row.querySelector('.vexpr').value
-        });
-      });
-      pushVars(next);
-      renderVars();
-      onInput();               // the expression may now mean something different
-    };
-
-    el.vars.querySelectorAll('input').forEach((inp) => {
-      inp.addEventListener('change', commit);
+    el.vars.querySelectorAll('.varitem input').forEach((inp) => {
+      inp.addEventListener('input', () => commitVars(false));
+      inp.addEventListener('change', () => commitVars(true));
       inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') inp.blur(); });
     });
-    el.vars.querySelectorAll('.del').forEach((b) => {
-      b.addEventListener('click', () => {
-        const list2 = loadVars();
-        list2.splice(+b.parentElement.getAttribute('data-i'), 1);
-        pushVars(list2);
-        renderVars();
-        onInput();
+  }
+
+  function readVars() {
+    const out = [];
+    el.vars.querySelectorAll('.varitem').forEach((row) => {
+      out.push({
+        name: row.querySelector('.vname').value.replace(/[^a-zA-Z_]/g, ''),
+        expr: row.querySelector('.vexpr').value
       });
     });
-    const add = el.vars.querySelector('.varadd');
-    if (add) add.addEventListener('click', () => {
-      const list2 = loadVars();
-      list2.push({ name: '', expr: '' });
-      pushVars(list2);
-      renderVars();
+    return out.length ? out : loadVars();
+  }
+
+  /* Saving must not rebuild the rows: re-rendering mid-edit was what stole the
+     focus when tabbing out of a name. Only the error line and the stepper move. */
+  function commitVars(tidy) {
+    const list = readVars();
+    pushVars(list);
+    el.vars.querySelectorAll('.varitem').forEach((row, i) => {
+      const v = list[i] || { name: '', expr: '' };
+      const err = varError(v.expr);
+      const box = row.querySelector('.varerr');
+      box.textContent = err || '';
+      box.classList.toggle('on', !!err);
+      row.querySelector('.step').classList.toggle('off', !isInt(v.expr));
+      const nm = row.querySelector('.vname');
+      if (tidy && nm.value !== v.name) nm.value = v.name;
+    });
+    onInput();                 // the expression may now mean something different
+  }
+
+  /** one delegated listener, so re-rendering the rows never loses the wiring */
+  function wireVars() {
+    el.vars.addEventListener('click', (ev) => {
+      if (ev.target.closest('.varadd')) {
+        const list = readVars();
+        list.push({ name: '', expr: '' });
+        pushVars(list);
+        renderVars();
+        const box = el.vars.querySelector('.varitem:last-of-type .vname');
+        if (box) box.focus();
+        return;
+      }
+      const item = ev.target.closest('.varitem');
+      if (!item) return;
+      if (ev.target.closest('.del')) {
+        const list = readVars();
+        list.splice(+item.getAttribute('data-i'), 1);
+        pushVars(list);
+        renderVars();
+        onInput();
+        return;
+      }
+      const inc = ev.target.closest('.vinc'), dec = ev.target.closest('.vdec');
+      if (!inc && !dec) return;
+      const box = item.querySelector('.vexpr');
+      if (!isInt(box.value)) return;
+      box.value = String(parseInt(box.value.trim(), 10) + (inc ? 1 : -1));
+      commitVars(true);
     });
   }
 
@@ -893,6 +976,7 @@
     renderSaved();
     pushVars(loadVars());
     renderVars();
+    wireVars();
 
     const hash = decodeURIComponent(location.hash.replace(/^#/, ''));
     el.ta.value = hash || store.read(LS_LAST, '') || DEFAULT_EXPR;

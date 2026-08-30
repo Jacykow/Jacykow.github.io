@@ -61,10 +61,16 @@ it narrows the set of allowed values rather than repeating a roll.
 | 5 | `u`, `u3` | force unique results (`u3` gives up after 3 attempts) |
 | 6 | `kh3`, `kl1` | keep the highest / lowest N |
 | 7 | `dl1`, `dh1` | drop the lowest / highest N |
-| 8 | `>=8` | stop summing; count each qualifying die as a success |
-| 8 | `f1`, `f<=1` | each qualifying die cancels one success |
-| 9 | `cs>=19` | flag critical successes (display only) |
-| 10 | `cf<=2` | flag critical failures (display only) |
+| 8 | `>=8` | a plain yes/no: each die reads success or failure |
+| 8 | `s>=8` | mark the hits and say nothing about the rest |
+| 8 | `f1`, `f<=1` | mark each qualifying die a failure |
+| 9 | `cs>=19` | flag critical successes |
+| 10 | `cf<=2` | flag critical failures |
+
+Writing the `s` says what counts as a hit and nothing at all about the rest —
+the alternative to a success need not be a failure — so `3d6s5` marks its hits
+and leaves the other dice unmarked. A bare comparison is a plain yes/no, so
+`3d6>=5` marks every die one way or the other.
 
 Comparison points are `=`, `!=`, `<`, `>`, `<=`, `>=`. A bare number reads in whichever
 direction the modifier naturally means: `e5` explodes on 5 **or more**, `r2` re-rolls 2
@@ -103,7 +109,13 @@ is not. Words carry no number, so a word can only ever be a result.
 hit                     a bare word (characters a-z, A-Z and _)
 "a long word"           quoted, so spaces are allowed
 d20>=15 ? hit : miss    C-style choice; the condition must read success or failure
+4d20>10 ? hit : miss    a set reads yes when any of its members hit
 ```
+
+A choice needs one yes-or-no. A checked value gives it straight away; a set of
+them reads yes when any member hit, so `4d20>10 ? hit : miss` is "if any of the
+four beat 10". Something carrying no check at all is not a condition, and saying
+so is a pre-roll error.
 
 Only the success check casts to a number — `success` is 1 and `failure` is 0, so
 `3d6s5+1` works. The failure, critical-success and critical-failure checks are terminal:
@@ -135,6 +147,18 @@ atk = d20+5             set in the Vars panel
 {atk}                   never mistaken for the word "atk"
 ```
 
+A variable holding a plain integer gets a −/+ pair in the panel for nudging it
+between rolls.
+
+`:=` sets one inside the expression itself, for that expression alone. It has to
+stand as its own top-level item, and it shadows a panel variable of the same
+name:
+
+```
+atk:=d20+5, 2atk        the same as 2(d20+5)
+x:=2d6, y:=x+1, y       assignments can build on each other
+```
+
 A variable that refers back to itself is caught at a fixed depth rather than hanging.
 
 ### Whole-roll extras
@@ -151,17 +175,26 @@ A variable that refers back to itself is caught at a fixed depth rather than han
   line names the position.
 * **Preview** — above the expression, the dice it *would* throw, drawn from the parse
   alone and carrying their die name rather than a face, since nothing has been rolled.
-  It updates as you type and never involves randomness.
+  Variables are opened up, so `2atk` shows the d20 it stands for. It updates as you type
+  and never involves randomness.
 * **Result** — nothing rolls until you ask: <kbd>Enter</kbd> or the Roll button. Each roll
   lands in the log collapsed; click it to open. Dropped dice are struck out, exploded dice
   are amber, re-rolled dice show their original value, successes and criticals are
-  colour-coded.
+  colour-coded. Both travel down from wherever they were decided: discard a whole group
+  and every die under it is struck, check a group and every die under it is coloured, with
+  the closest check always winning.
+
+  The headline is a number, or — when the roll produces result types — a game score:
+  every type the expression could possibly produce, best to worst, so a critical that
+  never turned up still shows its nought. A roll that lands on a word shows the word.
 
   Dice within a term are joined by the `+` they stand for, and every subtotal is drawn as
   a bracket in a tree beneath them, innermost nearest the dice — so `((2d6+d6)*d6)+8d10`
-  shows what each bracket came to on the way to the total. Past three dice a term overlaps
-  its own dice so it never takes more room than three; the individual faces stop mattering
-  there and the subtotal speaks for the term.
+  shows what each bracket came to on the way to the total. Each bracket also names the
+  modifiers it stands for, in the order they were applied (`kept highest 2`), fitting in
+  as many as it has room for. Past three dice a term overlaps its own dice so it never
+  takes more room than three; the individual faces stop mattering there and the subtotal
+  speaks for the term.
 
   Each card carries a **roll again** button, and clicking an opened entry anywhere inert
   folds it back up. Collapsed entries show their dice, and their label if they have one,
@@ -206,6 +239,9 @@ A variable that refers back to itself is caught at a fixed depth rather than han
   preference — attach directly, bracket the target first, append as a separate roll — and
   the first one that parses wins. An empty field gets the whole example, since there is
   nothing to attach to. If nothing fits, the click is refused.
+* **Vars** — the named expressions. Each row parses as you type and says what is wrong
+  underneath; an integer gets a −/+ pair. Remove sits ahead of the name, where it is an
+  easy target, and only the two fields take <kbd>Tab</kbd>.
 * **Saved** — expressions kept in `localStorage`. <kbd>Ctrl</kbd>+<kbd>S</kbd> to save.
 * **Copy link** — puts the expression in the URL hash so it can be shared.
 
@@ -269,7 +305,7 @@ node tools/splice.js
 `engine.js` exposes `window.DiceEngine`:
 
 ```js
-DiceEngine.roll('4d6dl1')      // → { total, notation, label, sets: [...] }
+DiceEngine.roll('4d6dl1')      // → { total, numeric, text, marks, possible, sets: [...] }
 DiceEngine.inspect('4d6dl1')   // → { spans, rows, notation }  (highlight + explain)
 DiceEngine.analyse('4d6dl1')   // → { min, max, mean, median, stdev, p10, p90, totals }
 DiceEngine.parse('4d6dl1')     // → { ast, repeat, label, ... }

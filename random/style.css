@@ -485,10 +485,12 @@ kbd{
 .die.custom .dieshape{stroke-dasharray:5 3}
 
 /* result words carry the same colours as the checks that produce them */
-.r-str.success, .success > .r-str{color:var(--green)}
+.r-str.success, .r-str.critSuccess, .success > .r-str{color:var(--green)}
+.r-str.failure, .r-str.critFail{color:var(--red)}
 
 /* ------------------------------------------------------------ variables */
-.varrow{display:flex; gap:8px; align-items:center; margin-bottom:6px}
+.varitem{margin-bottom:6px}
+.varrow{display:flex; gap:8px; align-items:center}
 .varrow input{
   background:#0a0c11; border:1px solid var(--border); color:var(--text);
   font-family:var(--mono); font-size:12.5px; padding:5px 8px; border-radius:6px; min-width:0;
@@ -496,8 +498,20 @@ kbd{
 .varrow .vname{width:110px; flex:none; color:var(--purple)}
 .varrow .vexpr{flex:1}
 .varrow input:focus{outline:none; border-color:var(--accent)}
-.varrow .del{background:none; border:none; color:var(--dimmer); font-size:15px; padding:0 4px; line-height:1}
+/* remove sits ahead of the name, where it is an easy target */
+.varrow .del{
+  background:none; border:none; color:var(--dimmer); font-size:15px;
+  padding:0; line-height:1; width:16px; flex:none; text-align:center;
+}
 .varrow .del:hover{color:var(--red)}
+/* a variable holding a plain integer gets a nudge either way */
+.step{display:inline-flex; gap:3px; flex:none}
+.step.off{visibility:hidden}
+.step button{
+  background:var(--pane-2); border:1px solid var(--border); color:var(--dim);
+  width:23px; height:25px; border-radius:5px; font-size:13px; line-height:1; padding:0;
+}
+.step button:hover{color:var(--accent); border-color:var(--accent)}
 .varhint{font-size:12px; color:var(--dimmer); margin:2px 0 10px}
 .varhint code{font-family:var(--mono); color:var(--dim)}
 .varadd{
@@ -505,4 +519,31 @@ kbd{
   font-size:12px; padding:5px 12px; border-radius:6px;
 }
 .varadd:hover{color:var(--text); border-color:var(--accent)}
-.varerr{color:var(--red); font-size:11.5px; font-family:var(--mono); margin:-2px 0 8px 118px}
+.varerr{
+  color:var(--red); font-size:11.5px; font-family:var(--mono);
+  margin:3px 0 0 26px; display:none;
+}
+.varerr.on{display:block}
+
+/* ------------------------------------------------- the result headline
+   Result types read like a score: every type the roll could produce, best
+   to worst, so a critical that never turned up still shows its nought. */
+.score{display:inline-flex; align-items:baseline}
+.score b{font-weight:700}
+.score i{color:var(--dimmer); font-style:normal; font-weight:400; opacity:.65; padding:0 .04em}
+.score .success, .score .critSuccess{color:var(--green)}
+.score .failure, .score .critFail{color:var(--red)}
+.score .critSuccess, .score .critFail{
+  text-decoration:underline; text-underline-offset:.16em; text-decoration-thickness:.055em;
+}
+.card .total .tsc{display:block; font-size:.42em; margin-top:3px}
+.line .lt .tsc{font-size:.9em; margin-left:5px}
+
+/* state travelling down from a discarded group or a check above */
+.r-num.dropped, .r-str.dropped{opacity:.34; text-decoration:line-through}
+.sumbar.dropped{opacity:.45}
+.sumbar.dropped .sumval{text-decoration:line-through}
+.sumbar.success .sumval, .sumbar.critSuccess .sumval{color:var(--green)}
+.sumbar.failure .sumval, .sumbar.critFail .sumval{color:var(--red)}
+/* the modifiers a subtotal stands for, as many as the bracket has room for */
+.sumval i{font-style:normal; color:var(--dimmer); font-size:10px; margin-left:5px}

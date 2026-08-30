@@ -71,13 +71,33 @@
     check: { kind: 'element', order: 8 }
   };
 
-  /* the four checks. only `s` carries a number through to arithmetic */
+  /* The four checks. Only `s` carries a number through to arithmetic.
+     Writing the `s` says what counts as a hit and nothing at all about the
+     rest, so a miss stays blank. A bare comparison is a plain yes/no, so
+     there a miss really is a failure. */
   const CHECKS = {
-    s: { castable: true, hit: 'success', miss: 'failure', label: 'Success check' },
+    s: { castable: true, hit: 'success', miss: null, bareMiss: 'failure', label: 'Success check' },
     f: { castable: false, hit: 'failure', miss: null, label: 'Failure check' },
     cs: { castable: false, hit: 'critSuccess', miss: null, label: 'Critical success' },
     cf: { castable: false, hit: 'critFail', miss: null, label: 'Critical failure' }
   };
+  /* best to worst — the order the result tally is read in */
+  const MARK_ORDER = ['critSuccess', 'success', 'failure', 'critFail'];
+
+  /** the word a resolved check reads as, or null when it says nothing */
+  function checkWord(c) {
+    const spec = CHECKS[c.kind];
+    if (c.hit) return spec.hit;
+    return (c.bare && spec.bareMiss) ? spec.bareMiss : spec.miss;
+  }
+
+  /** every result type a check modifier could produce */
+  function checkMarks(m, out) {
+    const spec = CHECKS[m.check];
+    if (spec.hit) out.add(spec.hit);
+    const miss = (m.bare && spec.bareMiss) ? spec.bareMiss : spec.miss;
+    if (miss) out.add(miss);
+  }
 
   class DiceError extends Error {
     constructor(msg, pos) { super(msg); this.name = 'DiceError'; this.pos = pos; }
@@ -536,8 +556,7 @@
      through to arithmetic; the other three are terminal result types. */
   function wordOf(item) {
     if (!item.check) return item.word || null;
-    const c = CHECKS[item.check.kind];
-    return item.check.hit ? c.hit : c.miss;
+    return checkWord(item.check);
   }
 
   function checkTotal(item) {
@@ -549,16 +568,76 @@
     return c.hit ? 1 : 0;
   }
 
-  function markClass(item) {
+  /** the result class this value carries in its own right, or '' */
+  function markOf(item) {
     if (!item.check) return '';
-    const c = CHECKS[item.check.kind];
-    return item.check.hit ? ' ' + c.hit : (c.miss ? ' ' + c.miss : '');
+    return checkWord(item.check) || '';
   }
+  const markClass = (item) => { const m = markOf(item); return m ? ' ' + m : ''; };
 
   /** totals throw on a non-castable check; the display must not. raw() is the
       underlying number, which never consults the check, so there is no loop. */
   function safeTotal(node) {
     try { return node.total(); } catch (e) { return node.raw(); }
+  }
+
+  /* Dropped and result state travel down the render, so the dice under a
+     discarded group are struck out and the ones under a check are coloured.
+     A value with a check of its own replaces what it inherited — the closest
+     check always wins. */
+  function ctxFor(o, item) {
+    const own = markOf(item);
+    const mark = own || (o && o.mark) || '';
+    const dropped = !!(o && o.dropped) || !!item.dropped;
+    if (mark === ((o && o.mark) || '') && dropped === !!(o && o.dropped)) return o;
+    return { plain: !!(o && o.plain), mark, dropped };
+  }
+  const inheritClass = (o, item) => {
+    const own = markClass(item);
+    if (own) return own;
+    return (o && o.mark) ? ' ' + o.mark : '';
+  };
+  const isDropped = (o, item) => !!item.dropped || !!(o && o.dropped);
+
+  /* a short past-tense phrase per modifier, for the subtotal bracket */
+  const cpShort = (cp) => {
+    if (!cp) return '';
+    if (cp.op === '>=') return cp.v + '+';
+    if (cp.op === '<=') return '≤' + cp.v;
+    if (cp.op === '!=') return '≠' + cp.v;
+    return cp.op + cp.v;
+  };
+  const CHECK_SHORT = { s: 'success', f: 'failure', cs: 'crit', cf: 'crit fail' };
+
+  function modNote(m) {
+    const end = (e) => e === 'h' ? 'highest' : 'lowest';
+    switch (m.t) {
+      case 'min': return 'floored at ' + m.n;
+      case 'max': return 'capped at ' + m.n;
+      case 'explode': return (m.pen ? 'penetrated' : 'exploded') + (m.inf ? ' repeatedly' : '');
+      case 'reroll': return 're-rolled' + (m.inf ? ' repeatedly' : '');
+      case 'unique': return 'made unique';
+      case 'keep': return 'kept ' + end(m.end) + (m.n > 1 ? ' ' + m.n : '');
+      case 'drop': return 'dropped ' + end(m.end) + (m.n > 1 ? ' ' + m.n : '');
+      case 'check': return CHECK_SHORT[m.check] + ' on ' + cpShort(m.cp);
+    }
+    return '';
+  }
+
+  /** every modifier on a value, in the order they were applied */
+  function noteAttr(item) {
+    const mods = item.mods;
+    if (!mods || !mods.length) return '';
+    const rank = (m) => { const k = MODS[m.t === 'check' ? 'check' : m.t]; return k ? k.order : 99; };
+    const text = mods.slice().sort((a, b) => rank(a) - rank(b)).map(modNote).filter(Boolean).join('|');
+    return text ? ' data-note="' + esc(text) + '"' : '';
+  }
+
+  /** what the subtotal bracket needs to know beyond its number */
+  function stateAttr(o, item) {
+    const mark = markOf(item);
+    return (isDropped(o, item) ? ' data-drop="1"' : '') +
+      (mark ? ' data-mark="' + mark + '"' : '') + noteAttr(item);
   }
 
   function Die(roll, sides, uid) {
@@ -569,15 +648,16 @@
       get value() { return roll.v; },
       raw() { return roll.v; },
       total() { const c = checkTotal(this); return c === null ? roll.v : c; },
+      cond() { return this.check ? this.check.hit : null; },
       html(o) {
         const tag = uid ? ' data-x="d' + uid + '"' : '';
-        return (o && o.plain) ? chipHTML(this, tag) : dieHTML(this, shapeFor(sides), tag);
+        return (o && o.plain) ? chipHTML(this, tag, o) : dieHTML(this, shapeFor(sides), tag, o);
       }
     };
   }
 
   /** a word: 'success', 'failure', or anything the user quoted */
-  function Str(word, html) {
+  function Str(word) {
     return {
       set: false, die: false, word, check: null, dropped: false,
       get value() { return word; },
@@ -586,33 +666,66 @@
         throw new DiceError('"' + word + '" is a word, not a number, ' +
           'so it cannot be used in a calculation');
       },
-      html() { return html || '<span class="r-str">' + esc(word) + '</span>'; }
+      cond() {
+        if (this.check) return this.check.hit;
+        if (word === 'success') return true;
+        if (word === 'failure') return false;
+        return null;
+      },
+      html(o) {
+        return '<span class="r-str' + inheritClass(o, this) +
+          (isDropped(o, this) ? ' dropped' : '') + '">' + esc(word) + '</span>';
+      }
     };
   }
 
-  function Val(v, html) {
+  function Val(v) {
     return {
       set: false, die: false, check: null, dropped: false,
       get value() { return v; },
       raw() { return v; },
       total() { const c = checkTotal(this); return c === null ? v : c; },
-      html() { return html || '<span class="r-num">' + fmt(v) + '</span>'; }
+      cond() { return this.check ? this.check.hit : null; },
+      html(o) {
+        return '<span class="r-num' + inheritClass(o, this) +
+          (isDropped(o, this) ? ' dropped' : '') + '">' + fmt(v) + '</span>';
+      }
+    };
+  }
+
+  /* A worked-out expression — a sum, a negation, a function call. It keeps its
+     parts rather than a baked string, so state reaching it later (a discard, a
+     check, the plain-chip fallback) still travels down to the dice inside. */
+  function Expr(v, parts) {
+    return {
+      set: false, die: false, check: null, dropped: false, parts,
+      get value() { return v; },
+      raw() { return v; },
+      total() { const c = checkTotal(this); return c === null ? v : c; },
+      cond() { return this.check ? this.check.hit : null; },
+      html(o) {
+        const co = ctxFor(o, this);
+        return parts.map((p) => typeof p === 'string' ? p : p.html(co)).join('');
+      }
     };
   }
 
   /** a bracket around a value: still a value, drawn with its own subtotal */
   function Group(inner, uid, prefix) {
     return {
-      set: false, die: false, check: null, dropped: false, uid,
+      set: false, die: false, check: null, dropped: false, uid, inner,
       get value() { return inner.word !== undefined ? inner.word : inner.raw(); },
       get word() { return inner.word; },
       raw() { return inner.raw(); },
       total() { const c = checkTotal(this); return c === null ? inner.total() : c; },
+      cond() { return this.check ? this.check.hit : (inner.cond ? inner.cond() : null); },
       html(o) {
         const tag = uid ? ' data-x="s' + uid + '"' : '';
-        const sum = inner.word !== undefined ? '' : ' data-sum="' + esc(fmt(safeTotal(inner))) + '"';
+        const sum = inner.word !== undefined ? ''
+          : ' data-sum="' + esc(fmt(safeTotal(inner))) + '"' + stateAttr(o, this);
+        const co = ctxFor(o, this);
         return '<span class="r-grp"' + tag + sum + '>' + (prefix || '') +
-          '<span class="r-brk"' + tag + '>(</span>' + inner.html(o) +
+          '<span class="r-brk"' + tag + '>(</span>' + inner.html(co) +
           '<span class="r-brk"' + tag + '>)</span></span>';
       }
     };
@@ -621,19 +734,21 @@
   /** a face picked off a custom die, drawn as the die it came from */
   function CustomDie(inner, shape, uid) {
     return {
-      set: false, die: false, custom: true, check: null, dropped: false, uid,
+      set: false, die: false, custom: true, check: null, dropped: false, uid, inner,
       get value() { return inner.word !== undefined ? inner.word : inner.raw(); },
       get word() { return inner.word; },
       raw() { return inner.raw(); },
       total() { const c = checkTotal(this); return c === null ? inner.total() : c; },
+      cond() { return this.check ? this.check.hit : (inner.cond ? inner.cond() : null); },
       html(o) {
         const tag = uid ? ' data-x="c' + uid + '"' : '';
         const w = wordOf(this);
         const face = w !== null && w !== undefined ? w
           : (inner.word !== undefined ? inner.word : fmt(safeTotal(inner)));
         const cls = ['die', 'custom', 's-' + shape];
-        const mk = markClass(this);
+        const mk = inheritClass(o, this);
         if (mk) cls.push(mk.trim());
+        if (isDropped(o, this)) cls.push('dropped');
         const size = String(face).length >= 3 ? ' v3' : (String(face).length === 2 ? ' v2' : '');
         return '<span class="' + cls.join(' ') + '"' + tag + ' title="custom die">' +
           '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
@@ -655,19 +770,40 @@
 
   const varTag = (node) => '<span class="r-var">' + esc(node.name) + '</span>';
 
+  /* An `a:=expr` written into the expression itself only lives for that one
+     expression, and shadows a variable of the same name from the panel. */
+  const varSrc = (name, ctx) =>
+    (ctx && ctx.vars && ctx.vars[name] !== undefined) ? ctx.vars[name] : VARS[name];
+
   function setVars(map) {
     VARS = {};
     for (const k in map) if (/^[a-zA-Z_]+$/.test(k)) VARS[k] = map[k];
     varCache.clear();
   }
 
-  /** success is true, failure is false, anything else is not a condition */
+  /* A choice needs one yes-or-no. A checked value gives it straight away; a set
+     of them reads yes when any member hit, so `4d20>10 ? a : b` is "if any of
+     the four beat 10". Something carrying no check at all is not a condition. */
   function truth(v) {
-    const w = v.word !== undefined ? v.word : wordOf(v);
-    if (w === 'success') return true;
-    if (w === 'failure') return false;
-    throw new DiceError('a ? : choice needs a success or failure on the left — ' +
-      'compare something first, like d20>=15 ? hit : miss');
+    const c = v.cond ? v.cond() : null;
+    if (c === null || c === undefined) {
+      throw new DiceError('a ? : choice needs something that reads success or failure on ' +
+        'the left — compare something first, like d20>=15 ? hit : miss');
+    }
+    return c;
+  }
+
+  /** tally the result types in a value. the closest check speaks for what is under it */
+  function collectMarks(v, out) {
+    if (!v || v.dropped) return;
+    if (v.check) {
+      const w = checkWord(v.check);
+      if (w) out[w] = (out[w] || 0) + 1;
+      return;
+    }
+    if (v.set) { for (const m of v.members) collectMarks(m, out); return; }
+    if (v.inner) { collectMarks(v.inner, out); return; }
+    if (v.parts) { for (const p of v.parts) if (typeof p !== 'string') collectMarks(p, out); }
   }
 
   function SetVal(members, opts) {
@@ -685,31 +821,29 @@
         for (const m of this.live()) s += m.total();
         return s;
       },
-      marks() {
-        const out = {};
-        const add = (k) => { if (k) out[k] = (out[k] || 0) + 1; };
+      cond() {
+        if (this.check) return this.check.hit;
+        let seen = null;
         for (const m of this.live()) {
-          if (m.check) {
-            const c = CHECKS[m.check.kind];
-            add(m.check.hit ? c.hit : c.miss);
-          } else if (m.set && m.marks) {
-            const sub = m.marks();
-            if (sub) for (const k in sub) out[k] = (out[k] || 0) + sub[k];
-          }
+          const c = m.cond ? m.cond() : null;
+          if (c === null || c === undefined) continue;
+          if (c) return true;
+          seen = false;
         }
-        return Object.keys(out).length ? out : null;
+        return seen;
       },
       html(o) {
         const tag = this.uid ? ' data-x="' + (this.brackets ? 's' : 'd') + this.uid + '"' : '';
-        const sum = ' data-sum="' + esc(fmt(safeTotal(this))) + '"';
+        const sum = ' data-sum="' + esc(fmt(safeTotal(this))) + '"' + stateAttr(o, this);
+        const co = ctxFor(o, this);
         if (this.brackets) {
           return '<span class="r-grp"' + tag + sum + '>' + this.prefix +
             '<span class="r-brk"' + tag + '>(</span>' +
-            members.map((m) => m.html(o)).join('<span class="r-op">,</span>') +
+            members.map((m) => m.html(co)).join('<span class="r-op">,</span>') +
             '<span class="r-brk"' + tag + '>)</span></span>';
         }
         const squeezed = members.length > SQUEEZE_AT && members.every((m) => m.die);
-        const body = members.map((m) => m.html(o)).join(squeezed ? '' : PLUS);
+        const body = members.map((m) => m.html(co)).join(squeezed ? '' : PLUS);
         return '<span class="r-term' + (squeezed ? ' squeezed' : '') + '"' + tag +
           (members.length > 1 ? sum : '') + squeezeStyle(members.length) + '>' + body + '</span>';
       }
@@ -717,11 +851,11 @@
   }
 
   /* ------------------------------------------------------------- markup */
-  function dieHTML(item, shape, tag) {
+  function dieHTML(item, shape, tag, o) {
     const r = item.roll;
     const cls = ['die', 's-' + shape].concat(r.tags);
-    if (r.dropped) cls.push('dropped');
-    const mk = markClass(item);
+    if (isDropped(o, item)) cls.push('dropped');
+    const mk = inheritClass(o, item);
     if (mk) cls.push(mk.trim());
     const face = fmt(r.v);
     const size = face.length >= 3 ? ' v3' : (face.length === 2 ? ' v2' : '');
@@ -729,7 +863,7 @@
     if (r.from !== null && r.from !== undefined) badge = '<s>' + esc(fmt(r.from)) + '</s>';
     else if (r.tags.indexOf('exploded') >= 0) badge = '!';
     const title = (r.tags.length ? r.tags.join(', ') : 'natural') +
-      (r.dropped ? ', dropped' : '') + (mk ? ',' + mk : '');
+      (isDropped(o, item) ? ', dropped' : '') + (mk ? ',' + mk : '');
     return '<span class="' + cls.join(' ') + '"' + tag + ' title="' + esc(title) + '">' +
       '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
       '<use href="#sh-' + shape + '"/></svg>' +
@@ -737,11 +871,11 @@
       (badge ? '<span class="diebadge">' + badge + '</span>' : '') + '</span>';
   }
 
-  function chipHTML(item, tag) {
+  function chipHTML(item, tag, o) {
     const r = item.roll;
     const cls = ['chip-die'].concat(r.tags);
-    if (r.dropped) cls.push('dropped');
-    const mk = markClass(item);
+    if (isDropped(o, item)) cls.push('dropped');
+    const mk = inheritClass(o, item);
     if (mk) cls.push(mk.trim());
     const was = (r.from !== null && r.from !== undefined) ? '<s>' + esc(fmt(r.from)) + '</s>' : '';
     const bang = r.tags.indexOf('exploded') >= 0 ? '<sup>!</sup>' : '';
@@ -794,8 +928,10 @@
     return out;
   }
 
+  /* a member already thrown away takes no further part */
   function eachMember(value, fn) {
-    if (value.set) { for (const m of value.members) fn(m); } else fn(value);
+    if (value.set) { for (const m of value.members) if (!m.dropped) fn(m); }
+    else fn(value);
   }
 
   function applyElement(item, m) {
@@ -809,7 +945,7 @@
       return;
     }
     if (m.t === 'check') {
-      item.check = { kind: m.check, hit: cpTest(m.cp, item.value) };
+      item.check = { kind: m.check, hit: cpTest(m.cp, item.value), bare: !!m.bare };
     }
   }
 
@@ -845,6 +981,7 @@
   }
 
   function applyMods(value, mods, sides) {
+    if (mods && mods.length) value.mods = mods;   // the subtotal bracket names them
     const ordered = mods.filter((m) => {
       const k = MODS[m.t === 'check' ? 'check' : m.t];
       return k && k.kind !== 'die';
@@ -902,7 +1039,7 @@
 
       /* a bare word is a variable when one is defined, otherwise just a word */
       case 'word': {
-        const src = VARS[node.name];
+        const src = varSrc(node.name, ctx);
         if (src === undefined) {
           if (node.forced) throw new DiceError('no variable named "' + node.name + '" is set');
           return applyMods(Str(node.name), node.mods || [], null);
@@ -940,12 +1077,12 @@
 
       case 'neg': {
         const v = evalNode(node.v, ctx);
+        const minus = '<span class="r-op">-</span>';
         if (v.set) {
           // a minus in front of a set flips every member
-          return SetVal(v.members.map((m) =>
-            Val(-safeTotal(m), '<span class="r-op">-</span>' + m.html())), { uid: node.uid });
+          return SetVal(v.members.map((m) => Expr(-safeTotal(m), [minus, m])), { uid: node.uid });
         }
-        return Val(-v.total(), '<span class="r-op">-</span>' + v.html());
+        return Expr(-v.total(), [minus, v]);
       }
 
       case 'bin': {
@@ -961,14 +1098,19 @@
           case '^': v = Math.pow(a, b); break;
         }
         const tag = node.uid ? ' data-x="o' + node.uid + '"' : '';
-        return Val(v, l.html() + '<span class="r-op"' + tag + '>' + esc(node.op) + '</span>' + r.html());
+        return Expr(v, [l, '<span class="r-op"' + tag + '>' + esc(node.op) + '</span>', r]);
       }
 
       case 'func': {
-        const parts = node.args.map((a) => evalNode(a, ctx));
-        const v = FUNCS[node.name].apply(null, parts.map((p) => p.total()));
-        return Val(v, '<span class="r-fn">' + node.name + '</span><span class="r-brk">(</span>' +
-          parts.map((p) => p.html()).join('<span class="r-op">,</span>') + '<span class="r-brk">)</span>');
+        const args = node.args.map((a) => evalNode(a, ctx));
+        const v = FUNCS[node.name].apply(null, args.map((p) => p.total()));
+        const parts = ['<span class="r-fn">' + node.name + '</span><span class="r-brk">(</span>'];
+        args.forEach((p, i) => {
+          if (i) parts.push('<span class="r-op">,</span>');
+          parts.push(p);
+        });
+        parts.push('<span class="r-brk">)</span>');
+        return Expr(v, parts);
       }
 
       case 'dice': return rollDice(node, ctx);
@@ -1078,7 +1220,11 @@
         ' member. Needs a set.'];
       case 'check': {
         const c = CHECKS[m.check];
+        const miss = (m.bare && c.bareMiss) ? c.bareMiss : c.miss;
         return [c.label, 'Mark every member of ' + cpPhrase(m.cp) + ' as ' + c.hit + '. ' +
+          (miss ? 'Anything else reads ' + miss + '. '
+                : 'It says nothing about the rest — drop the "' + m.check +
+                  '" and write the comparison alone for a plain success/failure. ') +
           (c.castable
             ? 'A hit counts as 1 and a miss as 0, so this can still be used in a calculation.'
             : 'This is a result type — it carries no number, so it cannot be used in a calculation.')];
@@ -1232,12 +1378,14 @@
         }
         case 'rep': {
           const rid = 's' + node.uid;
-          push([node.count.sp[0], node.brk[0][1]], 't-rep', {
+          push(node.count.sp, 't-rep', {
             title: 'Repeat into a set',
             desc: 'Evaluate the bracket ' + plain(node.count) +
               ' separate times and collect the results as a set.',
             depth
           }, rid);
+          // both halves of the pair are painted the same, like every other bracket
+          push(node.brk[0], 't-brk', null, rid);
           node.items.forEach((it, i) => {
             walk(it, depth + 1);
             if (node.commas[i]) push(node.commas[i], 't-op', null, rid);
@@ -1278,15 +1426,31 @@
     return null;
   }
 
-  function previewNode(node) {
+  const PREVIEW_DEPTH = 6;
+
+  function previewNode(node, ctx) {
+    ctx = ctx || { vars: null, depth: 0 };
+    const kid = (n) => previewNode(n, ctx);
     switch (node.t) {
       case 'num': return '<span class="r-num">' + fmt(node.v) + '</span>';
       case 'str': return '<span class="r-str">' + esc(node.v) + '</span>';
-      case 'word': return '<span class="r-var" data-x="w' + node.uid + '">' + esc(node.name) + '</span>';
+      /* a variable is opened up, so the preview shows the dice it stands for */
+      case 'word': {
+        const tag = ' data-x="w' + node.uid + '"';
+        const name = '<span class="r-var"' + tag + '>' + esc(node.name) + '</span>';
+        const src = varSrc(node.name, ctx);
+        if (src === undefined || ctx.depth >= PREVIEW_DEPTH) return name;
+        let ast;
+        try { ast = varAst(node.name, src); } catch (e) { return name; }
+        const inner = previewNode(ast, { vars: ctx.vars, depth: ctx.depth + 1 });
+        return '<span class="r-grp"' + tag + '>' + name +
+          '<span class="r-brk"' + tag + '>(</span>' + inner +
+          '<span class="r-brk"' + tag + '>)</span></span>';
+      }
       case 'ternary':
-        return previewNode(node.cond) + '<span class="r-op" data-x="t' + node.uid + '">?</span>' +
-          previewNode(node.yes) + '<span class="r-op" data-x="t' + node.uid + '">:</span>' +
-          previewNode(node.no);
+        return kid(node.cond) + '<span class="r-op" data-x="t' + node.uid + '">?</span>' +
+          kid(node.yes) + '<span class="r-op" data-x="t' + node.uid + '">:</span>' +
+          kid(node.no);
       case 'custom': {
         const shape = shapeFor(node.items.length);
         return '<span class="die ghost custom s-' + shape + '" data-x="c' + node.uid + '">' +
@@ -1294,17 +1458,17 @@
           '<span class="dieval' + (String(node.items.length).length === 2 ? ' v2' : '') + '">' +
           node.items.length + '</span></span>';
       }
-      case 'neg': return '<span class="r-op">-</span>' + previewNode(node.v);
+      case 'neg': return '<span class="r-op">-</span>' + kid(node.v);
       case 'bin':
-        return previewNode(node.l) +
+        return kid(node.l) +
           '<span class="r-op"' + (node.uid ? ' data-x="o' + node.uid + '"' : '') + '>' +
-          esc(node.op) + '</span>' + previewNode(node.r);
+          esc(node.op) + '</span>' + kid(node.r);
       case 'func':
         return '<span class="r-fn">' + node.name + '</span><span class="r-brk">(</span>' +
-          node.args.map(previewNode).join('<span class="r-op">,</span>') + '<span class="r-brk">)</span>';
+          node.args.map(kid).join('<span class="r-op">,</span>') + '<span class="r-brk">)</span>';
       case 'paren': case 'set': case 'rep': {
         const tag = ' data-x="s' + node.uid + '"';
-        const items = (node.t === 'paren' ? [node.v] : node.items).map(previewNode)
+        const items = (node.t === 'paren' ? [node.v] : node.items).map(kid)
           .join('<span class="r-op">,</span>');
         const pre = node.t === 'rep' ? '<span class="r-num">' + esc(plain(node.count)) + '</span>' : '';
         return '<span class="r-grp"' + tag + '>' + pre + '<span class="r-brk"' + tag + '>(</span>' +
@@ -1348,6 +1512,8 @@
     return out;
   }
 
+  const ASSIGN_RE = /^\s*([a-zA-Z_]+)\s*:=/;
+
   function parse(input) {
     const raw = String(input == null ? '' : input);
     let src = raw.trim();
@@ -1372,25 +1538,47 @@
     if (!src.trim()) throw new DiceError('nothing to roll', offset);
 
     const parts = [];
+    const vars = {};
     let uid = 0;
     for (const piece of splitParts(src)) {
       if (!piece.text.trim()) throw new DiceError('empty roll between commas', offset + piece.a);
-      const p = new Parser(piece.text, uid);
+      // `name := expr` as a top-level item defines a variable for this expression only
+      const asg = ASSIGN_RE.exec(piece.text);
+      const body = asg ? piece.text.slice(asg[0].length) : piece.text;
+      const base = offset + piece.a + (asg ? asg[0].length : 0);
+      if (asg && !body.trim()) {
+        throw new DiceError('"' + asg[1] + ':=" needs an expression after it', base);
+      }
+      const p = new Parser(body, uid);
       let ast;
       try {
         ast = p.parse();
         typeCheck(ast, false);
       } catch (e) {
-        if (e instanceof DiceError && e.pos != null) e.pos += offset + piece.a;
+        if (e instanceof DiceError && e.pos != null) e.pos += base;
         throw e;
       }
       uid = p.uid;
-      parts.push({ ast, a: offset + piece.a, src: piece.text });
+      if (asg) {
+        vars[asg[1]] = body;
+        const nameA = offset + piece.a + asg[0].indexOf(asg[1]);
+        parts.push({
+          ast, a: base, src: body, pieceA: offset + piece.a, assign: asg[1],
+          nameSp: [nameA, nameA + asg[1].length], opSp: [base - 2, base]
+        });
+      } else {
+        parts.push({ ast, a: base, src: body, pieceA: offset + piece.a });
+      }
+    }
+    const rolls = parts.filter((x) => !x.assign);
+    if (!rolls.length) {
+      throw new DiceError('this only sets variables — add something to roll', offset);
     }
 
     return {
-      parts, ast: parts[0].ast, repeat, repeatSp, label, labelSp, offset, src,
-      trimmed: raw.trim(), notation: parts.map((p) => plain(p.ast)).join(', ')
+      parts, rolls, vars, ast: rolls[0].ast, repeat, repeatSp, label, labelSp, offset, src,
+      trimmed: raw.trim(),
+      notation: parts.map((p) => (p.assign ? p.assign + ':=' : '') + plain(p.ast)).join(', ')
     };
   }
 
@@ -1398,11 +1586,21 @@
     const p = parse(input);
     const spans = [], rows = [];
     p.parts.forEach((part, i) => {
+      if (part.assign) {
+        const aid = 'xa' + i;
+        spans.push({ a: part.nameSp[0], b: part.nameSp[1], cls: 't-var', id: aid });
+        spans.push({ a: part.opSp[0], b: part.opSp[1], cls: 't-op', id: aid });
+        rows.push({
+          id: aid, code: part.assign + ':=', depth: 0, title: 'Assignment',
+          desc: 'Sets ' + part.assign + ' for this expression only, shadowing any variable ' +
+            'of that name in the panel. It is still worked out afresh wherever it is used.'
+        });
+      }
       const d = describe(part.ast, part.src);
       for (const s of d.spans) spans.push({ a: s.a + part.a, b: s.b + part.a, cls: s.cls, id: s.id });
       for (const r of d.rows) rows.push(Object.assign({}, r));
       if (i < p.parts.length - 1) {
-        const c = p.parts[i + 1].a - 1;
+        const c = p.parts[i + 1].pieceA - 1;
         spans.push({ a: c, b: c + 1, cls: 't-op', id: 'xc' + i });
         rows.push({
           id: 'xc' + i, code: ',', depth: 0, title: 'Next roll',
@@ -1430,23 +1628,66 @@
     return { parsed: p, spans, rows, notation: p.notation };
   }
 
-  const evaluate = (ast) => evalNode(ast, { dice: 0, depth: 0 });
+  const evaluate = (ast, vars) => evalNode(ast, { dice: 0, depth: 0, vars: vars || null });
 
   function countDice(v) {
     if (!v) return 0;
     if (v.die) return 1;
     if (v.set) { let n = 0; for (const m of v.members) n += countDice(m); return n; }
+    if (v.inner) return countDice(v.inner);
+    if (v.parts) { let n = 0; for (const p of v.parts) if (typeof p !== 'string') n += countDice(p); return n; }
     return 0;
+  }
+
+  /* Which result types this expression could ever produce — read off the
+     checks in the source, not the outcome, so a tally can show a nought for
+     the criticals that were possible but did not turn up. */
+  function scanMarks(node, out, ctx) {
+    if (!node || typeof node !== 'object') return;
+    for (const m of node.mods || []) if (m.t === 'check') checkMarks(m, out);
+    if (node.t === 'word') {
+      const src = varSrc(node.name, ctx);
+      const key = node.name + '::' + src;
+      if (src !== undefined && !ctx.seen.has(key)) {
+        ctx.seen.add(key);
+        let ast = null;
+        try { ast = varAst(node.name, src); } catch (e) { ast = null; }
+        if (ast) scanMarks(ast, out, ctx);
+      }
+    }
+    // a check read by a ? : or used as a count is spent there; only what can
+    // still reach the result counts as possible
+    for (const k of ['l', 'r', 'v', 'yes', 'no']) scanMarks(node[k], out, ctx);
+    (node.items || []).forEach((x) => scanMarks(x, out, ctx));
+    (node.args || []).forEach((x) => scanMarks(x, out, ctx));
+  }
+
+  /** a roll that lands on words has those words for a headline, not a number */
+  function wordText(v) {
+    if (!v || v.dropped) return '';
+    if (v.word !== undefined && v.word !== null) return String(v.word);
+    if (v.set) return v.live().map(wordText).filter(Boolean).join(', ');
+    if (v.inner) return wordText(v.inner);
+    if (v.parts) {
+      return v.parts.map((x) => typeof x === 'string' ? '' : wordText(x)).filter(Boolean).join(' ');
+    }
+    return '';
+  }
+
+  function possibleMarks(p) {
+    const out = new Set(), ctx = { vars: p.vars, seen: new Set() };
+    for (const part of p.rolls) scanMarks(part.ast, out, ctx);
+    return MARK_ORDER.filter((k) => out.has(k));
   }
 
   function roll(input) {
     const p = parse(input);
     const sets = [];
-    const multi = p.repeat > 1 || p.parts.length > 1;
+    const multi = p.repeat > 1 || p.rolls.length > 1;
     for (let i = 0; i < p.repeat; i++) {
-      for (const part of p.parts) {
-        const r = evaluate(part.ast);
-        if (multi) r.name = p.parts.length > 1 ? plain(part.ast) : null;
+      for (const part of p.rolls) {
+        const r = evaluate(part.ast, p.vars);
+        if (multi) r.name = p.rolls.length > 1 ? plain(part.ast) : null;
         sets.push(r);
       }
     }
@@ -1459,26 +1700,20 @@
     catch (e) { numeric = false; total = 0; }
 
     const marks = {};
-    for (const s of sets) {
-      let m = null;
-      if (s.check) {
-        const c = CHECKS[s.check.kind];
-        const key = s.check.hit ? c.hit : c.miss;
-        if (key) m = { [key]: 1 };
-      } else if (s.marks) m = s.marks();
-      if (m) for (const k in m) marks[k] = (marks[k] || 0) + m[k];
-    }
+    for (const s of sets) collectMarks(s, marks);
 
     return {
       input: p.trimmed, notation: p.notation, label: p.label, repeat: p.repeat,
-      sets, diceCount, total, numeric,
+      sets, diceCount, total, numeric, possible: possibleMarks(p),
+      text: sets.map(wordText).filter(Boolean).join(', '),
       marks: Object.keys(marks).length ? marks : null
     };
   }
 
   function preview(input) {
     const p = parse(input);
-    return p.parts.map((part) => previewNode(part.ast)).join('<span class="r-op">,</span>');
+    const ctx = { vars: p.vars, depth: 0 };
+    return p.rolls.map((part) => previewNode(part.ast, ctx)).join('<span class="r-op">,</span>');
   }
 
   function analyse(input, n) {
@@ -1488,7 +1723,9 @@
     let sum = 0, min = Infinity, max = -Infinity;
     for (let i = 0; i < n; i++) {
       let t = 0;
-      for (let r = 0; r < p.repeat; r++) for (const part of p.parts) t += evaluate(part.ast).total();
+      for (let r = 0; r < p.repeat; r++) {
+        for (const part of p.rolls) t += evaluate(part.ast, p.vars).total();
+      }
       totals[i] = t; sum += t;
       if (t < min) min = t;
       if (t > max) max = t;
@@ -1507,6 +1744,6 @@
 
   global.DiceEngine = {
     parse, inspect, evaluate, roll, analyse, preview, setVars, fmt, esc, shapeFor,
-    DiceError, LIMIT, FUNCS, CHECKS
+    DiceError, LIMIT, FUNCS, CHECKS, MARK_ORDER
   };
 }(window));
