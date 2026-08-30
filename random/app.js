@@ -1,8 +1,19 @@
 /* ============================================================================
    Random Engine — UI layer
-   RegExr-style: a live syntax-highlighted expression field, a result stack,
-   and a tool drawer (Explain / Details / Reference / Saved) that stays in sync
-   with the caret.
+   ----------------------------------------------------------------------------
+   A live syntax-highlighted expression field over a result stack, with a
+   drawer of tools that stays in step with the caret. The engine does the
+   thinking; nothing here parses or rolls anything.
+
+   Two ideas run through the whole file:
+
+     Every rolled thing is tagged `data-x`, and every place one can be drawn
+     carries a `data-scope`. That is what lets the editor, the Explain list,
+     the preview and a result light each other up on hover.
+
+     A saved roll and a variable are the same shape — an expression named by
+     the `# name` at its end — so one pair of functions draws and wires both
+     lists, and the shortcut bar is a third view of the same two.
    ========================================================================== */
 (function () {
   'use strict';
@@ -44,113 +55,9 @@
     hot: null, hotScope: null   // token currently hovered, and in which expression
   };
 
-  /* ======================================================== reference data */
-  /* every size that has a solid of its own, for the gallery */
-  const DICE_GALLERY = [2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 100];
-
-  /* Each entry is [example, description, form].
-       Every example is valid on its own. A ~ toggles between the grey
-       scaffolding and the coloured part that does the referenced work, so
-       '4d6~kh3' greys the dice and colours the modifier.
-       form: atom inserts as written; suffix hangs the coloured part off the
-       term the caret is in; wrap wraps that term. */
-  const REFERENCE = [
-    ['Dice', [
-      ['~d20', 'one die — a value', 'atom', 'One die is a value, not a set. Set modifiers like kh have nothing to work on and are refused. Any positive number of sides works: a size with no solid of its own borrows the nearest one to draw with.'],
-      ['~4d6', 'four dice — a set, summed when a value is needed', 'atom', 'A count makes a set. Summing is the only thing that ever turns one back into a value.'],
-      ['~(2+2)~d6', 'computed quantity', 'atom', 'The bracket is worked out first and used as the number of dice.'],
-      ['3d~(2*6)', 'computed number of sides', 'atom', 'Sides can be computed too, so a die can be as big as the maths makes it.']
-    ]],
-    ['Sets', [
-      ['(d6~,~d8)', 'a set built by listing values', 'atom', 'The comma is what builds a set. Whitespace never does: d10-2d6 and d10 -2d6 are the same roll.'],
-      ['~4(~d10+d6~)', 'repeat an expression into a set of 4', 'atom', '4d6 is shorthand for 4(d6). Anything can be repeated this way, not just a die.'],
-      ['~2(~d10,2d6~)', 'sets inside sets unpack', 'atom', 'Nesting never compounds — the inner set is flattened into the outer one.'],
-      ['(d10,~-~2d6)', 'a minus flips every member', 'atom', 'A minus in front of a set negates each member rather than the sum.']
-    ]],
-    ['Advantage', [
-      ['2d6~a', 'roll it all again, keep the better total', 'suffix', 'Everything to the left is rolled again and the better result kept. Each attempt is summed before they are compared, so this is the better total, not the better die. It has to be the last modifier.'],
-      ['2d6~da', 'keep the worse total', 'suffix', 'The same, keeping the worse.'],
-      ['2d6~a3', 'best of three', 'suffix', 'The number is how many attempts to make in total.'],
-      ['d20~a', 'the familiar one', 'suffix', 'On a single die this is the usual advantage roll; 2d20kh1 says the same thing.']
-    ]],
-    ['Keep & drop', [
-      ['4d6~kh3', 'keep the highest 3 — needs a set', 'suffix', 'Keep and drop need a set. On one value there is nothing to choose between, and it is refused before the roll.'],
-      ['2d20~kl1', 'keep the lowest die', 'suffix', 'This picks a die. To pick between whole totals instead, use da.'],
-      ['4d6~dl1', 'drop the lowest', 'suffix'],
-      ['4d6~dh1', 'drop the highest', 'suffix'],
-      ['(3d6,2d8)~kh3', 'best 3 across a listed set', 'suffix', 'Brackets only group. (3d6+2d8) is a value and refuses kh; (3d6,2d8) is a set and takes it.']
-    ]],
-    ['Exploding', [
-      ['d6~e', 'roll again and add when it lands on 6', 'suffix', 'Explode needs dice, so it cannot attach to a bracket. The plain letter does it once.'],
-      ['d6~ei', 'keep exploding while it hits 6', 'suffix', 'A trailing i means for as long as it keeps qualifying, up to a safety limit.'],
-      ['d6~e5', 'explode on 5 or more', 'suffix'],
-      ['d6~ep', 'penetrating: the extra die takes -1', 'suffix', 'Every extra roll comes in one lower.'],
-      ['d6~epi', 'penetrating, repeated', 'suffix']
-    ]],
-    ['Re-rolling', [
-      ['4d6~r', 're-roll a 1, once', 'suffix', 'The new value stands. The die shows what it was before, struck out.'],
-      ['4d6~ri', 're-roll 1s until they stop', 'suffix', 'Repeats while it keeps qualifying.'],
-      ['4d6~r2', 're-roll 2 and below, once', 'suffix'],
-      ['4d10~u', 'force every die to a different value', 'suffix', 'Duplicates are re-rolled. Needs dice, and a set of them.'],
-      ['4d10~u3', 'give up after three attempts', 'suffix']
-    ]],
-    ['Results', [
-      ['3d6~s5', 'mark each 5+ a success — counts as 1', 'suffix', 'Writing the s says what a hit is and nothing about the rest, so a miss stays blank. A hit counts as 1, so this can still be used in a calculation.'],
-      ['3d6~>=5', 'the same, with s left out', 'suffix', 'A bare comparison is a plain yes or no, so it names both sides: success or failure.'],
-      ['3d6~f2', 'mark each 2 or less a failure', 'suffix', 'A failure check carries no number, so using it in a calculation is refused before the roll.'],
-      ['2d20~cs19', 'mark 19+ a critical success', 'suffix', 'A result type with no number of its own. If criticals are possible at all, the tally shows a nought when none turn up.'],
-      ['2d20~cf2', 'mark 2 or less a critical failure', 'suffix']
-    ]],
-    ['Clamp', [
-      ['4d6~min2', 'treat any face below 2 as 2', 'suffix', 'Clamps a face rather than re-rolling it; the die shows what it was.'],
-      ['4d6~max5', 'treat any face above 5 as 5', 'suffix']
-    ]],
-    ['Maths', [
-      ['2d6~+2', 'add', 'suffix'],
-      ['2d6~-2', 'subtract', 'suffix'],
-      ['2d6~*2', 'multiply — the set is summed first', 'suffix', 'A set is summed before multiplying, never multiplied out member by member.'],
-      ['2d6~/2', 'divide', 'suffix'],
-      ['2d6~%2', 'remainder', 'suffix'],
-      ['2d6~^2', 'raise to a power', 'suffix'],
-      ['~max(~d20,10~)', 'the largest value', 'wrap', 'One of the two functions left. Each argument is reduced to a value first.'],
-      ['~min(~d20,10~)', 'the smallest value', 'wrap']
-    ]],
-    ['Words & choices', [
-      ['d20>=15~?hit:miss', 'pick between two results', 'suffix', 'The choice distributes exactly as the comparison does: 4d20>10?hit:miss is four choices, not one taken on the sum.'],
-      ['~\"a long word\"', 'a quoted word, spaces allowed', 'atom'],
-      ['~hit', 'a bare word — a variable if one is set', 'atom', 'A bare word becomes a variable when one of that name exists, and stays a word otherwise.'],
-      ['~{atk}', 'always the variable, never a word', 'atom', 'Insists on the variable, and says so if none is set.']
-    ]],
-    ['Variables', [
-      ['~roll:=d6~,roll,roll', 'a fresh roll at every mention', 'atom', 'A variable holds text, not a result, so every mention rolls again — this throws two dice. It has to stand as its own top-level item, and it shadows a variable of the same name in the panel.'],
-      ['~roll::=d6~,roll,roll', 'rolled once, however often it is named', 'atom', 'The opposite of :=. One die, and both mentions are that same result, which is what lets a chain of comparisons ask about one roll several times. It stands for what the roll came to, so it is a value and never a set.'],
-      ['~atk:=d20+5,~2atk', 'set one for this expression only', 'prefix', 'Has to stand as its own top-level item. It shadows a variable of the same name in the panel, and is worked out afresh at every mention.'],
-      ['~2~atk', 'used twice means rolled twice', 'atom', 'A variable holds text, not a result, so every mention is a fresh roll.']
-    ]],
-    ['Chained choices', [
-      ['d6>4?yes~:>2?maybe:no~', 'more comparisons on the same roll', 'atom', 'An else that opens with a comparison carries on about the same subject. The subject is worked out once and each comparison tried in the order written.'],
-      ['(2d6)>=10?good~:>=7?mixed:bad~', 'bracket what the chain is about', 'atom', 'A comparison binds to a term, not a sum, so 2d6+3>=10 would compare the 3. Bracket what the chain is about.']
-    ]],
-    ['Custom dice', [
-      ['~[1,1,1,1,1,6]', 'six faces, mostly ones', 'atom', 'A die whose faces you write out. It is drawn with the shape matching the face count.'],
-      ['~[hit,hit,miss]', 'faces can be words', 'atom', 'A face that is a word is written out rather than fitted onto a die.'],
-      ['~[d6,d10]', 'a face can be another roll', 'atom', 'One face is picked, then whatever is written on it is worked out.'],
-      ['~3~[a,b]', 'roll a custom die three times', 'atom']
-    ]],
-    ['Whole roll', [
-      ['~6x~4d6dl1', 'repeat the whole expression 6 times', 'prefix', 'Rolls the whole expression separately that many times and reports each.'],
-      ['2d6~,3d8', 'separate rolls, reported together', 'append', 'At the top level a comma starts another roll. Inside brackets the same comma builds a set.'],
-      ['2d20kh1~#attack', 'label, ignored by the maths', 'append', 'The label names the roll. It is also what a saved roll or a variable is called, and saving needs one.']
-    ]],
-    ['Comparisons', [
-      ['d6e~=6', 'exactly', 'suffix'],
-      ['d6e~>=5', 'at least', 'suffix'],
-      ['4d6r~<=2', 'at most', 'suffix'],
-      ['4d6r~!=3', 'anything but', 'suffix'],
-      ['4d6~>d4', 'against a fresh roll each time', 'suffix', 'The other side of an explicit comparison can be any expression that works out to one value, rolled again for every comparison it takes part in.'],
-      ['loot~=gem', 'against a word', 'suffix', 'Words compare by being the same word.']
-    ]]
-  ];
+  /* --------------------------------------- reference data, in its own file */
+  const DICE_GALLERY = window.RandomEngineDice || [];
+  const REFERENCE = window.RandomEngineReference || [];
 
   /* ============================================================== helpers */
   function toast(msg) {
@@ -401,6 +308,29 @@
   const STEP_BIG = 10;
   const isInt = (s) => /^\s*-?\d+\s*$/.test(String(s == null ? '' : s));
 
+  /* The chip and the list row both nudge a whole number, and both size a field
+     to what it holds, so they say it once here. */
+  const FIELD = { min: 2, max: 14 };
+  const sizeOf = (v) => Math.max(FIELD.min, Math.min(FIELD.max, String(v).length));
+  const sizeVal = (box) => box.setAttribute('size', String(sizeOf(box.value)));
+
+  /* One button, so a chip can put them either side of its field and a list row
+     can keep them together at the end. */
+  const stepBtn = (cls) => {
+    const sign = cls === 'vinc' ? '+' : '&minus;';
+    return '<button class="' + cls + '" tabindex="-1" title="' + sign + '1, or ' + sign +
+      STEP_BIG + ' with shift or the right button">' + sign + '</button>';
+  };
+
+  /** which way and how far a click on a stepper means to move, or null */
+  function stepDelta(ev) {
+    const b = ev.target.closest('.vinc, .vdec');
+    if (!b) return null;
+    ev.preventDefault();
+    const big = ev.shiftKey || ev.type === 'contextmenu';
+    return { b, by: (b.classList.contains('vinc') ? 1 : -1) * (big ? STEP_BIG : 1) };
+  }
+
   function renderShortcuts() {
     // the bar redraws while its own field is being typed in, so hold the caret
     const act = document.activeElement;
@@ -420,15 +350,11 @@
           titleHTML(r.expr) + '</button>').join('') +
       vars.map((v) => {
         const body = bodyOf(v.expr);
-        const step = (cls, sign, label) =>
-          '<button class="' + cls + '" title="' + label + '1, or ' + label + STEP_BIG +
-          ' with shift or the right button">' + sign + '</button>';
         return '<span class="sc var' + (isInt(body) ? '' : ' plain') +
           '" data-var="' + esc(nameOf(v.expr)) + '">' +
-          '<i>' + titleHTML(v.expr) + '</i>' + step('vdec', '&minus;', '&minus;') +
+          '<i>' + titleHTML(v.expr) + '</i>' + stepBtn('vdec') +
           '<input class="vval" value="' + esc(body) + '" spellcheck="false" ' +
-                 'size="' + Math.max(2, Math.min(14, body.length)) + '">' +
-          step('vinc', '+', '+') +
+                 'size="' + sizeOf(body) + '">' + stepBtn('vinc') +
         '</span>';
       }).join('');
 
@@ -447,13 +373,10 @@
     }
   }
 
-  const sizeVal = (box) =>
-    box.setAttribute('size', String(Math.max(2, Math.min(14, box.value.length))));
-
-  /* The shortcut and the Vars panel are two views of one list. Writing from the
-     shortcut never rebuilds the shortcut: the buttons have to stay put under
-     the cursor while it is being clicked, even as the number grows a digit. */
-  /** the chip edits the expression and leaves the name alone */
+  /* The chip and the panel are two views of one list. Writing from the chip
+     never rebuilds the chip: its buttons have to stay put under the cursor
+     while it is being clicked, even as the number grows a digit. The chip
+     edits the expression and leaves the name alone. */
   function writeVar(node, val) {
     const chip = node.closest('[data-var]');
     const name = chip.getAttribute('data-var');
@@ -473,15 +396,8 @@
   }
 
   function wireShortcuts() {
-    const step = (ev) => {
-      const b = ev.target.closest('.vinc, .vdec');
-      if (!b) return null;
-      ev.preventDefault();
-      const big = ev.shiftKey || ev.type === 'contextmenu';
-      return { b, by: (b.classList.contains('vinc') ? 1 : -1) * (big ? STEP_BIG : 1) };
-    };
     el.shortcuts.addEventListener('click', (ev) => {
-      const s = step(ev);
+      const s = stepDelta(ev);
       if (s) return stepVar(s.b, s.by);
       const r = ev.target.closest('[data-roll]');
       if (!r) return;
@@ -492,7 +408,7 @@
     });
     // the right button is the quick way to move by ten without a keyboard
     el.shortcuts.addEventListener('contextmenu', (ev) => {
-      const s = step(ev);
+      const s = stepDelta(ev);
       if (s) stepVar(s.b, s.by);
     });
   }
@@ -1199,7 +1115,6 @@
     tag.textContent = first.slice(0, NAME_STUB) + (first.length > NAME_STUB ? '…' : '');
   }
 
-  /* ================================================================ saved */
   /* ================================================================ lists
      A variable and a saved roll are the same thing — an expression named by
      its own label — so one pair of functions draws and wires both. All that
@@ -1249,9 +1164,7 @@
             '<input class="lexpr" value="' + esc(it.expr) + '" spellcheck="false" ' +
               'placeholder="' + esc(L.placeholder) + '">' +
             '<span class="step' + (isInt(bodyOf(it.expr)) ? '' : ' off') + '">' +
-              '<button class="vdec" title="subtract 1, or 10 with shift" tabindex="-1">&minus;</button>' +
-              '<button class="vinc" title="add 1, or 10 with shift" tabindex="-1">+</button>' +
-            '</span>' +
+              stepBtn('vdec') + stepBtn('vinc') + '</span>' +
           '</div>' +
           '<div class="lerr' + (err ? ' on' : '') + '">' + esc(err || '') + '</div>' +
         '</div>';
@@ -1361,13 +1274,22 @@
         L.keep(list); renderList(kind); renderShortcuts(); onInput();
         return;
       }
-      const inc = ev.target.closest('.vinc'), dec = ev.target.closest('.vdec');
-      if (!inc && !dec) return;
+      const s = stepDelta(ev);
+      if (!s) return;
       const box = row.querySelector('.lexpr');
       const body = bodyOf(box.value);
       if (!isInt(body)) return;
-      box.value = withBody(box.value,
-        String(parseInt(body, 10) + (inc ? 1 : -1) * (ev.shiftKey ? STEP_BIG : 1)));
+      box.value = withBody(box.value, String(parseInt(body, 10) + s.by));
+      commitList(kind);
+    });
+    el[L.pane].addEventListener('contextmenu', (ev) => {
+      const s = stepDelta(ev);
+      const row = ev.target.closest('.lrow');
+      if (!s || !row) return;
+      const box = row.querySelector('.lexpr');
+      const body = bodyOf(box.value);
+      if (!isInt(body)) return;
+      box.value = withBody(box.value, String(parseInt(body, 10) + s.by));
       commitList(kind);
     });
   }
@@ -1399,9 +1321,10 @@
     store.write(LS_DRAWER, collapsed);
   }
 
-  /* ============================================================ variables
-     A variable is just an expression stored under a name. It is worked out
-     afresh at every occurrence, so `2atk` rolls twice. */
+  /* ------------------------------------------------------ what is stored
+     A variable is an expression worked out afresh at every occurrence, so
+     `2atk` rolls twice. Only variables reach the engine by name; a saved roll
+     is only ever loaded into the field. */
   function loadVars() {
     const v = store.read(LS_VARS, null);
     if (Array.isArray(v)) return v.map(normalise);
@@ -1445,8 +1368,6 @@
      A preset is everything you have set up — the saved rolls and the
      variables — carried in one link. It lives in localStorage between visits
      like everything else, so a link is only ever a way of moving one about. */
-
-
   function renderSetup() {
     const link = setupLink();
     const back = lastImport();

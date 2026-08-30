@@ -384,6 +384,7 @@ don't clip it.
 | `engine.js` | tokenizer, recursive-descent parser, evaluator, explainer. No DOM. |
 | `app.js` | UI: highlighting, caret sync, result log, tools, storage. |
 | `presets.js` | ready-made rolls per game, as data |
+| `reference.js` | the reference panel, as data |
 | `SYSTEMS.md` | what each game asks for, and what the notation cannot yet say |
 | `index.html`, `style.css` | markup and theme |
 | `tools/gen-dice.js` | builds the dice art (see below) |

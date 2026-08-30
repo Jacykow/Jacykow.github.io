@@ -145,7 +145,6 @@ kbd{
   white-space:pre; overflow:hidden; text-overflow:ellipsis;
 }
 .status.err{color:var(--red)}
-.status .caretline{color:var(--red)}
 
 /* ------------------------------------------------------------- result */
 .resultbody{
@@ -307,10 +306,7 @@ kbd{
 .r-kw.hot{background:rgba(240,180,41,.2); border-radius:3px; color:var(--accent)}
 .hl .hot{background:rgba(240,180,41,.22); border-radius:3px; box-shadow:0 0 0 1px rgba(240,180,41,.35)}
 .r-fn{color:var(--purple)}
-.r-notn{color:var(--dimmer); margin-right:4px}
 .r-num{color:var(--text)}
-.r-sub{display:inline-block}
-.dropped-sub{opacity:.4}
 
 /* -------------------------------------------------------------- tools */
 /* The drawer takes --tools-h, but never so much that the result pane starves. */
@@ -581,7 +577,6 @@ kbd{
   font-size:12px; padding:5px 12px; border-radius:6px;
 }
 .varadd:hover{color:var(--text); border-color:var(--accent)}
-.varerr{color:var(--red); font-size:11.5px; font-family:var(--mono); margin:6px 0}
 
 /* ------------------------------------------------------------- setup tab */
 .setrowb{display:flex; gap:8px; align-items:flex-start; margin-bottom:8px}
@@ -595,19 +590,7 @@ kbd{
 }
 .setbox:focus{outline:none; border-color:var(--accent); color:var(--text)}
 .setrowb .varadd{flex:none; padding:6px 12px}
-.setlist{border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-top:4px}
-.setlist h4{margin:0 0 4px; font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--dim)}
-.setlist ul{margin:0 0 10px; padding-left:16px; font-size:12px; color:var(--dim)}
-.setlist li{font-family:var(--mono); margin-bottom:2px}
-.setlist li b{color:var(--purple); font-weight:600; margin-right:6px}
-.setwarn{font-size:11.5px; color:var(--accent); margin-bottom:8px}
 
-/* undo and redo, for a screen with no keyboard to reach them from */
-.undoredo{
-  display:flex; gap:6px; padding:0 18px 8px; background:var(--head);
-  border-bottom:1px solid var(--border);
-}
-.undoredo .mini{font-family:var(--sans)}
 
 /* ------------------------------------------------- the result headline
    Result types read like a score: every type the roll could produce, best

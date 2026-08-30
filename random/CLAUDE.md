@@ -15,10 +15,11 @@ node tools/splice.js   # regenerate the dice art into index.html + style.css
 | File | What lives there |
 |---|---|
 | `engine.js` | tokenizer, parser, evaluator, explainer, preview. **No DOM.** Exposes `window.DiceEngine`. |
-| `app.js` | everything DOM: highlighting, caret sync, result log, subtotal trees, tools, storage. |
+| `app.js` | everything DOM: highlighting, caret sync, result log, subtotal trees, tools, storage. Data lives in the two files below, not here. |
 | `index.html`, `style.css` | markup and theme. Both contain a **generated** dice-art block. |
 | `tools/gen-dice.js`, `tools/splice.js` | the generator behind that block. |
 | `presets.js` | ready-made rolls per game, pure data. `PRESETS[0]` is what a fresh browser gets. |
+| `reference.js` | the reference panel, pure data: example, description, form, hover note. |
 | `SYSTEMS.md` | what each game's dice ask for, and which of them the notation cannot yet say. Read it before adding a preset. |
 | `serve.js` | 25-line static server. |
 
