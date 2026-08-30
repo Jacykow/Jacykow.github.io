@@ -409,6 +409,7 @@ kbd{
 }
 .savedrow:hover{background:var(--pane-2)}
 .savedrow .nm{font-size:12.5px; color:var(--text); min-width:110px}
+.savedrow .pin{margin-right:-4px}
 .savedrow code{font-family:var(--mono); font-size:12px; color:var(--accent); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 .savedrow .del{color:var(--dimmer); font-size:15px; padding:0 5px; background:none; border:none; line-height:1}
 .savedrow .del:hover{color:var(--red)}
@@ -503,6 +504,42 @@ kbd{
 .r-pick.success, .r-pick.critSuccess{color:var(--green)}
 .r-pick.failure, .r-pick.critFail{color:var(--red)}
 .r-pick.dropped{opacity:.34; text-decoration:line-through}
+
+/* ----------------------------------------------------------- shortcuts
+   Bookmarked rolls and variables, under the expression, where a session's
+   handful of things stays in reach without opening the drawer. */
+.shortcuts{display:flex; flex-wrap:wrap; gap:6px; padding:0 18px 8px}
+.shortcuts:empty{display:none}
+.sc{
+  display:inline-flex; align-items:center; gap:5px; font-family:var(--mono);
+  font-size:12px; border:1px solid var(--border); border-radius:999px;
+  background:var(--pane); padding:3px 10px; color:var(--dim);
+}
+.sc.roll{cursor:pointer}
+.sc.roll:hover{color:var(--accent); border-color:var(--accent)}
+.sc.var i{font-style:normal; color:var(--purple)}
+.sc .vval{
+  background:none; border:none; color:var(--text); font-family:var(--mono);
+  font-size:12px; padding:0; min-width:2ch; text-align:center;
+}
+.sc .vval:focus{outline:none; color:var(--accent)}
+.sc .vinc, .sc .vdec{
+  background:var(--pane-2); border:1px solid var(--border); color:var(--dim);
+  width:20px; height:20px; border-radius:50%; font-size:12px; line-height:1; padding:0;
+}
+.sc .vinc:hover, .sc .vdec:hover{color:var(--accent); border-color:var(--accent)}
+/* only a whole number can be nudged */
+.sc.var.plain .vinc, .sc.var.plain .vdec{display:none}
+.sc .vval{text-align:left}
+.sc.var:not(.plain) .vval{text-align:center}
+
+/* the bookmark toggle, in both lists */
+.pin{
+  background:none; border:none; color:#333a49; font-size:13px;
+  padding:0; line-height:1; width:16px; flex:none; text-align:center;
+}
+.pin:hover{color:var(--dim)}
+.pin.on{color:var(--accent)}
 
 /* ------------------------------------------------------------ variables */
 .varitem{margin-bottom:6px}

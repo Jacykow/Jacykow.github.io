@@ -84,6 +84,13 @@ there would be a lie. Hovering one lights the variable as a whole instead.
 - **Reference clicks must never leave the field unparseable.** `applySnippet`
   builds candidates in preference order and takes the first that parses;
   refusing the click is an acceptable outcome.
+- **The shortcut bar and the Vars panel are two views of one list.** Whichever
+  is being typed into does not get rebuilt — the other does. Stepping a number
+  never rebuilds the bar either, or the button would move out from under the
+  cursor as the number gains a digit.
+- **Subtotal rows are assigned deepest-first.** An enclosing bracket sits above
+  everything it encloses, so it has to be settled after the things inside it
+  have finished rising, or two brackets land on the same row.
 - **Subtotal brackets:** a modifier draws its own bracket with no number
   (`data-steps`), a name rides along with the number (`data-note`), and a node
   filling its whole row draws nothing because the headline already says it.

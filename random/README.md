@@ -292,6 +292,11 @@ A variable that refers back to itself is caught at a fixed depth rather than han
   preference — attach directly, bracket the target first, append as a separate roll — and
   the first one that parses wins. An empty field gets the whole example, since there is
   nothing to attach to. If nothing fits, the click is refused.
+* **Shortcuts** — the star beside a saved roll or a variable puts it on a bar under the
+  expression, so a session's handful of things stays in reach without opening the drawer.
+  A roll shortcut loads the expression; a variable shortcut edits the value and never the
+  name, since the name is what expressions refer to. A whole number gets a −/+ pair,
+  which move by one, or by ten with shift or the right mouse button.
 * **Vars** — the named expressions. Each row parses as you type and says what is wrong
   underneath; an integer gets a −/+ pair. Remove sits ahead of the name, where it is an
   easy target, and only the two fields take <kbd>Tab</kbd>.

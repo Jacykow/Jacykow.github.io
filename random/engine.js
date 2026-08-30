@@ -872,7 +872,7 @@
   function Group(inner, uid, opts) {
     opts = opts || {};
     return value({
-      uid, inner, note: opts.note || null,
+      uid, inner, condVal: opts.condVal || null, note: opts.note || null,
       raw() { return inner.raw(); },
       total() { const c = checkTotal(this); return c === null ? inner.total() : c; },
       html(o) {
@@ -1274,7 +1274,9 @@
           const v = evalNode(truth(cv) ? node.yes : node.no, ctx);
           const pre = '<span class="r-cond"' + tag + '>' + condHTML(cv) +
             '<span class="r-kw"' + tag + '>so</span></span>';
-          return Group(v, uid, { prefix: pre, bare: true });
+          // the condition is drawn as part of the prefix; keep the value too,
+          // or the dice it rolled go missing from the count that sizes them
+          return Group(v, uid, { prefix: pre, bare: true, condVal: cv });
         };
         if (!c.set) return answer(c);
         // a member thrown away before the choice keeps its place, struck out
@@ -1904,7 +1906,7 @@
     if (!v) return 0;
     if (v.die) return 1;
     if (v.set) { let n = 0; for (const m of v.members) n += countDice(m); return n; }
-    if (v.inner) return countDice(v.inner);
+    if (v.inner) return countDice(v.inner) + countDice(v.condVal);
     if (v.parts) { let n = 0; for (const p of v.parts) if (typeof p !== 'string') n += countDice(p); return n; }
     return 0;
   }

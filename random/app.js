@@ -17,7 +17,7 @@
     tabs: $('tabs'), explain: $('tab-explain'), details: $('tab-details'),
     reference: $('tab-reference'), saved: $('tab-saved'), vars: $('tab-vars'), toast: $('toast'),
     paneTools: $('paneTools'), drawer: $('drawerToggle'), refSide: $('refSide'),
-    preview: $('preview')
+    preview: $('preview'), shortcuts: $('shortcuts')
   };
 
   /* the one place the desktop/mobile split is decided */
@@ -192,8 +192,8 @@
     if (!vars.length && !saved.length) return encodeURIComponent(expr.trim());
     return URL_TAG + b64.enc(JSON.stringify({
       e: expr,
-      v: vars.map((v) => [v.name, v.expr]),
-      s: saved.map((x) => [x.name, x.expr])
+      v: vars.map((v) => [v.name, v.expr, v.mark ? 1 : 0]),
+      s: saved.map((x) => [x.name, x.expr, x.mark ? 1 : 0])
     }));
   }
 
@@ -220,7 +220,8 @@
     try {
       const d = JSON.parse(b64.dec(raw.slice(1)));
       const pairs = (a) => Array.isArray(a)
-        ? a.filter(Array.isArray).map(([name, expr]) => ({ name: String(name), expr: String(expr) }))
+        ? a.filter(Array.isArray).map(([name, expr, mark]) =>
+            ({ name: String(name), expr: String(expr), mark: !!mark }))
         : null;
       return { expr: typeof d.e === 'string' ? d.e : '', vars: pairs(d.v), saved: pairs(d.s) };
     } catch (e) { return null; }
@@ -234,7 +235,7 @@
       const by = new Map(loadVars().map((v) => [v.name, v]));
       for (const v of st.vars) if (v.name) by.set(v.name, v);
       pushVars(Array.from(by.values()));
-      renderVars();
+      renderVars(); renderShortcuts();
     }
     if (st.saved && st.saved.length) {
       const items = store.read(LS_SAVED, []);
@@ -244,10 +245,113 @@
         if (!seen.has(key)) { items.push(s); seen.add(key); }
       }
       store.write(LS_SAVED, items.slice(0, 60));
-      renderSaved();
+      renderSaved(); renderShortcuts();
     }
     if (typeof st.expr === 'string') el.ta.value = st.expr;
     return true;
+  }
+
+  /* ============================================================ shortcuts
+     A bookmarked saved roll or variable gets a chip under the expression, so a
+     session's handful of things is one click away without opening a drawer.
+     A roll chip loads the expression; a variable chip edits the value in place
+     and never the name, since the name is what expressions refer to. */
+  const STEP_BIG = 10;
+  const isInt = (s) => /^\s*-?\d+\s*$/.test(String(s == null ? '' : s));
+
+  function renderShortcuts() {
+    // the bar redraws while its own field is being typed in, so hold the caret
+    const act = document.activeElement;
+    const keep = act && act.classList && act.classList.contains('vval') &&
+      el.shortcuts.contains(act)
+      ? { name: act.closest('[data-var]').getAttribute('data-var'),
+          a: act.selectionStart, b: act.selectionEnd }
+      : null;
+
+    const rolls = store.read(LS_SAVED, []).filter((x) => x.mark);
+    const vars = loadVars().filter((v) => v.mark && v.name);
+    if (!rolls.length && !vars.length) { el.shortcuts.innerHTML = ''; return; }
+
+    el.shortcuts.innerHTML =
+      rolls.map((r, i) =>
+        '<button class="sc roll" data-roll="' + i + '" title="' + esc(r.expr) + '">' +
+          esc(r.name || r.expr) + '</button>').join('') +
+      vars.map((v) => {
+        const step = (cls, sign, label) =>
+          '<button class="' + cls + '" title="' + label + '1, or ' + label + STEP_BIG +
+          ' with shift or the right button">' + sign + '</button>';
+        return '<span class="sc var' + (isInt(v.expr) ? '' : ' plain') +
+          '" data-var="' + esc(v.name) + '">' +
+          '<i>' + esc(v.name) + '</i>' + step('vdec', '&minus;', '&minus;') +
+          '<input class="vval" value="' + esc(v.expr) + '" spellcheck="false" ' +
+                 'size="' + Math.max(2, Math.min(14, String(v.expr).length)) + '">' +
+          step('vinc', '+', '+') +
+        '</span>';
+      }).join('');
+
+    el.shortcuts.querySelectorAll('.vval').forEach((inp) => {
+      inp.addEventListener('input', () => writeVar(inp, inp.value));
+      inp.addEventListener('change', () => writeVar(inp, inp.value));
+      inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') inp.blur(); });
+    });
+
+    if (keep) {
+      const box = el.shortcuts.querySelector('[data-var="' + keep.name + '"] .vval');
+      if (box) {
+        box.focus();
+        try { box.setSelectionRange(keep.a, keep.b); } catch (e) { /* not selectable */ }
+      }
+    }
+  }
+
+  const sizeVal = (box) =>
+    box.setAttribute('size', String(Math.max(2, Math.min(14, box.value.length))));
+
+  /* The shortcut and the Vars panel are two views of one list. Writing from the
+     shortcut never rebuilds the shortcut: the buttons have to stay put under
+     the cursor while it is being clicked, even as the number grows a digit. */
+  function writeVar(node, val) {
+    const chip = node.closest('[data-var]');
+    const name = chip.getAttribute('data-var');
+    pushVars(loadVars().map((v) =>
+      v.name === name ? Object.assign({}, v, { expr: val }) : v));
+    sizeVal(node);
+    chip.classList.toggle('plain', !isInt(val));
+    renderVars();
+    onInput();
+  }
+
+  function stepVar(node, by) {
+    const box = node.closest('[data-var]').querySelector('.vval');
+    if (!isInt(box.value)) return;
+    box.value = String(parseInt(box.value.trim(), 10) + by);
+    writeVar(box, box.value);
+  }
+
+  function wireShortcuts() {
+    const step = (ev) => {
+      const b = ev.target.closest('.vinc, .vdec');
+      if (!b) return null;
+      ev.preventDefault();
+      const big = ev.shiftKey || ev.type === 'contextmenu';
+      return { b, by: (b.classList.contains('vinc') ? 1 : -1) * (big ? STEP_BIG : 1) };
+    };
+    el.shortcuts.addEventListener('click', (ev) => {
+      const s = step(ev);
+      if (s) return stepVar(s.b, s.by);
+      const r = ev.target.closest('[data-roll]');
+      if (!r) return;
+      const item = store.read(LS_SAVED, []).filter((x) => x.mark)[+r.getAttribute('data-roll')];
+      if (!item) return;
+      el.ta.value = item.expr;
+      el.ta.focus();
+      onInput();
+    });
+    // the right button is the quick way to move by ten without a keyboard
+    el.shortcuts.addEventListener('contextmenu', (ev) => {
+      const s = step(ev);
+      if (s) stepVar(s.b, s.by);
+    });
   }
 
   /* ==================================================== syntax highlighting */
@@ -792,8 +896,11 @@
       }).filter((it) => it.bars.length);
       if (!items.length) return;
 
-      // an enclosing node starts above everything it encloses
-      for (const inner of items) {
+      /* An enclosing node starts above everything it encloses. Deepest first,
+         so a node has its own final row before it pushes its enclosers up —
+         document order would settle an outer bracket against an inner one that
+         had not finished rising, and the two would collide. */
+      for (const inner of items.slice().reverse()) {
         for (const outer of items) {
           if (outer !== inner && outer.node.contains(inner.node)) {
             outer.row = Math.max(outer.row, inner.row + inner.bars.length);
@@ -865,6 +972,8 @@
     }
     el.saved.innerHTML = items.map((it, i) =>
       '<div class="savedrow" data-i="' + i + '">' +
+        '<button class="pin' + (it.mark ? " on" : "") + '" data-pin="' + i +
+          '" title="show as a shortcut under the expression">★</button>' +
         '<span class="nm">' + esc(it.name) + '</span>' +
         '<code>' + esc(it.expr) + '</code>' +
         '<button class="del" data-del="' + i + '" title="delete">&times;</button>' +
@@ -872,9 +981,20 @@
 
     el.saved.querySelectorAll('.savedrow').forEach((row) => {
       row.addEventListener('click', (ev) => {
-        if (ev.target.hasAttribute('data-del')) return;
+        if (ev.target.closest('[data-del], [data-pin]')) return;
         const it = store.read(LS_SAVED, [])[+row.getAttribute('data-i')];
         if (it) { el.ta.value = it.expr; onInput(); commitRoll(); }
+      });
+    });
+    el.saved.querySelectorAll('[data-pin]').forEach((b) => {
+      b.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const items = store.read(LS_SAVED, []);
+        const it = items[+b.getAttribute('data-pin')];
+        if (!it) return;
+        it.mark = !it.mark;
+        store.write(LS_SAVED, items);
+        renderSaved(); renderShortcuts(); syncURL();
       });
     });
     el.saved.querySelectorAll('[data-del]').forEach((b) => {
@@ -883,8 +1003,7 @@
         const items = store.read(LS_SAVED, []);
         items.splice(+b.getAttribute('data-del'), 1);
         store.write(LS_SAVED, items);
-        renderSaved();
-        syncURL();
+        renderSaved(); renderShortcuts(); syncURL();
       });
     });
   }
@@ -897,8 +1016,7 @@
     const items = store.read(LS_SAVED, []);
     items.unshift({ name: name.trim() || expr, expr });
     store.write(LS_SAVED, items.slice(0, 60));
-    renderSaved();
-    syncURL();
+    renderSaved(); renderShortcuts(); syncURL();
     switchTab('saved');
     toast('saved');
   }
@@ -926,8 +1044,6 @@
     store.write(LS_VARS, list);
   }
 
-  const isInt = (s) => /^\s*-?\d+\s*$/.test(String(s == null ? '' : s));
-
   /* Only the two inputs take Tab, so tabbing out of a name always lands on its
      own expression rather than a button in between. */
   function renderVars() {
@@ -940,6 +1056,8 @@
         '<div class="varitem" data-i="' + i + '">' +
           '<div class="varrow">' +
             '<button class="del" title="remove" tabindex="-1">&times;</button>' +
+            '<button class="pin' + (v.mark ? " on" : "") + '" title="show as a shortcut under ' +
+              'the expression" tabindex="-1">★</button>' +
             '<input class="vname" value="' + esc(v.name) + '" spellcheck="false" placeholder="name">' +
             '<input class="vexpr" value="' + esc(v.expr) + '" spellcheck="false" placeholder="expression">' +
             '<span class="step' + (isInt(v.expr) ? '' : ' off') + '">' +
@@ -959,15 +1077,17 @@
     });
   }
 
+  /** the fields the panel shows, with anything it does not show carried over */
   function readVars() {
+    const stored = loadVars();
     const out = [];
-    el.vars.querySelectorAll('.varitem').forEach((row) => {
-      out.push({
+    el.vars.querySelectorAll('.varitem').forEach((row, i) => {
+      out.push(Object.assign({}, stored[i], {
         name: row.querySelector('.vname').value.replace(/[^a-zA-Z_]/g, ''),
         expr: row.querySelector('.vexpr').value
-      });
+      }));
     });
-    return out.length ? out : loadVars();
+    return out.length ? out : stored;
   }
 
   /* Saving must not rebuild the rows: re-rendering mid-edit was what stole the
@@ -985,6 +1105,7 @@
       const nm = row.querySelector('.vname');
       if (tidy && nm.value !== v.name) nm.value = v.name;
     });
+    renderShortcuts();
     onInput();                 // the expression may now mean something different
   }
 
@@ -1002,11 +1123,20 @@
       }
       const item = ev.target.closest('.varitem');
       if (!item) return;
+      if (ev.target.closest('.pin')) {
+        const list = readVars();
+        const v = list[+item.getAttribute('data-i')];
+        if (!v) return;
+        v.mark = !v.mark;
+        pushVars(list);
+        renderVars(); renderShortcuts();
+        return;
+      }
       if (ev.target.closest('.del')) {
         const list = readVars();
         list.splice(+item.getAttribute('data-i'), 1);
         pushVars(list);
-        renderVars();
+        renderVars(); renderShortcuts();
         onInput();
         return;
       }
@@ -1120,6 +1250,8 @@
     pushVars(loadVars());
     renderVars();
     wireVars();
+    renderShortcuts();
+    wireShortcuts();
 
     // a link carries everything; without one, pick up where the last visit left off
     const fromURL = applyURL(readURL());
