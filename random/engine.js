@@ -2373,9 +2373,8 @@
 
   /* A roll that lands on a word has no total, so the run counts words instead
      of summing them. Both may happen in the same expression. */
-  function analyse(input, n) {
+  function runOne(input, n) {
     const p = parse(input);
-    n = n || 20000;
     const can = outcomes(input);
     const totals = [];
     const tally = {};
@@ -2395,7 +2394,7 @@
     }
 
     const out = {
-      n, notation: p.notation, totals, tally,
+      n, totals, tally,
       words: can.words.concat(Object.keys(tally).filter((w) => can.words.indexOf(w) < 0)),
       canMin: can.min, canMax: can.max
     };
@@ -2412,6 +2411,86 @@
       median: sorted[Math.floor(sorted.length / 2)],
       p10: sorted[Math.floor(sorted.length * 0.10)],
       p90: sorted[Math.floor(sorted.length * 0.90)]
+    });
+  }
+
+  /* `3d10` produces three values, all of them a d10; `4(x),d10,d10` produces
+     six, of two kinds. Summarising the sum alone hides which is which, so the
+     run is broken into the smallest repeated piece — but only where the pieces
+     are independent. Keep or drop couples them, and then only the whole is
+     worth reporting. */
+  const bracketed = (n) =>
+    (n.t === 'bin' || n.t === 'neg' || n.t === 'ternary' || n.t === 'band' || n.t === 'set')
+      ? { t: 'paren', v: n, mods: [] } : n;
+
+  function unitNode(node) {
+    const mods = node.mods || [];
+    const coupled = mods.some((m) => {
+      const k = MODS[m.t === 'check' ? 'check' : m.t];
+      return k && (k.kind === 'set' || k.kind === 'repeat');
+    });
+    if (!coupled) {
+      if (node.t === 'rep' && node.items.length === 1) {
+        const n = constOf(node.count);
+        // the brackets belonged to the repeat, so a compound item needs its own
+        if (n !== null && n >= 1) return { node: bracketed(node.items[0]), times: n };
+      }
+      if (node.t === 'dice' && node.qty !== null) {
+        const n = constOf(node.qty);
+        if (n !== null && n >= 1) return { node: Object.assign({}, node, { qty: null }), times: n };
+      }
+      /* a choice distributes, so a choice about many things is many choices
+         about one — ask the same question of a single member instead */
+      const key = node.t === 'band' ? 'subject' : (node.t === 'ternary' ? 'cond' : null);
+      if (key) {
+        const sub = unitNode(node[key]);
+        if (sub.times > 1) {
+          const one = Object.assign({}, node);
+          one[key] = sub.node;
+          return { node: one, times: sub.times };
+        }
+      }
+    }
+    return { node, times: 1 };
+  }
+  const unitOf = (node) => {
+    const u = unitNode(node);
+    return { src: plain(u.node), times: u.times };
+  };
+
+  function analyse(input, n) {
+    n = n || 20000;
+    const p = parse(input);
+    const whole = runOne(input, n);
+
+    // a binding rolled once cannot be taken apart without changing what it means
+    const preamble = p.parts.filter((x) => x.assign && !x.once)
+      .map((x) => x.assign + ':=' + x.src).join(', ');
+    const splittable = !p.parts.some((x) => x.assign && x.once);
+
+    const units = [];
+    if (splittable) {
+      for (const part of p.rolls) {
+        const u = unitOf(part.ast);
+        const at = units.findIndex((x) => x.src === u.src);
+        if (at >= 0) units[at].times += u.times * p.repeat;
+        else units.push({ src: u.src, times: u.times * p.repeat });
+      }
+    }
+
+    const many = units.reduce((a, u) => a + u.times, 0) > 1 || units.length > 1;
+    const groups = (many ? units : []).map((u) => {
+      const src = preamble ? preamble + ', ' + u.src : u.src;
+      let r = null;
+      try { r = runOne(src, n); } catch (e) { r = null; }
+      return r && Object.assign({ src: u.src, times: u.times }, r);
+    }).filter(Boolean);
+
+    return Object.assign({}, whole, {
+      notation: p.notation,
+      groups,
+      // the sum is only news when there was more than one thing to add up
+      showWhole: many || !groups.length
     });
   }
 

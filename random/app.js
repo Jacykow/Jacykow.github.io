@@ -269,6 +269,14 @@
     return added.v.length + added.s.length;
   }
 
+  function replaceSetup(st) {
+    store.write(LS_UNDO, { was: { v: loadVars(), s: loadSaved() } });
+    pushVars(st.vars.slice());
+    store.write(LS_SAVED, st.saved.slice());
+    renderVars(); renderSaved(); renderShortcuts();
+    return st.vars.length + st.saved.length;
+  }
+
   function dropSetup(pick) {
     const gone = new Set(pick.vars.concat(pick.saved).map((x) => x.expr));
     pushVars(loadVars().filter((v) => !gone.has(v.expr)));
@@ -281,7 +289,9 @@
   /** what the last import brought in, as a setup shape */
   function lastImport() {
     const a = store.read(LS_UNDO, null);
-    if (!a || (!(a.v || []).length && !(a.s || []).length)) return null;
+    if (!a) return null;
+    if (a.was) return { whole: a.was };
+    if (!(a.v || []).length && !(a.s || []).length) return null;
     return {
       vars: (a.v || []).map((expr) => ({ expr, mark: false })),
       saved: (a.s || []).map((expr) => ({ expr, mark: false }))
@@ -342,9 +352,13 @@
   /* A first visit gets the three rolls almost everyone starts from, rather than
      an empty bar that says nothing about what the bar is for. */
   const FIRST_ROLLS = [
+    { expr: 'd20 # <d20>', mark: true },
+    { expr: 'd12 # <d12>', mark: true },
+    { expr: 'd10 # <d10>', mark: true },
+    { expr: 'd8 # <d8>', mark: true },
     { expr: 'd6 # <d6>', mark: true },
-    { expr: '2d6 # 2x <d6>', mark: true },
-    { expr: 'd20 # <d20>', mark: true }
+    { expr: 'd4 # <d4>', mark: true },
+    { expr: '2d6 # 2x <d6>', mark: true }
   ];
   const loadSaved = () => {
     const v = store.read(LS_SAVED, null);
@@ -817,7 +831,11 @@
         return;
       }
       if (token !== state.statsToken) return;
-      el.details.innerHTML = statsHTML(s);
+      el.details.innerHTML =
+        s.groups.map((g) => section(g.src + (g.times > 1 ? ' &times;' + g.times : ''), g)).join('') +
+        // the sum is only news when the whole thing comes to a number
+        (s.showWhole && s.numeric ? section(s.groups.length ? 'all of it, added up' : null, s) : '') +
+        '<div class="tailroom"></div>';
     }, 0);
   }
 
@@ -825,7 +843,14 @@
      have: each word the expression can produce gets a bar even at nought, and a
      numeric run is bracketed by the smallest and largest it could ever reach —
      worked out from the expression rather than watched for. */
+  const section = (title, s) => {
+    const body = statsHTML(s);
+    if (!body) return '';
+    return (title ? '<h4 class="stathead">' + esc(title) + '</h4>' : '') + body;
+  };
+
   function statsHTML(s) {
+    if (!s.words.length && !s.numeric) return '';
     const parts = [];
 
     if (s.words.length) {
@@ -1401,7 +1426,9 @@
         '<button class="varadd" id="setLoad">import</button></div>' +
       '<div class="setrowb"><label>Or start from</label>' +
         '<button class="varadd" id="setDefault">the starting preset</button></div>' +
-      (back ? '<button class="varadd" id="setBack">undo the last import&hellip;</button>' : '') +
+      (back ? '<button class="varadd" id="setBack">' +
+        (back.whole ? 'put back the preset this replaced' : 'undo the last import&hellip;') +
+        '</button>' : '') +
       '<div class="tailroom"></div>';
 
     $('setCopy').addEventListener('click', () => copy(link, 'link copied', 'could not copy'));
@@ -1411,7 +1438,14 @@
       pickDialog('add', st);
     });
     $('setDefault').addEventListener('click', () => pickDialog('add', DEFAULT_PRESET));
-    if (back) $('setBack').addEventListener('click', () => pickDialog('remove', back));
+    if (back) $('setBack').addEventListener('click', () => {
+      if (!back.whole) { pickDialog('remove', back); return; }
+      pushVars(back.whole.v || []);
+      store.write(LS_SAVED, back.whole.s || []);
+      store.write(LS_UNDO, null);
+      renderVars(); renderSaved(); renderShortcuts(); renderSetup(); onInput();
+      toast('put back');
+    });
   }
 
   /** how an incoming item stands against what is already here */
@@ -1432,7 +1466,7 @@
     const rows = (list, kind) => list.map((x, i) => {
       const how = adding ? standing(x, kind) : 'new';
       return '<label class="pickrow ' + how + '">' +
-        '<input type="checkbox"' + (how === 'same' ? '' : ' checked') +
+        '<input type="checkbox" checked' + (how === 'same' ? ' disabled' : '') +
           ' data-kind="' + kind + '" data-i="' + i + '">' +
         '<b>' + (titleOf(x.expr) ? titleHTML(x.expr) : '—') + '</b>' +
         '<code>' + esc(bodyOf(x.expr)) + '</code>' +
@@ -1444,24 +1478,28 @@
     host.innerHTML =
       '<div class="sheet">' +
         '<h3>' + (adding ? 'Take what you want' : 'Put back what you do not') + '</h3>' +
-        '<p>' + (adding
-          ? 'Added to what you already have. <b>new</b> is not here yet, ' +
-            '<b>update</b> is here but says something different, <b>same</b> is already ' +
-            'exactly this.'
-          : 'These came in with the last import. Whatever stays selected is removed.') + '</p>' +
         (st.saved.length ? '<h4>Saved rolls</h4>' + rows(st.saved, 's') : '') +
         (st.vars.length ? '<h4>Variables</h4>' + rows(st.vars, 'v') : '') +
         '<div class="sheetend">' +
           '<button class="varadd" data-go="1">' +
             (adding ? 'add selected' : 'remove selected') + '</button>' +
+          (adding ? '<button class="varadd warn" data-all="1">replace everything</button>' : '') +
           '<button class="varadd" data-close="1">cancel</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(host);
 
     const shut = () => host.remove();
+    const done = (n, verb) => {
+      shut();
+      if ($('setIn')) $('setIn').value = '';
+      renderSetup();
+      onInput();
+      toast(n ? n + ' ' + verb : 'nothing ' + verb);
+    };
     host.addEventListener('click', (ev) => {
       if (ev.target === host || ev.target.closest('[data-close]')) { shut(); return; }
+      if (ev.target.closest('[data-all]')) { done(replaceSetup(st), 'imported'); return; }
       if (!ev.target.closest('[data-go]')) return;
       const pick = { vars: [], saved: [] };
       host.querySelectorAll('input:checked').forEach((c) => {
@@ -1469,12 +1507,7 @@
         const item = (v ? st.vars : st.saved)[+c.getAttribute('data-i')];
         if (item) (v ? pick.vars : pick.saved).push(item);
       });
-      const n = adding ? addSetup(pick) : dropSetup(pick);
-      shut();
-      if ($('setIn')) $('setIn').value = '';
-      renderSetup();
-      onInput();
-      toast(n ? (adding ? n + ' added' : n + ' removed') : 'nothing to do');
+      done(adding ? addSetup(pick) : dropSetup(pick), adding ? 'imported' : 'removed');
     });
   }
 

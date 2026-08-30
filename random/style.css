@@ -104,7 +104,8 @@ kbd{
 .preview .treehost{line-height:calc(var(--dsz) * 1.24)}
 /* The dice have no result yet, so they read as outlines — but at full strength,
    or they look like dice that have been thrown away. */
-.die.ghost .dieshape{fill:none}
+/* opaque, or a squeezed row shows the dice behind through the ones in front */
+.die.ghost .dieshape{fill:#0a0c11}
 .die.ghost .dieval{color:var(--text); font-weight:600}
 
 /* ------------------------------------------------------------- editor */
@@ -761,3 +762,16 @@ button.roll.sec kbd{background:#171b23; color:var(--dimmer)}
 .pickrow.same .tag{background:var(--pane-2); color:var(--dimmer)}
 .pickrow.same{opacity:.6}
 .sheet p b{color:var(--dim); font-weight:600}
+
+/* a heading per summary, when a roll makes more than one kind of value */
+.stathead{
+  margin:14px 0 6px; font-size:11px; font-family:var(--mono); color:var(--accent);
+  font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.stathead:first-child{margin-top:2px}
+/* a die inside a preset dialog row sits on a lighter ground */
+.sheet .die.ghost .dieshape, .sc .die.ghost .dieshape{fill:var(--pane)}
+.varadd.warn{border-color:rgba(245,120,111,.5); color:var(--red)}
+.varadd.warn:hover{border-color:var(--red); color:var(--red)}
+.pickrow input:disabled{opacity:.45}
+.pickrow.same{opacity:.55; cursor:default}
