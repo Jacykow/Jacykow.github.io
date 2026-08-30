@@ -222,7 +222,9 @@
       within + '.t-mod' + sel + ', ' + within + '.t-op' + sel + ', ' +
       within + '.exrow' + sel + ', ' + within + '.r-term' + sel + ', ' +
       within + '.r-grp' + sel + ', ' + within + '.r-op' + sel + ', ' +
-      within + '.r-brk' + sel + ', ' + within + '.sumbar' + sel
+      within + '.r-brk' + sel + ', ' + within + '.sumbar' + sel + ', ' +
+      // a lone die carries the tag itself; only a set of them has a term to wrap it
+      within + '.die' + sel + ', ' + within + '.r-kw' + sel
     ).forEach((n) => n.classList.add('hot'));
   }
 
@@ -331,7 +333,9 @@
   function totalHTML(roll) {
     const score = scoreHTML(roll);
     const plain = roll.numeric ? E.fmt(roll.total) : (roll.text || '—');
-    if (!score) return '<span class="tv">' + esc(plain) + '</span>';
+    // a list of words needs the room a number never does
+    const cls = 'tv' + (plain.length > 8 ? ' long' : '');
+    if (!score) return '<span class="' + cls + '">' + esc(plain) + '</span>';
     // the number only earns its place when it says more than the score does
     const hits = (roll.marks && roll.marks.success) || 0;
     if (roll.numeric && roll.total !== hits) {
@@ -429,8 +433,9 @@
   /** the dice this expression would roll, by name — no randomness involved */
   function renderPreview() {
     if (state.error || !el.ta.value.trim()) { el.preview.innerHTML = ''; return; }
-    try { el.preview.innerHTML = E.preview(el.ta.value); }
-    catch (e) { el.preview.innerHTML = ''; }
+    try { el.preview.innerHTML = '<div class="treehost">' + E.preview(el.ta.value) + '</div>'; }
+    catch (e) { el.preview.innerHTML = ''; return; }
+    drawTrees(el.preview);
   }
 
   /** Rolling only ever happens here: on Enter, or the Roll button. */
@@ -664,51 +669,79 @@
      Every summing node carries data-sum. Measure where each one sits over the
      dice and draw it as a bracket underneath, innermost nearest the dice. */
   const SUM_ROW = 17;
+  const SEL_TREE = '[data-sum], [data-steps], [data-note]';
+
+  /* What each node draws, innermost first: one bar per modifier step, then one
+     for its own value. A node's value is skipped when it fills the whole row —
+     the headline already says it, and repeating it buys nothing. */
+  function barsFor(n, body) {
+    const out = (n.getAttribute('data-steps') || '').split('|').filter(Boolean)
+      .map((label) => ({ label, sum: null }));
+    const sum = n.getAttribute('data-sum');
+    const note = (n.getAttribute('data-note') || '').split('|').filter(Boolean).join(', ');
+    const sole = n.parentElement === body && body.children.length === 1;
+    if (sum !== null && !sole) out.push({ label: note, sum });
+    else if (note && sum === null) out.push({ label: note, sum: null });
+    return out;
+  }
+
   function drawTrees(root) {
-    root.querySelectorAll('.setrow .body').forEach((body) => {
-      const nodes = Array.prototype.slice.call(body.querySelectorAll('[data-sum]'));
+    root.querySelectorAll('.setrow .body, .treehost').forEach((body) => {
+      body.querySelectorAll('.sumtree').forEach((n) => n.remove());
+      const nodes = Array.prototype.slice.call(body.querySelectorAll(SEL_TREE));
       if (!nodes.length) return;
       const base = body.getBoundingClientRect();
       const items = nodes.map((n) => {
-        let depth = 0, p = n.parentElement;
-        while (p && p !== body) {
-          if (p.hasAttribute && p.hasAttribute('data-sum')) depth++;
-          p = p.parentElement;
-        }
         const r = n.getBoundingClientRect();
-        return { depth, left: r.left - base.left, width: r.width,
-                 sum: n.getAttribute('data-sum'), x: n.getAttribute('data-x'),
-                 note: n.getAttribute('data-note'), drop: n.hasAttribute('data-drop'),
-                 mark: n.getAttribute('data-mark') };
-      });
-      const maxDepth = items.reduce((a, i) => Math.max(a, i.depth), 0);
+        return {
+          node: n, bars: barsFor(n, body), row: 0,
+          left: r.left - base.left, width: r.width,
+          x: n.getAttribute('data-x'), drop: n.hasAttribute('data-drop'),
+          mark: n.getAttribute('data-mark')
+        };
+      }).filter((it) => it.bars.length);
+      if (!items.length) return;
+
+      // an enclosing node starts above everything it encloses
+      for (const inner of items) {
+        for (const outer of items) {
+          if (outer !== inner && outer.node.contains(inner.node)) {
+            outer.row = Math.max(outer.row, inner.row + inner.bars.length);
+          }
+        }
+      }
+      const rows = items.reduce((a, it) => Math.max(a, it.row + it.bars.length), 0);
 
       const layer = document.createElement('div');
       layer.className = 'sumtree';
-      layer.style.height = ((maxDepth + 1) * SUM_ROW) + 'px';
-      const bars = [];
+      layer.style.height = (rows * SUM_ROW) + 'px';
+      const drawn = [];
       for (const it of items) {
-        const bar = document.createElement('div');
-        bar.className = 'sumbar' + (it.drop ? ' dropped' : '') + (it.mark ? ' ' + it.mark : '');
-        if (it.x) bar.setAttribute('data-x', it.x);
-        bar.style.left = it.left + 'px';
-        bar.style.width = Math.max(it.width, 20) + 'px';
-        bar.style.top = ((maxDepth - it.depth) * SUM_ROW) + 'px';
-        bar.innerHTML = '<span class="sumval">' + esc(it.sum) + '</span>';
-        layer.appendChild(bar);
-        bars.push([bar, it]);
+        it.bars.forEach((b, k) => {
+          const bar = document.createElement('div');
+          bar.className = 'sumbar' + (it.drop ? ' dropped' : '') +
+            (it.mark && b.sum !== null ? ' ' + it.mark : '') + (b.sum === null ? ' step' : '');
+          if (it.x) bar.setAttribute('data-x', it.x);
+          bar.style.left = it.left + 'px';
+          bar.style.width = Math.max(it.width, 20) + 'px';
+          bar.style.top = ((it.row + k) * SUM_ROW) + 'px';   // innermost nearest the dice
+          bar.innerHTML = '<span class="sumval">' + (b.sum === null ? '' : esc(b.sum)) + '</span>';
+          layer.appendChild(bar);
+          drawn.push([bar, b]);
+        });
       }
       body.appendChild(layer);
-      // Now the bars have a width, name the modifiers — as many as still fit,
-      // in the order they were applied, dropping from the end until they do.
-      for (const [bar, it] of bars) {
-        if (!it.note) continue;
+
+      // Now the bars have a width, fit the label in — trimming from the end, so
+      // what survives is the front of the phrase, where the verb and count are.
+      for (const [bar, b] of drawn) {
+        if (!b.label) continue;
         const val = bar.querySelector('.sumval');
-        const notes = it.note.split('|');
         const tag = document.createElement('i');
         val.appendChild(tag);
-        for (let k = notes.length; k > 0; k--) {
-          tag.textContent = notes.slice(0, k).join(', ');
+        const words = b.label.split(' ');
+        for (let k = words.length; k > 0; k--) {
+          tag.textContent = words.slice(0, k).join(' ');
           if (val.getBoundingClientRect().width <= bar.getBoundingClientRect().width) break;
           if (k === 1) tag.remove();
         }

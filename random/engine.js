@@ -107,7 +107,14 @@
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const fmt = (n) => !isFinite(n) ? String(n)
     : (Number.isInteger(n) ? String(n) : String(Math.round(n * 1000) / 1000));
-  const cpText = (cp) => cp ? cp.op + cp.v : '';
+  /* The other side of a comparison is either a literal or an expression, in
+     which case it is worked out afresh for every comparison it takes part in. */
+  const cpSrc = (cp) => cp.node ? plain(cp.node) : fmt(cp.v);
+  const cpText = (cp) => cp ? cp.op + cpSrc(cp) : '';
+
+  /* nodes inside a variable are namespaced away, so hovering a d20 in the
+     expression never lights up an unrelated d20 the variable happened to roll */
+  const uidOf = (node, ctx) => (ctx && ctx.mute) ? 0 : node.uid;
 
   /* ==========================================================================
      PARSER
@@ -375,13 +382,15 @@
     comparePoint() {
       this.ws();
       for (const op of ['<=', '>=', '!=', '<>', '=', '<', '>']) {
-        if (this.s.substr(this.i, op.length) === op) {
-          const save = this.i;
-          this.i += op.length;
-          const v = this.signedInt();
-          if (v === null) { this.i = save; return null; }
-          return { op: op === '<>' ? '!=' : op, v };
-        }
+        if (this.s.substr(this.i, op.length) !== op) continue;
+        const save = this.i;
+        const name = op === '<>' ? '!=' : op;
+        this.i += op.length;
+        const v = this.signedInt();
+        if (v !== null) return { op: name, v };
+        // not a plain number, so the other side is an expression of its own
+        try { return { op: name, node: this.primary() }; }
+        catch (e) { this.i = save; return null; }
       }
       return null;
     }
@@ -514,6 +523,13 @@
         throw new DiceError('"' + modText(m) + '" has to attach to dice — there is nothing to re-roll',
           m.sp && m.sp[0]);
       }
+      if (m.cp && m.cp.node) {
+        if (isSet(m.cp.node)) {
+          throw new DiceError('the other side of a comparison has to be a single value, ' +
+            'not a set', m.cp.node.sp && m.cp.node.sp[0]);
+        }
+        typeCheck(m.cp.node, false);
+      }
     }
 
     const chk = checkOf(node);
@@ -547,14 +563,23 @@
   /* ==========================================================================
      VALUES
      ========================================================================== */
-  function cpTest(cp, v) {
+  /** the value being compared against, rolled once for this one comparison */
+  function cpSide(cp, ctx) {
+    if (!cp.node) return cp.v;
+    const r = evalNode(cp.node, ctx || { dice: 0, depth: 0, vars: null });
+    if (r.set) throw new DiceError('the other side of a comparison has to be a single value');
+    return (r.word !== undefined && r.word !== null) ? r.word : r.total();
+  }
+
+  function cpTest(cp, val, ctx) {
+    const v = val, b = cpSide(cp, ctx);
     switch (cp.op) {
-      case '=': return v === cp.v;
-      case '!=': return v !== cp.v;
-      case '<': return v < cp.v;
-      case '>': return v > cp.v;
-      case '<=': return v <= cp.v;
-      case '>=': return v >= cp.v;
+      case '=': return v === b;
+      case '!=': return v !== b;
+      case '<': return v < b;
+      case '>': return v > b;
+      case '<=': return v <= b;
+      case '>=': return v >= b;
     }
     return false;
   }
@@ -618,45 +643,59 @@
   };
   const isDropped = (o, item) => !!item.dropped || !!(o && o.dropped);
 
-  /* a short past-tense phrase per modifier, for the subtotal bracket */
+  /* A short phrase per modifier, for the subtotal bracket. The verb and the
+     count come first so that a cropped bracket still reads "kept" or "kept 5" —
+     which end it was is the least of the three worth keeping. */
   const cpShort = (cp) => {
     if (!cp) return '';
-    if (cp.op === '>=') return cp.v + '+';
-    if (cp.op === '<=') return '≤' + cp.v;
-    if (cp.op === '!=') return '≠' + cp.v;
-    return cp.op + cp.v;
+    const v = cpSrc(cp);
+    if (cp.op === '>=') return v + '+';
+    if (cp.op === '<=') return '≤' + v;
+    if (cp.op === '!=') return '≠' + v;
+    return cp.op + v;
   };
   const CHECK_SHORT = { s: 'success', f: 'failure', cs: 'crit', cf: 'crit fail' };
 
-  function modNote(m) {
+  function modNote(m, future) {
     const end = (e) => e === 'h' ? 'highest' : 'lowest';
+    const w = (now, then) => future ? now : then;
     switch (m.t) {
-      case 'min': return 'floored at ' + m.n;
-      case 'max': return 'capped at ' + m.n;
-      case 'explode': return (m.pen ? 'penetrated' : 'exploded') + (m.inf ? ' repeatedly' : '');
-      case 'reroll': return 're-rolled' + (m.inf ? ' repeatedly' : '');
-      case 'unique': return 'made unique';
-      case 'keep': return 'kept ' + end(m.end) + (m.n > 1 ? ' ' + m.n : '');
-      case 'drop': return 'dropped ' + end(m.end) + (m.n > 1 ? ' ' + m.n : '');
+      case 'min': return w('floor at ', 'floored at ') + m.n;
+      case 'max': return w('cap at ', 'capped at ') + m.n;
+      case 'explode': return (m.pen ? w('penetrate', 'penetrated') : w('explode', 'exploded')) +
+        (m.inf ? ' repeatedly' : '');
+      case 'reroll': return w('re-roll', 're-rolled') + (m.inf ? ' repeatedly' : '');
+      case 'unique': return w('make unique', 'made unique');
+      case 'keep': return w('keep ', 'kept ') + m.n + ' ' + end(m.end);
+      case 'drop': return w('drop ', 'dropped ') + m.n + ' ' + end(m.end);
       case 'check': return CHECK_SHORT[m.check] + ' on ' + cpShort(m.cp);
     }
     return '';
   }
 
-  /** every modifier on a value, in the order they were applied */
-  function noteAttr(item) {
-    const mods = item.mods;
-    if (!mods || !mods.length) return '';
+  /** every modifier on a node, in the order they are applied */
+  function noteList(mods, future) {
+    if (!mods || !mods.length) return [];
     const rank = (m) => { const k = MODS[m.t === 'check' ? 'check' : m.t]; return k ? k.order : 99; };
-    const text = mods.slice().sort((a, b) => rank(a) - rank(b)).map(modNote).filter(Boolean).join('|');
-    return text ? ' data-note="' + esc(text) + '"' : '';
+    // the preview writes comparisons out in full, so they are not steps there
+    return mods.filter((m) => !(future && m.t === 'check'))
+      .sort((a, b) => rank(a) - rank(b))
+      .map((m) => modNote(m, future)).filter(Boolean);
   }
+
+  /* Two kinds of label hang off a subtotal: a descriptor, which names what the
+     value is (a variable) and rides along with the number, and a step, which
+     replaces the number with the modifier it stands for. */
+  const noteAttr = (name, list) =>
+    list.length ? ' ' + name + '="' + esc(list.join('|')) + '"' : '';
 
   /** what the subtotal bracket needs to know beyond its number */
   function stateAttr(o, item) {
     const mark = markOf(item);
     return (isDropped(o, item) ? ' data-drop="1"' : '') +
-      (mark ? ' data-mark="' + mark + '"' : '') + noteAttr(item);
+      (mark ? ' data-mark="' + mark + '"' : '') +
+      noteAttr('data-note', item.note ? [item.note] : []) +
+      noteAttr('data-steps', noteList(item.mods, false));
   }
 
   function Die(roll, sides, uid) {
@@ -730,22 +769,25 @@
   }
 
   /** a bracket around a value: still a value, drawn with its own subtotal */
-  function Group(inner, uid, prefix) {
+  function Group(inner, uid, opts) {
+    opts = opts || {};
     return {
       set: false, die: false, check: null, dropped: false, uid, inner,
+      note: opts.note || null,
       get value() { return inner.word !== undefined ? inner.word : inner.raw(); },
       get word() { return inner.word; },
       raw() { return inner.raw(); },
       total() { const c = checkTotal(this); return c === null ? inner.total() : c; },
       cond() { return this.check ? this.check.hit : (inner.cond ? inner.cond() : null); },
       html(o) {
-        const tag = uid ? ' data-x="s' + uid + '"' : '';
+        const tag = uid ? ' data-x="' + (opts.tag || 's') + uid + '"' : '';
         const sum = inner.word !== undefined ? ''
           : ' data-sum="' + esc(fmt(safeTotal(inner))) + '"' + stateAttr(o, this);
         const co = ctxFor(o, this);
-        return '<span class="r-grp"' + tag + sum + '>' + (prefix || '') +
-          '<span class="r-brk"' + tag + '>(</span>' + inner.html(co) +
-          '<span class="r-brk"' + tag + '>)</span></span>';
+        const open = opts.bare ? '' : '<span class="r-brk"' + tag + '>(</span>';
+        const close = opts.bare ? '' : '<span class="r-brk"' + tag + '>)</span>';
+        return '<span class="r-grp"' + tag + sum + '>' + (opts.prefix || '') +
+          open + inner.html(co) + close + '</span>';
       }
     };
   }
@@ -768,7 +810,8 @@
         const mk = inheritClass(o, this);
         if (mk) cls.push(mk.trim());
         if (isDropped(o, this)) cls.push('dropped');
-        const size = String(face).length >= 3 ? ' v3' : (String(face).length === 2 ? ' v2' : '');
+        const len = String(face).length;
+        const size = len >= 5 ? ' v5' : (len >= 4 ? ' v4' : (len === 3 ? ' v3' : (len === 2 ? ' v2' : '')));
         return '<span class="' + cls.join(' ') + '"' + tag + ' title="custom die">' +
           '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
           '<use href="#sh-' + shape + '"/></svg>' +
@@ -786,8 +829,6 @@
     if (!varCache.has(key)) varCache.set(key, new Parser(String(src)).parse());
     return varCache.get(key);
   }
-
-  const varTag = (node) => '<span class="r-var">' + esc(node.name) + '</span>';
 
   /* An `a:=expr` written into the expression itself only lives for that one
      expression, and shadows a variable of the same name from the panel. */
@@ -829,7 +870,7 @@
     opts = opts || {};
     return {
       set: true, members, check: null, dropped: false, uid: opts.uid,
-      brackets: !!opts.brackets, prefix: opts.prefix || '',
+      brackets: !!opts.brackets, prefix: opts.prefix || '', note: opts.note || null,
       get value() { return this.raw(); },
       raw() { let s = 0; for (const m of members) if (!m.dropped) s += m.raw(); return s; },
       live() { return members.filter((m) => !m.dropped); },
@@ -851,9 +892,16 @@
         }
         return seen;
       },
+      /* a set of words has no sum worth showing, so it shows what it holds */
+      sumText() {
+        const live = this.live();
+        const worded = (m) => (m.word !== undefined && m.word !== null);
+        if (!live.some(worded)) return fmt(safeTotal(this));
+        return live.map((m) => worded(m) ? String(m.word) : fmt(safeTotal(m))).join(', ');
+      },
       html(o) {
-        const tag = this.uid ? ' data-x="' + (this.brackets ? 's' : 'd') + this.uid + '"' : '';
-        const sum = ' data-sum="' + esc(fmt(safeTotal(this))) + '"' + stateAttr(o, this);
+        const tag = this.uid ? ' data-x="' + (opts.tag || (this.brackets ? 's' : 'd')) + this.uid + '"' : '';
+        const sum = ' data-sum="' + esc(this.sumText()) + '"' + stateAttr(o, this);
         const co = ctxFor(o, this);
         if (this.brackets) {
           return '<span class="r-grp"' + tag + sum + '>' + this.prefix +
@@ -919,7 +967,7 @@
         for (const r of out) {
           next.push(r);
           let last = r.v, n = 0;
-          while (cpTest(cp, last) && n < LIMIT.explode) {
+          while (cpTest(cp, last, ctx) && n < LIMIT.explode) {
             n++;
             if (++ctx.dice > LIMIT.totalDice) throw new DiceError('too many dice in one expression');
             const raw = makeDie(sides);
@@ -934,7 +982,7 @@
         const cp = m.cp || { op: '=', v: 1 };
         for (const r of out) {
           let n = 0;
-          while (cpTest(cp, r.v) && n < LIMIT.reroll) {
+          while (cpTest(cp, r.v, ctx) && n < LIMIT.reroll) {
             if (r.from === null) r.from = r.v;
             r.v = makeDie(sides);
             tag(r, 'rerolled');
@@ -953,7 +1001,7 @@
     else fn(value);
   }
 
-  function applyElement(item, m) {
+  function applyElement(item, m, ctx) {
     if (m.t === 'min' || m.t === 'max') {
       if (!item.roll) return;                       // clamping only means something on a face
       const over = m.t === 'min' ? item.roll.v < m.n : item.roll.v > m.n;
@@ -964,11 +1012,11 @@
       return;
     }
     if (m.t === 'check') {
-      item.check = { kind: m.check, hit: cpTest(m.cp, item.value), bare: !!m.bare };
+      item.check = { kind: m.check, hit: cpTest(m.cp, item.value, ctx), bare: !!m.bare };
     }
   }
 
-  function applySet(value, m, sides) {
+  function applySet(value, m, sides, ctx) {
     if (!value.set) throw new DiceError('"' + modText(m) + '" needs a set of values');
     const members = value.members;
     if (m.t === 'keep' || m.t === 'drop') {
@@ -988,7 +1036,7 @@
       for (const x of members) {
         if (!x.die) throw new DiceError('"u" needs dice to re-roll');
         let n = 0;
-        while (seen.has(x.roll.v) && (!m.cp || cpTest(m.cp, x.roll.v)) && n < cap) {
+        while (seen.has(x.roll.v) && (!m.cp || cpTest(m.cp, x.roll.v, ctx)) && n < cap) {
           if (x.roll.from === null) x.roll.from = x.roll.v;
           x.roll.v = makeDie(sides);
           if (x.roll.tags.indexOf('rerolled') < 0) x.roll.tags.push('rerolled');
@@ -999,7 +1047,7 @@
     }
   }
 
-  function applyMods(value, mods, sides) {
+  function applyMods(value, mods, sides, ctx) {
     if (mods && mods.length) value.mods = mods;   // the subtotal bracket names them
     const ordered = mods.filter((m) => {
       const k = MODS[m.t === 'check' ? 'check' : m.t];
@@ -1012,8 +1060,8 @@
 
     for (const m of ordered) {
       const kind = MODS[m.t === 'check' ? 'check' : m.t].kind;
-      if (kind === 'element') eachMember(value, (item) => applyElement(item, m));
-      else applySet(value, m, sides);
+      if (kind === 'element') eachMember(value, (item) => applyElement(item, m, ctx));
+      else applySet(value, m, sides, ctx);
     }
     return value;
   }
@@ -1034,10 +1082,11 @@
     for (let i = 0; i < qty; i++) rolls.push({ v: makeDie(sides), tags: [], from: null });
     rolls = applyDieMods(rolls, sides, node.mods, ctx);
 
-    const dice = rolls.map((r) => Die(r, sides, node.uid));
+    const uid = uidOf(node, ctx);
+    const dice = rolls.map((r) => Die(r, sides, uid));
     // a bare d6 is one value; 4d6 is a set of four
-    const value = single ? dice[0] : SetVal(dice, { uid: node.uid });
-    return applyMods(value, node.mods, sides);
+    const value = single ? dice[0] : SetVal(dice, { uid });
+    return applyMods(value, node.mods, sides, ctx);
   }
 
   /** a set inside a set unpacks, so nesting never compounds */
@@ -1054,14 +1103,14 @@
     switch (node.t) {
       case 'num': return Val(node.v);
 
-      case 'str': return applyMods(Str(node.v), node.mods || [], null);
+      case 'str': return applyMods(Str(node.v), node.mods || [], null, ctx);
 
       /* a bare word is a variable when one is defined, otherwise just a word */
       case 'word': {
         const src = varSrc(node.name, ctx);
         if (src === undefined) {
           if (node.forced) throw new DiceError('no variable named "' + node.name + '" is set');
-          return applyMods(Str(node.name), node.mods || [], null);
+          return applyMods(Str(node.name), node.mods || [], null, ctx);
         }
         if (ctx.depth >= LIMIT.varDepth) {
           throw new DiceError('variable "' + node.name + '" keeps referring back to itself');
@@ -1069,13 +1118,18 @@
         let ast;
         try { ast = varAst(node.name, src); }
         catch (e) { throw new DiceError('variable "' + node.name + '": ' + e.message); }
-        ctx.depth++;
+        /* Inside the variable nothing is tagged: its nodes have no place in the
+           expression being edited, so linking them there would be a lie. The
+           name rides on the subtotal bracket instead of sitting in the dice. */
+        const mute = ctx.mute;
+        ctx.depth++; ctx.mute = true;
         const v = evalNode(ast, ctx);
-        ctx.depth--;
+        ctx.mute = mute; ctx.depth--;
+        const uid = uidOf(node, ctx);
         const wrapped = v.set
-          ? SetVal(v.members, { uid: node.uid, brackets: true, prefix: varTag(node) })
-          : Group(v, node.uid, varTag(node));
-        return applyMods(wrapped, node.mods || [], null);
+          ? SetVal(v.members, { uid, brackets: true, note: node.name, tag: 'w' })
+          : Group(v, uid, { note: node.name, tag: 'w' });
+        return applyMods(wrapped, node.mods || [], null, ctx);
       }
 
       /* one face is picked, then whatever is written on it is evaluated */
@@ -1083,15 +1137,26 @@
         const pick = node.items[rng.int(0, node.items.length - 1)];
         const v = evalNode(pick, ctx);
         const shape = shapeFor(node.items.length);
-        return applyMods(CustomDie(v, shape, node.uid), node.mods || [], null);
+        return applyMods(CustomDie(v, shape, uidOf(node, ctx)), node.mods || [], null, ctx);
       }
 
+      /* The choice distributes the same way a comparison does: one condition
+         per member, one answer per member. `4d20>5?hit:miss` is four choices,
+         not one taken on the sum. */
       case 'ternary': {
         const c = evalNode(node.cond, ctx);
-        const branch = truth(c) ? node.yes : node.no;
-        const v = evalNode(branch, ctx);
-        const tag = node.uid ? ' data-x="t' + node.uid + '"' : '';
-        return Group(v, node.uid, '<span class="r-cond"' + tag + '>' + c.html() + '<span class="r-op">?</span></span>');
+        const uid = uidOf(node, ctx);
+        const tag = uid ? ' data-x="t' + uid + '"' : '';
+        const answer = (cv) => {
+          const v = evalNode(truth(cv) ? node.yes : node.no, ctx);
+          const pre = '<span class="r-cond"' + tag + '>' + cv.html() +
+            '<span class="r-kw"' + tag + '>so</span></span>';
+          return Group(v, uid, { prefix: pre, bare: true });
+        };
+        if (!c.set) return answer(c);
+        // a member thrown away before the choice keeps its place, struck out
+        return SetVal(c.members.map((m) => m.dropped ? m : answer(m)),
+          { uid, brackets: c.members.length > 1 });
       }
 
       case 'neg': {
@@ -1099,7 +1164,7 @@
         const minus = '<span class="r-op">-</span>';
         if (v.set) {
           // a minus in front of a set flips every member
-          return SetVal(v.members.map((m) => Expr(-safeTotal(m), [minus, m])), { uid: node.uid });
+          return SetVal(v.members.map((m) => Expr(-safeTotal(m), [minus, m])), { uid: uidOf(node, ctx) });
         }
         return Expr(-v.total(), [minus, v]);
       }
@@ -1116,7 +1181,7 @@
           case '%': v = a % b; break;
           case '^': v = Math.pow(a, b); break;
         }
-        const tag = node.uid ? ' data-x="o' + node.uid + '"' : '';
+        const tag = uidOf(node, ctx) ? ' data-x="o' + node.uid + '"' : '';
         return Expr(v, [l, '<span class="r-op"' + tag + '>' + esc(node.op) + '</span>', r]);
       }
 
@@ -1138,14 +1203,14 @@
         const inner = evalNode(node.v, ctx);
         // grouping only — a bracket never turns a value into a set
         const value = inner.set
-          ? SetVal(inner.members, { uid: node.uid, brackets: true })
-          : Group(inner, node.uid);
-        return applyMods(value, node.mods || [], null);
+          ? SetVal(inner.members, { uid: uidOf(node, ctx), brackets: true })
+          : Group(inner, uidOf(node, ctx));
+        return applyMods(value, node.mods || [], null, ctx);
       }
 
       case 'set': {
         const parts = node.items.map((i) => evalNode(i, ctx));
-        return applyMods(SetVal(flatten(parts), { uid: node.uid, brackets: true }), node.mods || [], null);
+        return applyMods(SetVal(flatten(parts), { uid: uidOf(node, ctx), brackets: true }), node.mods || [], null, ctx);
       }
 
       case 'rep': {
@@ -1157,7 +1222,7 @@
           for (const p of flatten(node.items.map((x) => evalNode(x, ctx)))) members.push(p);
         }
         const prefix = '<span class="r-num">' + esc(plain(node.count)) + '</span>';
-        return applyMods(SetVal(members, { uid: node.uid, brackets: true, prefix }), node.mods || [], null);
+        return applyMods(SetVal(members, { uid: uidOf(node, ctx), brackets: true, prefix }), node.mods || [], null, ctx);
       }
     }
     throw new DiceError('cannot evaluate "' + node.t + '"');
@@ -1207,12 +1272,12 @@
   function cpPhrase(cp, fallback) {
     if (!cp) return fallback || '';
     switch (cp.op) {
-      case '=': return 'exactly ' + cp.v;
-      case '!=': return 'anything but ' + cp.v;
-      case '<': return 'less than ' + cp.v;
-      case '>': return 'more than ' + cp.v;
-      case '<=': return cp.v + ' or less';
-      case '>=': return cp.v + ' or more';
+      case '=': return 'exactly ' + cpSrc(cp);
+      case '!=': return 'anything but ' + cpSrc(cp);
+      case '<': return 'less than ' + cpSrc(cp);
+      case '>': return 'more than ' + cpSrc(cp);
+      case '<=': return cpSrc(cp) + ' or less';
+      case '>=': return cpSrc(cp) + ' or more';
     }
     return '';
   }
@@ -1447,69 +1512,91 @@
 
   const PREVIEW_DEPTH = 6;
 
+  /** a die that has not been rolled, wearing its name rather than a face */
+  function ghostDie(shape, face, tag, extra) {
+    const size = face.length >= 4 ? ' v4' : (face.length === 3 ? ' v3' : (face.length === 2 ? ' v2' : ''));
+    return '<span class="die ghost' + (extra || '') + ' s-' + shape + '"' + tag + '>' +
+      '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
+      '<use href="#sh-' + shape + '"/></svg>' +
+      '<span class="dieval' + size + '">' + esc(face) + '</span></span>';
+  }
+
+  /** comparisons belong in the preview: they are what the roll is being read for */
+  function previewChecks(node, ctx) {
+    let out = '';
+    for (const m of node.mods || []) {
+      if (m.t !== 'check') continue;
+      out += '<span class="r-op">' + esc((m.bare ? '' : m.check) + m.cp.op) + '</span>' +
+        (m.cp.node ? previewNode(m.cp.node, ctx)
+                   : '<span class="r-num">' + fmt(m.cp.v) + '</span>');
+    }
+    return out;
+  }
+
   function previewNode(node, ctx) {
-    ctx = ctx || { vars: null, depth: 0 };
+    ctx = ctx || { vars: null, depth: 0, mute: false };
     const kid = (n) => previewNode(n, ctx);
+    const X = (p) => ctx.mute ? '' : ' data-x="' + p + node.uid + '"';
+    // every other modifier shows as a step in the tree below, in the tense of
+    // something that has not happened yet
+    const steps = noteAttr('data-steps', noteList(node.mods, true));
+    const cmp = previewChecks(node, ctx);
+
     switch (node.t) {
       case 'num': return '<span class="r-num">' + fmt(node.v) + '</span>';
-      case 'str': return '<span class="r-str">' + esc(node.v) + '</span>';
-      /* a variable is opened up, so the preview shows the dice it stands for */
+      case 'str': return '<span class="r-str">' + esc(node.v) + '</span>' + cmp;
+      /* a variable is opened up, so the preview shows the dice it stands for.
+         Its name goes on the bracket below rather than in among the dice. */
       case 'word': {
-        const tag = ' data-x="w' + node.uid + '"';
+        const tag = X('w');
         const name = '<span class="r-var"' + tag + '>' + esc(node.name) + '</span>';
         const src = varSrc(node.name, ctx);
-        if (src === undefined || ctx.depth >= PREVIEW_DEPTH) return name;
+        if (src === undefined) return '<span class="r-str"' + tag + '>' + esc(node.name) + '</span>' + cmp;
+        if (ctx.depth >= PREVIEW_DEPTH) return name + cmp;
         let ast;
-        try { ast = varAst(node.name, src); } catch (e) { return name; }
-        const inner = previewNode(ast, { vars: ctx.vars, depth: ctx.depth + 1 });
-        return '<span class="r-grp"' + tag + '>' + name +
+        try { ast = varAst(node.name, src); } catch (e) { return name + cmp; }
+        const inner = previewNode(ast, { vars: ctx.vars, depth: ctx.depth + 1, mute: true });
+        return '<span class="r-grp"' + tag + noteAttr('data-note', [node.name]) + steps + '>' +
           '<span class="r-brk"' + tag + '>(</span>' + inner +
-          '<span class="r-brk"' + tag + '>)</span></span>';
+          '<span class="r-brk"' + tag + '>)</span></span>' + cmp;
       }
+      /* being edited, both answers are still open, so both are spelled out */
       case 'ternary':
-        return kid(node.cond) + '<span class="r-op" data-x="t' + node.uid + '">?</span>' +
-          kid(node.yes) + '<span class="r-op" data-x="t' + node.uid + '">:</span>' +
-          kid(node.no);
-      case 'custom': {
-        const shape = shapeFor(node.items.length);
-        return '<span class="die ghost custom s-' + shape + '" data-x="c' + node.uid + '">' +
-          '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true"><use href="#sh-' + shape + '"/></svg>' +
-          '<span class="dieval' + (String(node.items.length).length === 2 ? ' v2' : '') + '">' +
-          node.items.length + '</span></span>';
-      }
+        return '<span class="r-kw"' + X('t') + '>if</span>' + kid(node.cond) +
+          '<span class="r-kw"' + X('t') + '>then</span>' + kid(node.yes) +
+          '<span class="r-kw"' + X('t') + '>else</span>' + kid(node.no);
+      case 'custom':
+        return ghostDie(shapeFor(node.items.length), 'D' + node.items.length, X('c'), ' custom') + cmp;
       case 'neg': return '<span class="r-op">-</span>' + kid(node.v);
       case 'bin':
         return kid(node.l) +
-          '<span class="r-op"' + (node.uid ? ' data-x="o' + node.uid + '"' : '') + '>' +
-          esc(node.op) + '</span>' + kid(node.r);
+          '<span class="r-op"' + (node.uid ? X('o') : '') + '>' + esc(node.op) + '</span>' + kid(node.r);
       case 'func':
         return '<span class="r-fn">' + node.name + '</span><span class="r-brk">(</span>' +
           node.args.map(kid).join('<span class="r-op">,</span>') + '<span class="r-brk">)</span>';
       case 'paren': case 'set': case 'rep': {
-        const tag = ' data-x="s' + node.uid + '"';
+        const tag = X('s');
         const items = (node.t === 'paren' ? [node.v] : node.items).map(kid)
           .join('<span class="r-op">,</span>');
         const pre = node.t === 'rep' ? '<span class="r-num">' + esc(plain(node.count)) + '</span>' : '';
-        return '<span class="r-grp"' + tag + '>' + pre + '<span class="r-brk"' + tag + '>(</span>' +
-          items + '<span class="r-brk"' + tag + '>)</span></span>';
+        return '<span class="r-grp"' + tag + steps + '>' + pre +
+          '<span class="r-brk"' + tag + '>(</span>' + items +
+          '<span class="r-brk"' + tag + '>)</span></span>' + cmp;
       }
       case 'dice': {
         const sides = constOf(node.sides);
         const qty = node.qty === null ? 1 : constOf(node.qty);
         const shape = sides === null ? 'd20' : shapeFor(Math.floor(sides));
-        const face = sides === null ? '?' : fmt(Math.floor(sides));
+        const face = sides === null ? 'D?' : 'D' + fmt(Math.floor(sides));
         const n = (qty === null || !(qty >= 0)) ? 1 : Math.floor(qty);
         const shown = Math.max(1, Math.min(n, PREVIEW_MAX));
-        const size = face.length >= 3 ? ' v3' : (face.length === 2 ? ' v2' : '');
-        const tag = ' data-x="d' + node.uid + '"';
-        const one = '<span class="die ghost s-' + shape + '"' + tag + '>' +
-          '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
-          '<use href="#sh-' + shape + '"/></svg>' +
-          '<span class="dieval' + size + '">' + esc(face) + '</span></span>';
+        const tag = X('d');
+        const one = ghostDie(shape, face, tag);
         const squeezed = n > SQUEEZE_AT;
         const parts = new Array(shown).fill(one);
-        return '<span class="r-term' + (squeezed ? ' squeezed' : '') + '"' + tag +
-          squeezeStyle(shown) + '>' + (squeezed ? parts.join('') : parts.join(PLUS)) + '</span>';
+        return '<span class="r-term' + (squeezed ? ' squeezed' : '') + '"' + tag + steps +
+          squeezeStyle(shown) + '>' + (squeezed ? parts.join('') : parts.join(PLUS)) +
+          '</span>' + cmp;
       }
     }
     return '';
@@ -1731,7 +1818,7 @@
 
   function preview(input) {
     const p = parse(input);
-    const ctx = { vars: p.vars, depth: 0 };
+    const ctx = { vars: p.vars, depth: 0, mute: false };
     return p.rolls.map((part) => previewNode(part.ast, ctx)).join('<span class="r-op">,</span>');
   }
 

@@ -76,6 +76,17 @@ Comparison points are `=`, `!=`, `<`, `>`, `<=`, `>=`. A bare number reads in wh
 direction the modifier naturally means: `e5` explodes on 5 **or more**, `r2` re-rolls 2
 **and below**, `cs19` flags 19+, `cf2` and `f1` flag the low end, `u3` matches exactly 3.
 
+The other side of an explicit comparison need not be a number. It can be anything that
+works out to a single value — another roll, a word, a variable — and it is worked out
+afresh for every comparison it takes part in, so `4d6>d4` rolls its own d4 four times.
+A set there is refused before the roll.
+
+```
+4d6>d4                  each die against its own fresh d4
+loot=gem                a word on the right
+4d20>=atk               a variable on the right
+```
+
 ### Bracket groups
 
 Modifiers written after a closing bracket act on every die inside it, rather than on a
@@ -109,13 +120,13 @@ is not. Words carry no number, so a word can only ever be a result.
 hit                     a bare word (characters a-z, A-Z and _)
 "a long word"           quoted, so spaces are allowed
 d20>=15 ? hit : miss    C-style choice; the condition must read success or failure
-4d20>10 ? hit : miss    a set reads yes when any of its members hit
+4d20>10 ? hit : miss    one choice per die, so four answers
 ```
 
-A choice needs one yes-or-no. A checked value gives it straight away; a set of
-them reads yes when any member hit, so `4d20>10 ? hit : miss` is "if any of the
-four beat 10". Something carrying no check at all is not a condition, and saying
-so is a pre-roll error.
+The choice distributes exactly as the comparison does: one condition per member, one
+answer per member. `4d20>10 ? hit : miss` is four separate choices, not one taken on
+the sum, so it is the same as writing `d20>10?hit:miss` four times. Something carrying
+no check at all is not a condition, and saying so is a pre-roll error.
 
 Only the success check casts to a number — `success` is 1 and `failure` is 0, so
 `3d6s5+1` works. The failure, critical-success and critical-failure checks are terminal:
@@ -175,8 +186,10 @@ A variable that refers back to itself is caught at a fixed depth rather than han
   line names the position.
 * **Preview** — above the expression, the dice it *would* throw, drawn from the parse
   alone and carrying their die name rather than a face, since nothing has been rolled.
-  Variables are opened up, so `2atk` shows the d20 it stands for. It updates as you type
-  and never involves randomness.
+  Variables are opened up, so `2atk` shows the d20 it stands for, with the variable's name
+  on the bracket underneath. Comparisons are written out, since they are what the roll is
+  being read for. It updates as you type and never involves randomness, and it holds room
+  for two rows of brackets so ordinary typing never jolts the page.
 * **Result** — nothing rolls until you ask: <kbd>Enter</kbd> or the Roll button. Each roll
   lands in the log collapsed; click it to open. Dropped dice are struck out, exploded dice
   are amber, re-rolled dice show their original value, successes and criticals are
@@ -188,13 +201,22 @@ A variable that refers back to itself is caught at a fixed depth rather than han
   every type the expression could possibly produce, best to worst, so a critical that
   never turned up still shows its nought. A roll that lands on a word shows the word.
 
+  A choice shows only the branch it took, joined to its condition by **so** — `19+5 so 24`.
+  The preview above the field, where neither branch has happened yet, spells both out
+  with **if / then / else** instead.
+
   Dice within a term are joined by the `+` they stand for, and every subtotal is drawn as
   a bracket in a tree beneath them, innermost nearest the dice — so `((2d6+d6)*d6)+8d10`
-  shows what each bracket came to on the way to the total. Each bracket also names the
-  modifiers it stands for, in the order they were applied (`kept highest 2`), fitting in
-  as many as it has room for. Past three dice a term overlaps its own dice so it never
-  takes more room than three; the individual faces stop mattering there and the subtotal
-  speaks for the term.
+  shows what each bracket came to on the way to the total. Every modifier gets a bracket
+  of its own rather than a number, in the order it was applied, so `10d6kh8kl5` reads
+  `kept 8 highest` then `kept 5 lowest`. The verb and the count come first: a bracket too
+  narrow for the whole phrase keeps its front, and `kept 5` says more than `lowest` does.
+  A variable rides along on its bracket as a name, and a subtotal that holds words shows
+  the words rather than a meaningless sum. A term whose value fills the whole row has no
+  bracket at all, since the headline already says it.
+
+  Past three dice a term overlaps its own dice so it never takes more room than three;
+  the individual faces stop mattering there and the subtotal speaks for the term.
 
   Each card carries a **roll again** button, and clicking an opened entry anywhere inert
   folds it back up. Collapsed entries show their dice, and their label if they have one,
@@ -223,7 +245,9 @@ A variable that refers back to itself is caught at a fixed depth rather than han
   the caret highlights the matching row. Hovering any piece — a die, an operator, either
   half of a bracket pair, or a subtotal — lights up its counterparts everywhere. Node ids
   only mean something within one expression, so hovering is scoped: identical expressions
-  share a scope and link to each other, while unrelated history entries stay put.
+  share a scope and link to each other, while unrelated history entries stay put. What a
+  variable rolls is deliberately left untagged — those dice have no place in the expression
+  being edited — so hovering one lights the variable as a whole instead.
 * **Details** — Monte-Carlo distribution of the total (min / mean / median / max / std dev
   / percentiles) with a histogram. Sample size adapts to keep it responsive.
 * **Reference** — a gallery of every die that has a solid of its own, plus the full cheat
