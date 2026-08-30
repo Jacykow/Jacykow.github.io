@@ -486,6 +486,20 @@
     return c ? c.check : null;
   }
 
+  /* Could this ever read as a yes-or-no? A check says so outright; a word might
+     be one, or name a variable that is. Anything else is a number, and saying so
+     before the roll beats a green tick that fails the moment you press Enter. */
+  function canBeCondition(node) {
+    if (!node || typeof node !== 'object') return false;
+    if ((node.mods || []).some((m) => m.t === 'check')) return true;
+    switch (node.t) {
+      case 'word': case 'str': case 'ternary': return true;
+      case 'paren': case 'neg': return canBeCondition(node.v);
+      case 'set': case 'rep': case 'custom': return node.items.some(canBeCondition);
+    }
+    return false;
+  }
+
   function typeCheck(node, arith) {
     const mods = node.mods || [];
 
@@ -515,6 +529,11 @@
       case 'paren': typeCheck(node.v, arith); break;
       case 'set': case 'rep': case 'custom': node.items.forEach((i) => typeCheck(i, false)); break;
       case 'ternary':
+        if (!canBeCondition(node.cond)) {
+          throw new DiceError('a ? : choice needs something that reads success or failure on ' +
+            'the left — compare something first, like d20>=15 ? hit : miss',
+            node.qSp && node.qSp[0]);
+        }
         typeCheck(node.cond, false); typeCheck(node.yes, arith); typeCheck(node.no, arith); break;
       case 'func': node.args.forEach((a) => typeCheck(a, true)); break;
       case 'dice':
