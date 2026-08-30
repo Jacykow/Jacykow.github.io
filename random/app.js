@@ -123,7 +123,12 @@
     ]],
     ['Variables', [
       ['~atk:=d20+5,~2atk', 'set one for this expression only', 'prefix'],
-      ['~2atk', 'used twice means rolled twice', 'atom']
+      ['~2atk', 'used twice means rolled twice', 'atom'],
+      ['~roll::=2d6,~roll', 'rolled once, however often it is named', 'prefix']
+    ]],
+    ['Chained choices', [
+      ['d6>4?yes~:>2?maybe~:no', 'more comparisons on the same roll', 'append'],
+      ['(2d6)>=10?good~:>=7?mixed~:bad', 'bracket what the chain is about', 'atom']
     ]],
     ['Custom dice', [
       ['~[1,1,1,1,1,6]', 'six faces, mostly ones', 'atom'],
@@ -186,14 +191,14 @@
   };
 
   function urlPayload() {
-    const vars = loadVars().filter((v) => v.name);
-    const saved = store.read(LS_SAVED, []);
+    const vars = loadVars().filter((v) => nameOf(v.expr));
+    const saved = loadSaved();
     const expr = el.ta.value;
     if (!vars.length && !saved.length) return encodeURIComponent(expr.trim());
     return URL_TAG + b64.enc(JSON.stringify({
       e: expr,
-      v: vars.map((v) => [v.name, v.expr, v.mark ? 1 : 0]),
-      s: saved.map((x) => [x.name, x.expr, x.mark ? 1 : 0])
+      v: vars.map((v) => [v.expr, v.mark ? 1 : 0]),
+      s: saved.map((x) => [x.expr, x.mark ? 1 : 0])
     }));
   }
 
@@ -219,9 +224,11 @@
     }
     try {
       const d = JSON.parse(b64.dec(raw.slice(1)));
+      // a link written before the label named things put the name first
       const pairs = (a) => Array.isArray(a)
-        ? a.filter(Array.isArray).map(([name, expr, mark]) =>
-            ({ name: String(name), expr: String(expr), mark: !!mark }))
+        ? a.filter(Array.isArray).map((row) => normalise(row.length > 2
+            ? { name: String(row[0]), expr: String(row[1]), mark: !!row[2] }
+            : { expr: String(row[0]), mark: !!row[1] }))
         : null;
       return { expr: typeof d.e === 'string' ? d.e : '', vars: pairs(d.v), saved: pairs(d.s) };
     } catch (e) { return null; }
@@ -232,16 +239,16 @@
   function applyURL(st) {
     if (!st) return false;
     if (st.vars && st.vars.length) {
-      const by = new Map(loadVars().map((v) => [v.name, v]));
-      for (const v of st.vars) if (v.name) by.set(v.name, v);
+      const by = new Map(loadVars().map((v) => [nameOf(v.expr), v]));
+      for (const v of st.vars) if (nameOf(v.expr)) by.set(nameOf(v.expr), v);
       pushVars(Array.from(by.values()));
       renderVars(); renderShortcuts();
     }
     if (st.saved && st.saved.length) {
-      const items = store.read(LS_SAVED, []);
-      const seen = new Set(items.map((x) => JSON.stringify([x.name, x.expr])));
+      const items = loadSaved();
+      const seen = new Set(items.map((x) => x.expr));
       for (const s of st.saved) {
-        const key = JSON.stringify([s.name, s.expr]);
+        const key = s.expr;
         if (!seen.has(key)) { items.push(s); seen.add(key); }
       }
       store.write(LS_SAVED, items.slice(0, 60));
@@ -250,6 +257,32 @@
     if (typeof st.expr === 'string') el.ta.value = st.expr;
     return true;
   }
+
+  /* ================================================================ names
+     A saved roll and a variable are both just an expression; the `# name` at
+     its end is what they are called. Keeping the name inside the text is what
+     lets one field hold the whole thing, and the engine already strips it
+     before parsing, so a variable's name is drawn once — on its subtotal
+     bracket — and never twice. */
+  const nameOf = (expr) => E.splitLabel(expr).label;
+  const bodyOf = (expr) => E.splitLabel(expr).body.trim();
+
+  /** swap the expression, keep the name */
+  function withBody(expr, body) {
+    const name = nameOf(expr);
+    return name ? body + ' # ' + name : body;
+  }
+
+  /** an older entry kept its name beside the expression; the label holds it now */
+  const normalise = (x) => {
+    const expr = String((x && x.expr) || '');
+    const named = (x && x.name && !E.splitLabel(expr).label) ? expr + ' # ' + x.name : expr;
+    return { expr: named, mark: !!(x && x.mark) };
+  };
+  const loadSaved = () => {
+    const v = store.read(LS_SAVED, []);
+    return Array.isArray(v) ? v.map(normalise) : [];
+  };
 
   /* ============================================================ shortcuts
      A bookmarked saved roll or variable gets a chip under the expression, so a
@@ -268,23 +301,24 @@
           a: act.selectionStart, b: act.selectionEnd }
       : null;
 
-    const rolls = store.read(LS_SAVED, []).filter((x) => x.mark);
-    const vars = loadVars().filter((v) => v.mark && v.name);
+    const rolls = loadSaved().filter((x) => x.mark && nameOf(x.expr));
+    const vars = loadVars().filter((v) => v.mark && nameOf(v.expr));
     if (!rolls.length && !vars.length) { el.shortcuts.innerHTML = ''; return; }
 
     el.shortcuts.innerHTML =
       rolls.map((r, i) =>
         '<button class="sc roll" data-roll="' + i + '" title="' + esc(r.expr) + '">' +
-          esc(r.name || r.expr) + '</button>').join('') +
+          esc(nameOf(r.expr)) + '</button>').join('') +
       vars.map((v) => {
+        const body = bodyOf(v.expr);
         const step = (cls, sign, label) =>
           '<button class="' + cls + '" title="' + label + '1, or ' + label + STEP_BIG +
           ' with shift or the right button">' + sign + '</button>';
-        return '<span class="sc var' + (isInt(v.expr) ? '' : ' plain') +
-          '" data-var="' + esc(v.name) + '">' +
-          '<i>' + esc(v.name) + '</i>' + step('vdec', '&minus;', '&minus;') +
-          '<input class="vval" value="' + esc(v.expr) + '" spellcheck="false" ' +
-                 'size="' + Math.max(2, Math.min(14, String(v.expr).length)) + '">' +
+        return '<span class="sc var' + (isInt(body) ? '' : ' plain') +
+          '" data-var="' + esc(nameOf(v.expr)) + '">' +
+          '<i>' + esc(nameOf(v.expr)) + '</i>' + step('vdec', '&minus;', '&minus;') +
+          '<input class="vval" value="' + esc(body) + '" spellcheck="false" ' +
+                 'size="' + Math.max(2, Math.min(14, body.length)) + '">' +
           step('vinc', '+', '+') +
         '</span>';
       }).join('');
@@ -310,11 +344,12 @@
   /* The shortcut and the Vars panel are two views of one list. Writing from the
      shortcut never rebuilds the shortcut: the buttons have to stay put under
      the cursor while it is being clicked, even as the number grows a digit. */
+  /** the chip edits the expression and leaves the name alone */
   function writeVar(node, val) {
     const chip = node.closest('[data-var]');
     const name = chip.getAttribute('data-var');
     pushVars(loadVars().map((v) =>
-      v.name === name ? Object.assign({}, v, { expr: val }) : v));
+      nameOf(v.expr) === name ? { expr: withBody(v.expr, val), mark: v.mark } : v));
     sizeVal(node);
     chip.classList.toggle('plain', !isInt(val));
     renderVars();
@@ -341,7 +376,7 @@
       if (s) return stepVar(s.b, s.by);
       const r = ev.target.closest('[data-roll]');
       if (!r) return;
-      const item = store.read(LS_SAVED, []).filter((x) => x.mark)[+r.getAttribute('data-roll')];
+      const item = loadSaved().filter((x) => x.mark && nameOf(x.expr))[+r.getAttribute('data-roll')];
       if (!item) return;
       el.ta.value = item.expr;
       el.ta.focus();
@@ -965,7 +1000,7 @@
 
   /* ================================================================ saved */
   function renderSaved() {
-    const items = store.read(LS_SAVED, []);
+    const items = loadSaved();
     if (!items.length) {
       el.saved.innerHTML = '<div class="muted">nothing saved yet &mdash; hit Save (or Ctrl+S) to keep the current expression</div>';
       return;
@@ -974,22 +1009,22 @@
       '<div class="savedrow" data-i="' + i + '">' +
         '<button class="pin' + (it.mark ? " on" : "") + '" data-pin="' + i +
           '" title="show as a shortcut under the expression">★</button>' +
-        '<span class="nm">' + esc(it.name) + '</span>' +
-        '<code>' + esc(it.expr) + '</code>' +
+        '<span class="nm">' + esc(nameOf(it.expr) || '') + '</span>' +
+        '<code>' + esc(bodyOf(it.expr)) + '</code>' +
         '<button class="del" data-del="' + i + '" title="delete">&times;</button>' +
       '</div>').join('');
 
     el.saved.querySelectorAll('.savedrow').forEach((row) => {
       row.addEventListener('click', (ev) => {
         if (ev.target.closest('[data-del], [data-pin]')) return;
-        const it = store.read(LS_SAVED, [])[+row.getAttribute('data-i')];
+        const it = loadSaved()[+row.getAttribute('data-i')];
         if (it) { el.ta.value = it.expr; onInput(); commitRoll(); }
       });
     });
     el.saved.querySelectorAll('[data-pin]').forEach((b) => {
       b.addEventListener('click', (ev) => {
         ev.stopPropagation();
-        const items = store.read(LS_SAVED, []);
+        const items = loadSaved();
         const it = items[+b.getAttribute('data-pin')];
         if (!it) return;
         it.mark = !it.mark;
@@ -1000,7 +1035,7 @@
     el.saved.querySelectorAll('[data-del]').forEach((b) => {
       b.addEventListener('click', (ev) => {
         ev.stopPropagation();
-        const items = store.read(LS_SAVED, []);
+        const items = loadSaved();
         items.splice(+b.getAttribute('data-del'), 1);
         store.write(LS_SAVED, items);
         renderSaved(); renderShortcuts(); syncURL();
@@ -1008,13 +1043,17 @@
     });
   }
 
+  /* The label names it, so there is nothing to ask for — and nothing that can
+     drift out of step with what the expression actually says. */
   function saveCurrent() {
     const expr = el.ta.value.trim();
     if (!expr) return;
-    const name = prompt('Save this expression as:', state.inspect && state.inspect.parsed.label || expr);
-    if (name === null) return;
-    const items = store.read(LS_SAVED, []);
-    items.unshift({ name: name.trim() || expr, expr });
+    if (!nameOf(expr)) {
+      toast('name it first — add # a name to the end');
+      return;
+    }
+    const items = loadSaved().filter((x) => nameOf(x.expr) !== nameOf(expr));
+    items.unshift({ expr, mark: false });
     store.write(LS_SAVED, items.slice(0, 60));
     renderSaved(); renderShortcuts(); syncURL();
     switchTab('saved');
@@ -1034,33 +1073,38 @@
      afresh at every occurrence, so `2atk` rolls twice. */
   function loadVars() {
     const v = store.read(LS_VARS, null);
-    return Array.isArray(v) ? v : [{ name: 'atk', expr: 'd20+5' }];
+    return Array.isArray(v) ? v.map(normalise) : [{ expr: 'd20+5 # atk' }];
   }
 
   function pushVars(list) {
     const map = {};
-    for (const v of list) if (v.name) map[v.name] = v.expr;
+    for (const v of list) {
+      const n = nameOf(v.expr);
+      if (n && /^[a-zA-Z_]+$/.test(n)) map[n] = v.expr;
+    }
     E.setVars(map);
     store.write(LS_VARS, list);
   }
 
-  /* Only the two inputs take Tab, so tabbing out of a name always lands on its
-     own expression rather than a button in between. */
+  /* One field holds the whole thing, name and all, so there is nothing to tab
+     between and no second place for the name to disagree with itself. */
   function renderVars() {
     const list = loadVars();
     el.vars.innerHTML =
       '<div class="varhint">A variable holds an expression and is worked out again at every ' +
-      'occurrence. Use the bare name, or <code>{name}</code> when a plain word would be ambiguous. ' +
-      'Inside an expression, <code>atk:=d20+5</code> as its own item sets one for that roll alone.</div>' +
+      'occurrence. It is named by the <code>#&nbsp;name</code> at its end. Use the bare name, ' +
+      'or <code>{name}</code> when a plain word would be ambiguous. Inside an expression, ' +
+      '<code>atk:=d20+5</code> as its own item sets one for that roll alone, and ' +
+      '<code>atk::=d20+5</code> rolls it once however often it is mentioned.</div>' +
       list.map((v, i) =>
         '<div class="varitem" data-i="' + i + '">' +
           '<div class="varrow">' +
             '<button class="del" title="remove" tabindex="-1">&times;</button>' +
-            '<button class="pin' + (v.mark ? " on" : "") + '" title="show as a shortcut under ' +
+            '<button class="pin' + (v.mark ? ' on' : '') + '" title="show as a shortcut under ' +
               'the expression" tabindex="-1">★</button>' +
-            '<input class="vname" value="' + esc(v.name) + '" spellcheck="false" placeholder="name">' +
-            '<input class="vexpr" value="' + esc(v.expr) + '" spellcheck="false" placeholder="expression">' +
-            '<span class="step' + (isInt(v.expr) ? '' : ' off') + '">' +
+            '<input class="vexpr" value="' + esc(v.expr) + '" spellcheck="false" ' +
+              'placeholder="d20+5 # name">' +
+            '<span class="step' + (isInt(bodyOf(v.expr)) ? '' : ' off') + '">' +
               '<button class="vdec" title="subtract 1" tabindex="-1">&minus;</button>' +
               '<button class="vinc" title="add 1" tabindex="-1">+</button>' +
             '</span>' +
@@ -1071,8 +1115,8 @@
       '<button class="varadd">+ add a variable</button>';
 
     el.vars.querySelectorAll('.varitem input').forEach((inp) => {
-      inp.addEventListener('input', () => commitVars(false));
-      inp.addEventListener('change', () => commitVars(true));
+      inp.addEventListener('input', () => commitVars());
+      inp.addEventListener('change', () => commitVars());
       inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') inp.blur(); });
     });
   }
@@ -1082,28 +1126,24 @@
     const stored = loadVars();
     const out = [];
     el.vars.querySelectorAll('.varitem').forEach((row, i) => {
-      out.push(Object.assign({}, stored[i], {
-        name: row.querySelector('.vname').value.replace(/[^a-zA-Z_]/g, ''),
-        expr: row.querySelector('.vexpr').value
-      }));
+      out.push({ expr: row.querySelector('.vexpr').value,
+                 mark: !!(stored[i] && stored[i].mark) });
     });
     return out.length ? out : stored;
   }
 
-  /* Saving must not rebuild the rows: re-rendering mid-edit was what stole the
-     focus when tabbing out of a name. Only the error line and the stepper move. */
-  function commitVars(tidy) {
+  /* Saving must not rebuild the rows, or it would steal the caret mid-word.
+     Only the error line and the stepper move. */
+  function commitVars() {
     const list = readVars();
     pushVars(list);
     el.vars.querySelectorAll('.varitem').forEach((row, i) => {
-      const v = list[i] || { name: '', expr: '' };
+      const v = list[i] || { expr: '' };
       const err = varError(v.expr);
       const box = row.querySelector('.varerr');
       box.textContent = err || '';
       box.classList.toggle('on', !!err);
-      row.querySelector('.step').classList.toggle('off', !isInt(v.expr));
-      const nm = row.querySelector('.vname');
-      if (tidy && nm.value !== v.name) nm.value = v.name;
+      row.querySelector('.step').classList.toggle('off', !isInt(bodyOf(v.expr)));
     });
     renderShortcuts();
     onInput();                 // the expression may now mean something different
@@ -1114,10 +1154,10 @@
     el.vars.addEventListener('click', (ev) => {
       if (ev.target.closest('.varadd')) {
         const list = readVars();
-        list.push({ name: '', expr: '' });
+        list.push({ expr: '' });
         pushVars(list);
         renderVars();
-        const box = el.vars.querySelector('.varitem:last-of-type .vname');
+        const box = el.vars.querySelector('.varitem:last-of-type .vexpr');
         if (box) box.focus();
         return;
       }
@@ -1143,15 +1183,23 @@
       const inc = ev.target.closest('.vinc'), dec = ev.target.closest('.vdec');
       if (!inc && !dec) return;
       const box = item.querySelector('.vexpr');
-      if (!isInt(box.value)) return;
-      box.value = String(parseInt(box.value.trim(), 10) + (inc ? 1 : -1));
-      commitVars(true);
+      const body = bodyOf(box.value);
+      if (!isInt(body)) return;
+      const big = ev.shiftKey;
+      box.value = withBody(box.value,
+        String(parseInt(body, 10) + (inc ? 1 : -1) * (big ? STEP_BIG : 1)));
+      commitVars();
     });
   }
 
   function varError(expr) {
-    if (!String(expr || '').trim()) return null;
-    try { E.parse(expr); return null; } catch (e) { return e.message; }
+    const src = String(expr || '');
+    if (!src.trim()) return null;
+    const cut = E.splitLabel(src);
+    if (!cut.label) return 'needs a name — write it as # name at the end';
+    if (!/^[a-zA-Z_]+$/.test(cut.label)) return 'a name can only use letters and _';
+    if (!cut.body.trim()) return 'needs an expression before the # name';
+    try { E.parse(cut.body); return null; } catch (e) { return e.message; }
   }
 
   /* ================================================================= tabs */

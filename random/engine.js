@@ -36,7 +36,8 @@
    GRAMMAR (recursive descent, one Parser per top-level item; every node keeps
    the source span it came from, which is what drives highlighting and Explain):
 
-     expr    := sum ['?' expr ':' expr]
+     expr    := sum ['?' expr ':' (expr | chain)]
+     chain   := comparison '?' expr ':' (expr | chain)
      sum     := term (('+' | '-') term)*
      term    := power (('*' | '/' | '%') power)*
      power   := unary (('^' | '**') power)?
@@ -54,9 +55,14 @@
    otherwise a primary — so `3d6>=5+1` is `(3d6>=5)+1` rather than a surprise,
    while `4d6>d4` rolls a fresh d4 for every comparison it makes.
 
+   An else that opens with a comparison carries on about the same subject:
+   `d6>4?yes:>2?maybe:no` works the subject out once and tries each comparison
+   in turn, which is the only way to sort one roll into more than two outcomes.
+
    A top-level item of the form `name := expr` defines a variable for that one
    expression. Variables hold source text and are re-parsed and re-rolled at
-   every occurrence, which is why `2atk` really is two rolls.
+   every occurrence, which is why `2atk` really is two rolls. `name ::= expr`
+   is its opposite: rolled once, and every mention is that same result.
    ========================================================================== */
 (function (global) {
   'use strict';
@@ -198,6 +204,11 @@
       return node;
     }
 
+    atComparison() {
+      this.ws();
+      return /^(<=|>=|!=|<>|=|<|>)/.test(this.s.slice(this.i));
+    }
+
     /** cond ? a : b — the condition has to read as success or failure */
     expr() {
       const cond = this.sum();
@@ -206,11 +217,50 @@
       const yes = this.expr();
       const cA = this.mark();
       if (!this.lit(':')) this.fail('expected ":" to finish the ? : choice');
+      // an else that opens with a comparison carries on about the same thing
+      if (this.atComparison()) return this.band(cond, yes, q, cA);
       const no = this.expr();
       return {
         t: 'ternary', cond, yes, no, uid: ++this.uid,
         qSp: [q, q + 1], cSp: [cA, cA + 1], sp: [cond.sp ? cond.sp[0] : q, this.i]
       };
+    }
+
+    /* `d6>4?yes:>2?maybe:no` — one subject, tried against each comparison in
+       turn. The first comparison is written against the subject, so it has to
+       be lifted back off it to leave the thing every arm is talking about. */
+    band(cond, first, q, cA) {
+      const mods = cond.mods || [];
+      const lead = mods.filter((m) => m.t === 'check').pop();
+      if (!lead) {
+        this.i = cA;
+        // a comparison binds to a term, so `2d6+m>=13` compared m and not the sum
+        this.fail(cond.t === 'bin'
+          ? 'a chain of comparisons is about one thing — bracket what it compares, ' +
+            'like (2d6+3)>=13?crit:>=10?good:bad'
+          : 'a chain of comparisons needs the first one written out, ' +
+            'like d6>4?yes:>2?maybe:no');
+      }
+      const subject = Object.assign({}, cond, { mods: mods.filter((m) => m !== lead) });
+      const arms = [{ cp: lead.cp, check: lead.check, bare: !!lead.bare,
+                      then: first, sp: lead.sp, qSp: [q, q + 1], cSp: [cA, cA + 1] }];
+      for (;;) {
+        const a = this.mark();
+        const cp = this.comparePoint();
+        if (!cp) this.fail('expected a comparison after ":"');
+        const qq = this.mark();
+        if (!this.lit('?')) this.fail('expected "?" after the comparison');
+        const then = this.expr();
+        const cc = this.mark();
+        if (!this.lit(':')) this.fail('expected ":" to finish the choice');
+        arms.push({ cp, check: 's', bare: true, then, sp: [a, qq],
+                    qSp: [qq, qq + 1], cSp: [cc, cc + 1] });
+        if (this.atComparison()) continue;
+        return {
+          t: 'band', subject, arms, otherwise: this.expr(), uid: ++this.uid,
+          sp: [cond.sp ? cond.sp[0] : q, this.i]
+        };
+      }
     }
 
     sum() {
@@ -597,6 +647,20 @@
       case 'neg': typeCheck(node.v, arith); break;
       case 'paren': typeCheck(node.v, arith); break;
       case 'set': case 'rep': case 'custom': node.items.forEach((i) => typeCheck(i, false)); break;
+      case 'band':
+        typeCheck(node.subject, false);
+        for (const a of node.arms) {
+          if (a.cp.node) {
+            if (isSet(a.cp.node)) {
+              throw new DiceError('the other side of a comparison has to be a single value, ' +
+                'not a set', a.cp.node.sp && a.cp.node.sp[0]);
+            }
+            typeCheck(a.cp.node, false);
+          }
+          typeCheck(a.then, arith);
+        }
+        typeCheck(node.otherwise, arith);
+        break;
       case 'ternary':
         if (!canBeCondition(node.cond)) {
           throw new DiceError('a ? : choice needs something that reads success or failure on ' +
@@ -889,6 +953,25 @@
     });
   }
 
+  /* A mention of a roll binding after the first. Drawing the same dice again
+     would say they were thrown again, so it shows the name and what it came to.
+     It holds no `inner`, which keeps the dice from being counted twice. */
+  function Ref(inner, name, uid) {
+    return value({
+      uid, word: inner.word,
+      raw() { return inner.raw(); },
+      total() { const c = checkTotal(this); return c === null ? inner.total() : c; },
+      cond() { return this.check ? this.check.hit : inner.cond(); },
+      html(o) {
+        const tag = uid ? ' data-x="w' + uid + '"' : '';
+        const w = inner.word;
+        const shown = (w === undefined || w === null) ? fmt(safeTotal(inner)) : String(w);
+        return '<span class="r-ref' + stateCls(o, this) + '"' + tag + '>' +
+          '<i>' + esc(name) + '</i>' + esc(shown) + '</span>';
+      }
+    });
+  }
+
   /** a face picked off a custom die */
   function CustomDie(inner, shape, uid) {
     return value({
@@ -926,7 +1009,7 @@
 
   function varAst(name, src) {
     const key = name + '::' + src;
-    if (!varCache.has(key)) varCache.set(key, new Parser(String(src)).parse());
+    if (!varCache.has(key)) varCache.set(key, new Parser(splitLabel(src).body).parse());
     return varCache.get(key);
   }
 
@@ -1217,6 +1300,24 @@
     return out;
   }
 
+  /* A `::=` binding is thrown once and then referred to, which is what lets a
+     chain of comparisons ask about the same roll several times. It is a value,
+     never a set: it stands for what the roll came to. */
+  function fixedValue(node, slot, ctx) {
+    if (!slot.v) {
+      if (slot.busy) throw new DiceError('"' + node.name + '" is defined in terms of itself');
+      slot.busy = true;
+      slot.v = evalNode(slot.ast, ctx);
+      slot.busy = false;
+    }
+    const uid = uidOf(node, ctx);
+    const wrapped = slot.used
+      ? Ref(slot.v, node.name, uid)
+      : Group(slot.v, uid, { note: node.name, tag: 'w', bare: !!slot.v.atom });
+    slot.used = true;
+    return applyMods(wrapped, node.mods || [], null, ctx);
+  }
+
   function evalNode(node, ctx) {
     const adv = (node.mods || []).find((x) => x.t === 'adv');
     if (adv) return rollAdv(node, adv, ctx);
@@ -1228,6 +1329,8 @@
 
       /* a bare word is a variable when one is defined, otherwise just a word */
       case 'word': {
+        const slot = ctx.fixed && ctx.fixed[node.name];
+        if (slot) return fixedValue(node, slot, ctx);
         const src = varSrc(node.name, ctx);
         if (src === undefined) {
           if (node.forced) throw new DiceError('no variable named "' + node.name + '" is set');
@@ -1282,6 +1385,31 @@
         // a member thrown away before the choice keeps its place, struck out
         return SetVal(c.members.map((m) => m.dropped ? m : answer(m)),
           { uid, brackets: c.members.length > 1 });
+      }
+
+      /* One subject, tried against each comparison in turn. The subject is
+         worked out once, so the arms all talk about the same roll. */
+      case 'band': {
+        const v = evalNode(node.subject, ctx);
+        const uid = uidOf(node, ctx);
+        const tag = uid ? ' data-x="b' + uid + '"' : '';
+        const answer = (cv) => {
+          let taken = null;
+          for (const arm of node.arms) {
+            const rhs = cpEval(arm.cp, ctx);
+            const hit = compare(arm.cp.op, cv.value, rhs.v);
+            // the last comparison tried is the one a miss reads as the opposite of
+            cv.check = { kind: arm.check, hit, bare: arm.bare, op: arm.cp.op, rhs };
+            if (hit) { taken = arm; break; }
+          }
+          const out = evalNode(taken ? taken.then : node.otherwise, ctx);
+          const pre = '<span class="r-cond"' + tag + '>' + condHTML(cv) +
+            '<span class="r-kw"' + tag + '>so</span></span>';
+          return Group(out, uid, { prefix: pre, bare: true, condVal: cv });
+        };
+        if (!v.set) return answer(v);
+        return SetVal(v.members.map((m) => m.dropped ? m : answer(m)),
+          { uid, brackets: v.members.length > 1 });
       }
 
       case 'neg': {
@@ -1384,6 +1512,13 @@
       case 'word': return (node.forced ? '{' + node.name + '}' : node.name) + mods;
       case 'custom': return '[' + node.items.map(plain).join(',') + ']' + mods;
       case 'ternary': return plain(node.cond) + '?' + plain(node.yes) + ':' + plain(node.no);
+      case 'band': {
+        let s = plain(node.subject);
+        node.arms.forEach((a, i) => {
+          s += (i ? ':' : '') + (a.bare ? '' : a.check) + cpText(a.cp) + '?' + plain(a.then);
+        });
+        return s + ':' + plain(node.otherwise);
+      }
       case 'neg': return '-' + plain(node.v);
       case 'bin': return plain(node.l) + node.op + plain(node.r);
       case 'func': return node.name + '(' + node.args.map(plain).join(',') + ')';
@@ -1524,6 +1659,24 @@
           });
           push(node.brk[1], 't-brk', null, cid);
           mods(node, depth);
+          break;
+        }
+        case 'band': {
+          const bid = 'b' + node.uid;
+          walk(node.subject, depth + 1);
+          node.arms.forEach((a, i) => {
+            push(a.sp, 't-mod', {
+              title: i ? 'Or when' : 'When',
+              desc: 'If what came before is ' + cpPhrase(a.cp) + ', the answer is what ' +
+                'follows the ?. The comparisons are tried in the order written, on the ' +
+                'one result — nothing is rolled again.',
+              depth
+            }, bid);
+            push(a.qSp, 't-op', null, bid);
+            walk(a.then, depth + 1);
+            push(a.cSp, 't-op', null, bid);
+          });
+          walk(node.otherwise, depth + 1);
           break;
         }
         case 'ternary': {
@@ -1712,6 +1865,17 @@
         return '<span class="r-kw"' + X('t') + '>if</span>' + kid(node.cond) +
           '<span class="r-kw"' + X('t') + '>then</span>' + kid(node.yes) +
           '<span class="r-kw"' + X('t') + '>else</span>' + kid(node.no);
+      case 'band': {
+        const kw = (w) => '<span class="r-kw"' + X('b') + '>' + w + '</span>';
+        let out = kw('if') + kid(node.subject);
+        node.arms.forEach((a, i) => {
+          out += (i ? kw('else if') : '') +
+            '<span class="r-cmp">' + esc(a.bare ? '' : a.check) + CMP_SYM[a.cp.op] + '</span>' +
+            (a.cp.node ? kid(a.cp.node) : '<span class="r-num">' + fmt(a.cp.v) + '</span>') +
+            kw('then') + kid(a.then);
+        });
+        return out + kw('else') + kid(node.otherwise);
+      }
       case 'custom':
         return ghostDie(shapeFor(node.items.length), 'D' + node.items.length, X('c'), ' custom') + cmp;
       case 'neg': return '<span class="r-op">-</span>' + kid(node.v);
@@ -1784,6 +1948,18 @@
     return -1;
   }
 
+  /** the label names the thing — a saved roll, a variable — so it is worth
+      splitting off without parsing the rest */
+  function splitLabel(input) {
+    const src = String(input == null ? '' : input);
+    const i = labelAt(src);
+    if (i < 0) return { body: src, label: null };
+    return { body: src.slice(0, i), label: src.slice(i + 1).trim() || null };
+  }
+
+  /* `:=` holds source text and rolls afresh at every mention; `::=` rolls once
+     and every mention is that same result. Test the longer one first. */
+  const FIXED_RE = /^\s*([a-zA-Z_]+)\s*::=/;
   const ASSIGN_RE = /^\s*([a-zA-Z_]+)\s*:=/;
 
   function parse(input) {
@@ -1811,11 +1987,13 @@
 
     const parts = [];
     const vars = {};
+    const fixed = {};
     let uid = 0;
     for (const piece of splitParts(src)) {
       if (!piece.text.trim()) throw new DiceError('empty roll between commas', offset + piece.a);
       // `name := expr` as a top-level item defines a variable for this expression only
-      const asg = ASSIGN_RE.exec(piece.text);
+      const fx = FIXED_RE.exec(piece.text);
+      const asg = fx || ASSIGN_RE.exec(piece.text);
       const body = asg ? piece.text.slice(asg[0].length) : piece.text;
       const base = offset + piece.a + (asg ? asg[0].length : 0);
       if (asg && !body.trim()) {
@@ -1832,11 +2010,11 @@
       }
       uid = p.uid;
       if (asg) {
-        vars[asg[1]] = body;
+        if (fx) fixed[asg[1]] = ast; else vars[asg[1]] = body;
         const nameA = offset + piece.a + asg[0].indexOf(asg[1]);
         parts.push({
-          ast, a: base, src: body, pieceA: offset + piece.a, assign: asg[1],
-          nameSp: [nameA, nameA + asg[1].length], opSp: [base - 2, base]
+          ast, a: base, src: body, pieceA: offset + piece.a, assign: asg[1], once: !!fx,
+          nameSp: [nameA, nameA + asg[1].length], opSp: [base - (fx ? 3 : 2), base]
         });
       } else {
         parts.push({ ast, a: base, src: body, pieceA: offset + piece.a });
@@ -1848,7 +2026,7 @@
     }
 
     return {
-      parts, rolls, vars, ast: rolls[0].ast, repeat, repeatSp, label, labelSp, offset, src,
+      parts, rolls, vars, fixed, ast: rolls[0].ast, repeat, repeatSp, label, labelSp, offset, src,
       trimmed: raw.trim(),
       notation: parts.map((p) => (p.assign ? p.assign + ':=' : '') + plain(p.ast)).join(', ')
     };
@@ -1900,7 +2078,14 @@
     return { parsed: p, spans, rows, notation: p.notation };
   }
 
-  const evaluate = (ast, vars) => evalNode(ast, { dice: 0, depth: 0, vars: vars || null });
+  function slotsFor(fixed) {
+    const out = {};
+    for (const k in fixed) out[k] = { ast: fixed[k], v: null, busy: false, used: false };
+    return out;
+  }
+
+  const evaluate = (ast, vars, fixed) =>
+    evalNode(ast, { dice: 0, depth: 0, vars: vars || null, fixed: slotsFor(fixed || {}) });
 
   function countDice(v) {
     if (!v) return 0;
@@ -1929,7 +2114,8 @@
     }
     // a check read by a ? : or used as a count is spent there; only what can
     // still reach the result counts as possible
-    for (const k of ['l', 'r', 'v', 'yes', 'no']) scanMarks(node[k], out, ctx);
+    for (const k of ['l', 'r', 'v', 'yes', 'no', 'otherwise']) scanMarks(node[k], out, ctx);
+    (node.arms || []).forEach((a) => scanMarks(a.then, out, ctx));
     (node.items || []).forEach((x) => scanMarks(x, out, ctx));
     (node.args || []).forEach((x) => scanMarks(x, out, ctx));
   }
@@ -1958,7 +2144,7 @@
     const multi = p.repeat > 1 || p.rolls.length > 1;
     for (let i = 0; i < p.repeat; i++) {
       for (const part of p.rolls) {
-        const r = evaluate(part.ast, p.vars);
+        const r = evaluate(part.ast, p.vars, p.fixed);
         if (multi) r.name = p.rolls.length > 1 ? plain(part.ast) : null;
         sets.push(r);
       }
@@ -1996,7 +2182,7 @@
     for (let i = 0; i < n; i++) {
       let t = 0;
       for (let r = 0; r < p.repeat; r++) {
-        for (const part of p.rolls) t += evaluate(part.ast, p.vars).total();
+        for (const part of p.rolls) t += evaluate(part.ast, p.vars, p.fixed).total();
       }
       totals[i] = t; sum += t;
       if (t < min) min = t;
@@ -2016,6 +2202,6 @@
 
   global.DiceEngine = {
     parse, inspect, evaluate, roll, analyse, preview, setVars, fmt, esc, shapeFor,
-    DiceError, LIMIT, FUNCS, CHECKS, MARK_ORDER
+    splitLabel, DiceError, LIMIT, FUNCS, CHECKS, MARK_ORDER
   };
 }(window));

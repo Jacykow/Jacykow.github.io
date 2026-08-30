@@ -149,6 +149,18 @@ answer per member. `4d20>10 ? hit : miss` is four separate choices, not one take
 the sum, so it is the same as writing `d20>10?hit:miss` four times. Something carrying
 no check at all is not a condition, and saying so is a pre-roll error.
 
+An else that opens with a comparison carries on about the same thing, which sorts one
+roll into as many outcomes as you like:
+
+```
+d6>4 ? yes : >2 ? maybe : no
+(2d6+3)>=13 ? crit : >=10 ? good : >=7 ? mixed : bad
+```
+
+The subject is worked out **once** and each comparison is tried against it in the order
+written; the first that holds gives the answer. Since a comparison binds to a term
+rather than a sum, bracket what the chain is about — `2d6+3>=13` compares the 3.
+
 Only the success check casts to a number — `success` is 1 and `failure` is 0, so
 `3d6s5+1` works. The failure, critical-success and critical-failure checks are terminal:
 using one in a calculation is rejected before the roll happens.
@@ -174,8 +186,12 @@ really is two separate rolls. Set them in the **Vars** panel. A bare word become
 variable when one of that name exists, and stays a word otherwise; `{name}` insists on the
 variable and errors when it is missing.
 
+A variable is named by the `# name` at the end of its own expression, so `0 # modifier`
+is a variable called `modifier` holding `0`. Saved rolls are named the same way, and
+saving refuses an expression that has no name.
+
 ```
-atk = d20+5             set in the Vars panel
+d20+5 # atk             a variable, set in the Vars panel
 2atk>13                 the same as atk>13, atk>13
 {atk}                   never mistaken for the word "atk"
 ```
@@ -191,6 +207,16 @@ name:
 atk:=d20+5, 2atk        the same as 2(d20+5)
 x:=2d6, y:=x+1, y       assignments can build on each other
 ```
+
+`::=` is the opposite: **rolled once**, however often it is named. Every mention after
+the first shows the name and what it came to rather than drawing the same dice again.
+
+```
+roll::=2d6+3, roll>=10 ? good : >=7 ? mixed : bad
+x::=d20, x+x            one d20, counted twice
+```
+
+A `::=` binding stands for what its roll came to, so it is a value and never a set.
 
 A variable that refers back to itself is caught at a fixed depth rather than hanging.
 

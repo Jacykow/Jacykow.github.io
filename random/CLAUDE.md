@@ -62,10 +62,23 @@ anything after them would apply to each attempt rather than to the winner.
 `da` must be tested before the `d` that starts `dh`/`dl`/drop, which would
 otherwise match its first letter and abandon the whole modifier.
 
+**The label names things.** A saved roll and a variable are each just an
+expression whose `# name` says what it is called; nothing stores a name beside
+one. That is what lets a single field hold the whole thing, and why nothing can
+drift out of step. `varAst` strips the label before parsing, so a variable's
+name is drawn once — on its subtotal bracket — and never twice.
+
+**A chain of comparisons works its subject out once.** `d6>4?yes:>2?maybe:no`
+parses as a `band`, not nested ternaries, by lifting the first comparison back
+off the condition to leave the thing every arm is about. Nesting ternaries would
+re-roll, which is the whole reason the construct exists.
+
 **Variables hold source text**, re-parsed and re-rolled at every occurrence, so
 `2atk` really is two rolls. Their nodes are deliberately left untagged
 (`ctx.mute`): they have no span in the expression being edited, so linking them
 there would be a lie. Hovering one lights the variable as a whole instead.
+`::=` is the opposite — rolled once into `ctx.fixed`, with later mentions
+rendered as a `Ref` that holds no `inner`, so its dice are counted once.
 
 ## Things that are easy to break
 

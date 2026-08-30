@@ -626,3 +626,14 @@ kbd{
   font-size:calc(var(--dsz) * .17); white-space:normal; line-height:1.05;
   padding:0 6%; text-align:center; word-break:break-word;
 }
+
+/* a mention of a roll binding after the first: the name and what it came to,
+   since drawing the same dice again would say they were thrown again */
+.r-ref{
+  border:1px dashed var(--border); border-radius:5px; padding:0 5px;
+  color:var(--text); margin:0 2px;
+}
+.r-ref i{font-style:normal; color:var(--purple); margin-right:5px; font-size:11.5px}
+.r-ref.success, .r-ref.critSuccess{color:var(--green)}
+.r-ref.failure, .r-ref.critFail{color:var(--red)}
+.r-ref.dropped{opacity:.34; text-decoration:line-through}
