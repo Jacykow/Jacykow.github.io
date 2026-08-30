@@ -223,8 +223,9 @@ x:=2d6, y:=x+1, y       assignments can build on each other
 the first shows the name and what it came to rather than drawing the same dice again.
 
 ```
+roll::=d6, roll, roll   one die, named twice
+roll:=d6, roll, roll    two dice, since the name is worked out again
 roll::=2d6+3, roll>=10 ? good : >=7 ? mixed : bad
-x::=d20, x+x            one d20, counted twice
 ```
 
 A `::=` binding stands for what its roll came to, so it is a value and never a set.

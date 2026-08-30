@@ -2049,7 +2049,8 @@
     return {
       parts, rolls, vars, fixed, ast: rolls[0].ast, repeat, repeatSp, label, labelSp, offset, src,
       trimmed: raw.trim(),
-      notation: parts.map((p) => (p.assign ? p.assign + ':=' : '') + plain(p.ast)).join(', ')
+      notation: parts.map((p) =>
+        (p.assign ? p.assign + (p.once ? '::=' : ':=') : '') + plain(p.ast)).join(', ')
     };
   }
 
@@ -2105,8 +2106,9 @@
     return out;
   }
 
-  const evaluate = (ast, vars, fixed) =>
-    evalNode(ast, { dice: 0, depth: 0, vars: vars || null, fixed: slotsFor(fixed || {}) });
+  const rollCtx = (p) =>
+    ({ dice: 0, depth: 0, vars: p.vars || null, fixed: slotsFor(p.fixed || {}) });
+  const evaluate = (ast, vars, fixed) => evalNode(ast, rollCtx({ vars, fixed }));
 
   function countDice(v) {
     if (!v) return 0;
@@ -2164,8 +2166,9 @@
     const sets = [];
     const multi = p.repeat > 1 || p.rolls.length > 1;
     for (let i = 0; i < p.repeat; i++) {
+      const ctx = rollCtx(p);
       for (const part of p.rolls) {
-        const r = evaluate(part.ast, p.vars, p.fixed);
+        const r = evalNode(part.ast, ctx);
         if (multi) r.name = p.rolls.length > 1 ? plain(part.ast) : null;
         sets.push(r);
       }
@@ -2184,6 +2187,8 @@
     return {
       input: p.trimmed, notation: p.notation, label: p.label, repeat: p.repeat,
       sets, diceCount, total, numeric, possible: possibleMarks(p),
+      defs: p.parts.filter((x) => x.assign && !x.once)
+        .map((x) => x.assign + ' := ' + plain(x.ast)),
       text: sets.map(wordText).filter(Boolean).join(', '),
       marks: Object.keys(marks).length ? marks : null
     };
@@ -2191,8 +2196,11 @@
 
   function preview(input) {
     const p = parse(input);
-    const ctx = { vars: p.vars, depth: 0, mute: false };
-    return p.rolls.map((part) => previewNode(part.ast, ctx)).join('<span class="r-op">,</span>');
+    const ctx = { vars: p.vars, fixed: p.fixed, depth: 0, mute: false };
+    return p.parts.map((part) => (part.assign
+      ? '<span class="r-var">' + esc(part.assign) + '</span>' +
+        '<span class="r-op">' + (part.once ? '::=' : ':=') + '</span>'
+      : '') + previewNode(part.ast, ctx)).join('<span class="r-op">,</span>');
   }
 
   /* ==========================================================================
@@ -2383,8 +2391,9 @@
     for (let i = 0; i < n; i++) {
       let t = 0, word = null;
       for (let r = 0; r < p.repeat; r++) {
+        const ctx = rollCtx(p);
         for (const part of p.rolls) {
-          const v = evaluate(part.ast, p.vars, p.fixed);
+          const v = evalNode(part.ast, ctx);
           try { t += v.total(); }
           catch (e) { word = wordText(v) || word; }
         }

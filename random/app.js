@@ -122,9 +122,10 @@
       ['~{atk}', 'always the variable, never a word', 'atom', 'Insists on the variable, and says so if none is set.']
     ]],
     ['Variables', [
+      ['~roll:=d6,roll,roll', 'a fresh roll at every mention', 'atom', 'A variable holds text, not a result, so every mention rolls again — this throws two dice. It has to stand as its own top-level item, and it shadows a variable of the same name in the panel.'],
+      ['~roll::=d6,roll,roll', 'rolled once, however often it is named', 'atom', 'The opposite of :=. One die, and both mentions are that same result, which is what lets a chain of comparisons ask about one roll several times. It stands for what the roll came to, so it is a value and never a set.'],
       ['~atk:=d20+5,~2atk', 'set one for this expression only', 'prefix', 'Has to stand as its own top-level item. It shadows a variable of the same name in the panel, and is worked out afresh at every mention.'],
-      ['~2atk', 'used twice means rolled twice', 'atom', 'A variable holds text, not a result, so every mention is a fresh roll.'],
-      ['~roll::=2d6,~roll', 'rolled once, however often it is named', 'prefix', 'The opposite of :=. Rolled once, so a chain of comparisons can ask about the same result several times. It stands for what the roll came to, so it is a value and never a set.']
+      ['~2atk', 'used twice means rolled twice', 'atom', 'A variable holds text, not a result, so every mention is a fresh roll.']
     ]],
     ['Chained choices', [
       ['d6>4?yes~:>2?maybe~:no', 'more comparisons on the same roll', 'append', 'An else that opens with a comparison carries on about the same subject. The subject is worked out once and each comparison tried in the order written.'],
@@ -751,6 +752,9 @@
         '<div class="total">' + totalHTML(roll) + '</div>' +
         '<div class="meta">' +
           '<div class="expr">' + esc(roll.notation) + '</div>' +
+          ((roll.defs || []).length
+            ? '<div class="defs">' + roll.defs.map(esc).join('<span>&middot;</span>') + '</div>'
+            : '') +
           (roll.label ? '<div class="lbl"># ' + dieText(roll.label) + '</div>' : '') +
           '<div class="sub">' + meta.join('<span>&middot;</span>') + '</div>' +
         '</div>' +
