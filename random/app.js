@@ -676,12 +676,12 @@
      the headline already says it, and repeating it buys nothing. */
   function barsFor(n, body) {
     const out = (n.getAttribute('data-steps') || '').split('|').filter(Boolean)
-      .map((label) => ({ label, sum: null }));
+      .map((label) => ({ label, sum: null, name: false }));
     const sum = n.getAttribute('data-sum');
     const note = (n.getAttribute('data-note') || '').split('|').filter(Boolean).join(', ');
     const sole = n.parentElement === body && body.children.length === 1;
-    if (sum !== null && !sole) out.push({ label: note, sum });
-    else if (note && sum === null) out.push({ label: note, sum: null });
+    if (sum !== null && !sole) out.push({ label: note, sum, name: true });
+    else if (note && sum === null) out.push({ label: note, sum: null, name: true });
     return out;
   }
 
@@ -720,33 +720,50 @@
         it.bars.forEach((b, k) => {
           const bar = document.createElement('div');
           bar.className = 'sumbar' + (it.drop ? ' dropped' : '') +
-            (it.mark && b.sum !== null ? ' ' + it.mark : '') + (b.sum === null ? ' step' : '');
+            (it.mark && b.name ? ' ' + it.mark : '') + (b.name ? '' : ' step');
           if (it.x) bar.setAttribute('data-x', it.x);
           bar.style.left = it.left + 'px';
           bar.style.width = Math.max(it.width, 20) + 'px';
           bar.style.top = ((it.row + k) * SUM_ROW) + 'px';   // innermost nearest the dice
-          bar.innerHTML = '<span class="sumval">' + (b.sum === null ? '' : esc(b.sum)) + '</span>';
+          // the label leads, so you know what the number is before you read it
+          bar.innerHTML = '<span class="sumval">' + (b.label ? '<i></i>' : '') +
+            (b.sum === null ? '' : '<b>' + esc(b.sum) + '</b>') + '</span>';
           layer.appendChild(bar);
           drawn.push([bar, b]);
         });
       }
       body.appendChild(layer);
 
-      // Now the bars have a width, fit the label in — trimming from the end, so
-      // what survives is the front of the phrase, where the verb and count are.
       for (const [bar, b] of drawn) {
-        if (!b.label) continue;
-        const val = bar.querySelector('.sumval');
-        const tag = document.createElement('i');
-        val.appendChild(tag);
-        const words = b.label.split(' ');
-        for (let k = words.length; k > 0; k--) {
-          tag.textContent = words.slice(0, k).join(' ');
-          if (val.getBoundingClientRect().width <= bar.getBoundingClientRect().width) break;
-          if (k === 1) tag.remove();
-        }
+        if (b.label) fitLabel(bar, b.label, b.name);
       }
     });
+  }
+
+  /* Trim the label from the end, so what survives is the front of the phrase —
+     where the verb and the count are. A name that stands over a value never
+     disappears entirely: it gives up letters instead, down to a stub. */
+  const NAME_STUB = 3;
+  const NAME_ROOM = 76;      // a short name is worth spilling past its bracket for
+  function fitLabel(bar, label, named) {
+    const val = bar.querySelector('.sumval');
+    const tag = val.querySelector('i');
+    const room = () =>
+      Math.max(bar.getBoundingClientRect().width, named ? NAME_ROOM : 0);
+    const fits = () => val.getBoundingClientRect().width <= room();
+
+    const words = label.split(' ');
+    for (let k = words.length; k > 0; k--) {
+      tag.textContent = words.slice(0, k).join(' ');
+      if (fits()) return;
+    }
+    if (!named) { tag.remove(); return; }
+    const first = words[0];
+    for (let n = first.length - 1; n > NAME_STUB; n--) {
+      tag.textContent = first.slice(0, n) + '…';
+      if (fits()) return;
+    }
+    tag.textContent = first.slice(0, NAME_STUB) + (first.length > NAME_STUB ? '…' : '');
   }
 
   /* ================================================================ saved */

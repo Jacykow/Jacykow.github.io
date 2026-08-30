@@ -135,8 +135,9 @@ using one in a calculation is rejected before the roll happens.
 ### Custom dice
 
 Square brackets are a die whose faces you write out. One face is picked, then whatever is
-on it is worked out — so a face can be a number, a word, or another roll. The die is drawn
-with the shape matching its face count.
+on it is worked out — so a face can be a number, a word, or another roll. A number lands
+on a die drawn with the shape matching the face count; a word is simply written out, since
+a shape behind a word only hides it.
 
 ```
 [1,1,1,1,1,6]           six faces, mostly ones — drawn as a d6
@@ -211,9 +212,14 @@ A variable that refers back to itself is caught at a fixed depth rather than han
   of its own rather than a number, in the order it was applied, so `10d6kh8kl5` reads
   `kept 8 highest` then `kept 5 lowest`. The verb and the count come first: a bracket too
   narrow for the whole phrase keeps its front, and `kept 5` says more than `lowest` does.
-  A variable rides along on its bracket as a name, and a subtotal that holds words shows
-  the words rather than a meaningless sum. A term whose value fills the whole row has no
-  bracket at all, since the headline already says it.
+  A variable rides along on its bracket as a name, written before the value so you know
+  what the number is before you read it; a short name always shows in full even where the
+  bracket is narrower, and a long one gives up letters rather than disappearing. A subtotal
+  that holds words shows the words rather than a meaningless sum, and a term whose value
+  fills the whole row has no bracket at all, since the headline already says it.
+
+  Brackets in the result mark where something reaches, so they are only drawn where there
+  is a reach to mark: a variable standing for one value is written bare.
 
   Past three dice a term overlaps its own dice so it never takes more room than three;
   the individual faces stop mattering there and the subtotal speaks for the term.

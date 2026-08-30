@@ -700,7 +700,7 @@
 
   function Die(roll, sides, uid) {
     return {
-      set: false, die: true, roll, sides, uid, check: null,
+      set: false, die: true, atom: true, roll, sides, uid, check: null,
       get dropped() { return !!roll.dropped; },
       set dropped(v) { roll.dropped = v; },
       get value() { return roll.v; },
@@ -717,7 +717,7 @@
   /** a word: 'success', 'failure', or anything the user quoted */
   function Str(word) {
     return {
-      set: false, die: false, word, check: null, dropped: false,
+      set: false, die: false, atom: true, word, check: null, dropped: false,
       get value() { return word; },
       raw() { return 0; },
       total() {
@@ -739,7 +739,7 @@
 
   function Val(v) {
     return {
-      set: false, die: false, check: null, dropped: false,
+      set: false, die: false, atom: true, check: null, dropped: false,
       get value() { return v; },
       raw() { return v; },
       total() { const c = checkTotal(this); return c === null ? v : c; },
@@ -795,7 +795,7 @@
   /** a face picked off a custom die, drawn as the die it came from */
   function CustomDie(inner, shape, uid) {
     return {
-      set: false, die: false, custom: true, check: null, dropped: false, uid, inner,
+      set: false, die: false, custom: true, atom: true, check: null, dropped: false, uid, inner,
       get value() { return inner.word !== undefined ? inner.word : inner.raw(); },
       get word() { return inner.word; },
       raw() { return inner.raw(); },
@@ -806,8 +806,14 @@
         const w = wordOf(this);
         const face = w !== null && w !== undefined ? w
           : (inner.word !== undefined ? inner.word : fmt(safeTotal(inner)));
-        const cls = ['die', 'custom', 's-' + shape];
         const mk = inheritClass(o, this);
+        /* A word does not sit on a face legibly, and the shape it was drawn from
+           says nothing once it has been drawn. Write it out instead. */
+        if (typeof face === 'string' && !/^-?\d+(\.\d+)?$/.test(face)) {
+          return '<span class="r-pick' + mk + (isDropped(o, this) ? ' dropped' : '') + '"' +
+            tag + ' title="custom die">' + esc(face) + '</span>';
+        }
+        const cls = ['die', 'custom', 's-' + shape];
         if (mk) cls.push(mk.trim());
         if (isDropped(o, this)) cls.push('dropped');
         const len = String(face).length;
@@ -1126,9 +1132,11 @@
         const v = evalNode(ast, ctx);
         ctx.mute = mute; ctx.depth--;
         const uid = uidOf(node, ctx);
+        // brackets are there to show how far the variable reaches; around a
+        // single value there is nothing to show, so they are only noise
         const wrapped = v.set
           ? SetVal(v.members, { uid, brackets: true, note: node.name, tag: 'w' })
-          : Group(v, uid, { note: node.name, tag: 'w' });
+          : Group(v, uid, { note: node.name, tag: 'w', bare: !!v.atom });
         return applyMods(wrapped, node.mods || [], null, ctx);
       }
 
@@ -1512,6 +1520,11 @@
 
   const PREVIEW_DEPTH = 6;
 
+  /** does this stand on its own, with nothing a bracket could clarify? */
+  const atomAst = (n) => !(n.mods && n.mods.length) &&
+    (n.t === 'num' || n.t === 'str' || n.t === 'word' || n.t === 'custom' ||
+     (n.t === 'dice' && n.qty === null));
+
   /** a die that has not been rolled, wearing its name rather than a face */
   function ghostDie(shape, face, tag, extra) {
     const size = face.length >= 4 ? ' v4' : (face.length === 3 ? ' v3' : (face.length === 2 ? ' v2' : ''));
@@ -1556,9 +1569,11 @@
         let ast;
         try { ast = varAst(node.name, src); } catch (e) { return name + cmp; }
         const inner = previewNode(ast, { vars: ctx.vars, depth: ctx.depth + 1, mute: true });
+        // as in the result: nothing to bracket when it is a single value
+        const open = atomAst(ast) ? '' : '<span class="r-brk"' + tag + '>(</span>';
+        const close = atomAst(ast) ? '' : '<span class="r-brk"' + tag + '>)</span>';
         return '<span class="r-grp"' + tag + noteAttr('data-note', [node.name]) + steps + '>' +
-          '<span class="r-brk"' + tag + '>(</span>' + inner +
-          '<span class="r-brk"' + tag + '>)</span></span>' + cmp;
+          open + inner + close + '</span>' + cmp;
       }
       /* being edited, both answers are still open, so both are spelled out */
       case 'ternary':
