@@ -69,7 +69,7 @@
 
   const LIMIT = {
     qty: 5000, sides: 1000000, explode: 500, reroll: 500,
-    totalDice: 20000, repeat: 1000, varDepth: 24
+    totalDice: 20000, repeat: 1000, varDepth: 24, combos: 48
   };
 
   /* ------------------------------------------------------------------- rng */
@@ -2485,6 +2485,33 @@
       try { r = runOne(src, n); } catch (e) { r = null; }
       return r && Object.assign({ src: u.src, times: u.times }, r);
     }).filter(Boolean);
+
+    /* The whole result is one value per unit, so what it can be is every way
+       of choosing one from each — `2(band)` over four words is sixteen, not
+       four. That multiplies out fast, so past a point it is left to what the
+       run actually turned up. */
+    const lists = [];
+    for (const g of groups) {
+      if (!g.words.length) continue;
+      for (let i = 0; i < g.times; i++) lists.push(g.words);
+    }
+    const size = lists.reduce((a, l) => a * l.length, 1);
+    if (lists.length && size <= LIMIT.combos) {
+      let combos = [''];
+      for (const l of lists) {
+        const next = [];
+        for (const head of combos) for (const w of l) next.push(head ? head + ', ' + w : w);
+        combos = next;
+      }
+      whole.words = combos;
+      const tally = {};
+      for (const c of combos) tally[c] = whole.tally[c] || 0;
+      whole.tally = tally;
+    } else if (lists.length) {
+      // too many to name, so report the ones that happened, commonest first
+      whole.words = Object.keys(whole.tally)
+        .sort((a, b) => whole.tally[b] - whole.tally[a]).slice(0, LIMIT.combos);
+    }
 
     return Object.assign({}, whole, {
       notation: p.notation,

@@ -314,8 +314,13 @@ A variable that refers back to itself is caught at a fixed depth rather than han
   share a scope and link to each other, while unrelated history entries stay put. What a
   variable rolls is deliberately left untagged — those dice have no place in the expression
   being edited — so hovering one lights the variable as a whole instead.
-* **Details** — Monte-Carlo distribution of the total (min / mean / median / max / std dev
-  / percentiles) with a histogram. Sample size adapts to keep it responsive.
+* **Details** — what the expression can come to, run against a Monte-Carlo sample whose
+  size adapts to stay responsive. A roll that makes several kinds of value is broken into
+  the smallest repeated piece and each is summarised in turn, then the total: `3d10`
+  reports the d10 and then the sum. It only splits where the pieces are independent —
+  keep, drop and advantage couple them. Words get a bar each, including the ones that
+  never turned up; numbers get the usual figures plus the smallest and largest the
+  expression could ever reach, worked out from the expression rather than watched for.
 * **Reference** — a gallery of every die that has a solid of its own, plus the full cheat
   sheet. From 1000px up it sits in a permanent rail on the left; below that it folds back
   into the drawer as a tab. That breakpoint is the single `wide` media query in `app.js`.
@@ -334,11 +339,11 @@ A variable that refers back to itself is caught at a fixed depth rather than han
   A roll shortcut loads the expression; a variable shortcut edits the value and never the
   name, since the name is what expressions refer to. A whole number gets a −/+ pair,
   which move by one, or by ten with shift or the right mouse button.
-* **Vars** and **Saved** — the same list twice over, since a variable and a saved roll are
-  the same thing: an expression named by its own `# name`. Each row is remove, bookmark,
-  the name it is called by, what it says, and a −/+ pair when that is a whole number.
-  Clicking the name puts a variable into the expression, or replaces the expression with
-  a saved roll — and <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back, as it does for anything
+* **Variables** and **Saved** — the same list twice over, since a variable and a saved
+  roll are the same thing: an expression named by its own `# name`. Each row is remove,
+  bookmark, the name it is called by, what it says, and a −/+ pair when that is a whole
+  number. Drag a row by its name to reorder the list. Clicking the name puts a variable
+  into the expression, or replaces the expression with a saved roll — and <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back, as it does for anything
   else that writes into the field. <kbd>Ctrl</kbd>+<kbd>S</kbd> saves what you are
   editing, under its `# name`.
 * **undo / redo** sit under the expression, for a screen with no keyboard to reach them

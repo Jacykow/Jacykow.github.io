@@ -56,7 +56,7 @@
        term the caret is in; wrap wraps that term. */
   const REFERENCE = [
     ['Dice', [
-      ['~d20', 'one die — a value', 'atom', 'One die is a value, not a set. Set modifiers like kh have nothing to work on and are refused.'],
+      ['~d20', 'one die — a value', 'atom', 'One die is a value, not a set. Set modifiers like kh have nothing to work on and are refused. Any positive number of sides works: a size with no solid of its own borrows the nearest one to draw with.'],
       ['~4d6', 'four dice — a set, summed when a value is needed', 'atom', 'A count makes a set. Summing is the only thing that ever turns one back into a value.'],
       ['~(2+2)~d6', 'computed quantity', 'atom', 'The bracket is worked out first and used as the number of dice.'],
       ['3d~(2*6)', 'computed number of sides', 'atom', 'Sides can be computed too, so a die can be as big as the maths makes it.']
@@ -352,12 +352,12 @@
   /* A first visit gets the three rolls almost everyone starts from, rather than
      an empty bar that says nothing about what the bar is for. */
   const FIRST_ROLLS = [
-    { expr: 'd20 # <d20>', mark: true },
-    { expr: 'd12 # <d12>', mark: true },
-    { expr: 'd10 # <d10>', mark: true },
-    { expr: 'd8 # <d8>', mark: true },
-    { expr: 'd6 # <d6>', mark: true },
     { expr: 'd4 # <d4>', mark: true },
+    { expr: 'd6 # <d6>', mark: true },
+    { expr: 'd8 # <d8>', mark: true },
+    { expr: 'd10 # <d10>', mark: true },
+    { expr: 'd12 # <d12>', mark: true },
+    { expr: 'd20 # <d20>', mark: true },
     { expr: '2d6 # 2x <d6>', mark: true }
   ];
   const loadSaved = () => {
@@ -832,9 +832,9 @@
       }
       if (token !== state.statsToken) return;
       el.details.innerHTML =
-        s.groups.map((g) => section(g.src + (g.times > 1 ? ' &times;' + g.times : ''), g)).join('') +
+        s.groups.map((g) => section(g.src + (g.times > 1 ? ' ×' + g.times : ''), g)).join('') +
         // the sum is only news when the whole thing comes to a number
-        (s.showWhole && s.numeric ? section(s.groups.length ? 'all of it, added up' : null, s) : '') +
+        (s.showWhole ? section(s.groups.length ? 'total' : null, s) : '') +
         '<div class="tailroom"></div>';
     }, 0);
   }
@@ -923,14 +923,15 @@
   function galleryHTML() {
     const dice = DICE_GALLERY.map((n) => {
       const shape = E.shapeFor(n);
+      const face = 'D' + n;
+      const size = face.length >= 4 ? ' v4' : (face.length === 3 ? ' v3' : ' v2');
       return '<div class="refdie" data-ins="d' + n + '" title="click to insert d' + n + '">' +
-        '<span class="die s-' + shape + '">' +
+        '<span class="die ghost s-' + shape + '">' +
           '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true"><use href="#sh-' + shape + '"/></svg>' +
-          '<span class="dieval">' + n + '</span>' +
-        '</span><code>d' + n + '</code></div>';
+          '<span class="dieval' + size + '">' + face + '</span>' +
+        '</span></div>';
     }).join('');
-    return '<div class="refgroup"><h3>The dice</h3><div class="refdice">' + dice + '</div>' +
-      '<div class="refrow"><span>Sizes without a solid of their own borrow the nearest one.</span></div></div>';
+    return '<div class="refgroup"><h3>The dice</h3><div class="refdice">' + dice + '</div></div>';
   }
 
   /* '4d6~kh3' -> grey '4d6', coloured 'kh3'. Odd segments are the coloured
@@ -1236,12 +1237,12 @@
       '<div class="varhint">' + L.hint + '</div>' +
       list.map((it, i) => {
         const err = L.error(it.expr);
-        return '<div class="lrow" data-kind="' + kind + '" data-i="' + i + '">' +
+        return '<div class="lrow" data-kind="' + kind + '" data-i="' + i + '" draggable="true">' +
           '<div class="lmain">' +
             '<button class="del" title="remove" tabindex="-1">&times;</button>' +
             '<button class="pin' + (it.mark ? ' on' : '') + '" tabindex="-1" ' +
               'title="show as a shortcut under the expression">★</button>' +
-            '<button class="lname" title="' + esc(L.nameHint) + '">' +
+            '<button class="lname" title="' + esc(L.nameHint) + ' — drag to reorder">' +
               (titleOf(it.expr) ? titleHTML(it.expr) : '—') + '</button>' +
             '<input class="lexpr" value="' + esc(it.expr) + '" spellcheck="false" ' +
               'placeholder="' + esc(L.placeholder) + '">' +
@@ -1259,6 +1260,43 @@
       inp.addEventListener('input', () => commitList(kind));
       inp.addEventListener('change', () => commitList(kind));
       inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') inp.blur(); });
+    });
+    wireDrag(kind, host);
+  }
+
+  /* Rows are dragged by their name — the one part that is not a field, and the
+     part you are looking at when you decide where something belongs. */
+  function wireDrag(kind, host) {
+    let from = -1;
+    host.querySelectorAll('.lrow').forEach((row) => {
+      row.addEventListener('dragstart', (ev) => {
+        if (!ev.target.closest('.lname')) { ev.preventDefault(); return; }
+        from = +row.getAttribute('data-i');
+        row.classList.add('lifted');
+        ev.dataTransfer.effectAllowed = 'move';
+        try { ev.dataTransfer.setData('text/plain', String(from)); } catch (e) { /* ok */ }
+      });
+      row.addEventListener('dragend', () => {
+        from = -1;
+        host.querySelectorAll('.lrow').forEach((r) => r.classList.remove('lifted', 'over'));
+      });
+      row.addEventListener('dragover', (ev) => {
+        if (from < 0) return;
+        ev.preventDefault();
+        host.querySelectorAll('.lrow').forEach((r) => r.classList.remove('over'));
+        row.classList.add('over');
+      });
+      row.addEventListener('drop', (ev) => {
+        if (from < 0) return;
+        ev.preventDefault();
+        const to = +row.getAttribute('data-i');
+        if (to === from) return;
+        const list = readList(kind);
+        list.splice(to, 0, list.splice(from, 1)[0]);
+        LISTS[kind].keep(list);
+        from = -1;
+        renderList(kind); renderShortcuts();
+      });
     });
   }
 

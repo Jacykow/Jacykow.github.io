@@ -70,6 +70,12 @@ name is drawn once — on its subtotal bracket — and never twice. A `{name}` i
 the label is the identifier expressions use when that differs from the title;
 `<dN>` in a title draws the die (`nameOf` / `titleOf` / `titleHTML`).
 
+**Details splits a roll into its repeated pieces** (`unitOf`) and summarises each,
+then the total — but only where the pieces are independent, since keep, drop and
+advantage couple them. What the total can be is every way of choosing one from
+each piece, which multiplies out fast, so past `LIMIT.combos` it falls back to
+what the run turned up.
+
 **Details says what could happen, not only what did.** `outcomes()` reads the
 tree rather than the run: `wordsOf` lists every word the result could be, in
 source order, and `boundsOf` is interval arithmetic giving the smallest and
