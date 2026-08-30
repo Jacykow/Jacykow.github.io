@@ -1,35 +1,61 @@
 /* ============================================================================
    Random Engine — dice notation parser, evaluator & explainer
    ----------------------------------------------------------------------------
-   There are exactly two structural types, and everything follows from them:
+   No DOM, no dependencies. Exposes window.DiceEngine; app.js does the rest.
 
-     value   a single number
+   TYPES. There are exactly two structural types, and everything follows:
+
+     value   one thing
      set     an ordered collection of values
 
-   A set becomes a value by being SUMMED — that is the only implicit reduction.
-   `,` builds a set, `N(expr)` repeats an expression into one, and `4d6` is
+   A set becomes a value by being SUMMED — the only implicit reduction there
+   is. `,` builds a set, `N(expr)` repeats an expression into one, and `4d6` is
    sugar for `4(d6)`. A set inside a set unpacks, so nesting never compounds.
+   Brackets only group: `(3d6+2d8)` is a value, `(3d6,2d8)` is a set, which is
+   why `kh` attaches to the second and not the first.
 
-   Modifiers fall into three kinds:
+   A value is a number, or a word. Words carry no number, so a word can only
+   ever be a result. Comparing produces one: `d6>4` reads success or failure.
 
-     die       e, r                      need a die to re-roll
-     element   min, max, s, f, cs, cf    apply to each member in turn
-     set       kh, kl, dh, dl, u         need a collection, error on a value
+   MODIFIERS declare the type they need, so every mismatch is caught before
+   anything is rolled:
 
-   On top of numbers there are result types. `s` yields a success check whose
-   members read as success/failure and cast to 1/0, so it can be used in
-   arithmetic. `f`, `cs` and `cf` yield checks that carry no number and cannot
-   be cast — using one as an operand is rejected before the roll happens.
+     die       e, r, u                   need dice to re-roll
+     element   min, max, s, f, cs, cf    applied to each member in turn
+     set       kh, kl, dh, dl            need a collection, error on a value
 
-     expr    := term (('+' | '-') term)*
+   Element modifiers distribute, and so does `?:` — `4d20>5?hit:miss` is four
+   comparisons and four choices, never one taken on the sum.
+
+   CHECKS. `s` says what a hit is and nothing about the rest, so its misses
+   stay blank; a bare comparison is a plain yes/no and names both sides. Only
+   the success check casts to a number (1/0). `f`, `cs` and `cf` are terminal
+   result types: using one as an operand is rejected before the roll.
+
+   GRAMMAR (recursive descent, one Parser per top-level item; every node keeps
+   the source span it came from, which is what drives highlighting and Explain):
+
+     expr    := sum ['?' expr ':' expr]
+     sum     := term (('+' | '-') term)*
      term    := power (('*' | '/' | '%') power)*
      power   := unary (('^' | '**') power)?
      unary   := ('-' | '+')? primary
-     primary := number ['(' list ')' | 'd' sides] modifier*
-              | '(' list ')' modifier*
-              | func '(' list ')'
+     primary := number ['(' list ')' | 'd' sides | word | custom] modifier*
+              | '(' list ')' modifier*  | '[' list ']' modifier*
+              | func '(' list ')'       | '{' name '}' modifier*
+              | '"' text '"' modifier*  | word modifier*
               | 'd' sides modifier*
      list    := expr (',' expr)*
+     modifier:= name [comparison]
+     comparison := ('=' | '!=' | '<' | '>' | '<=' | '>=') (integer | primary)
+
+   A modifier's comparison takes a plain integer where there is one, and
+   otherwise a primary — so `3d6>=5+1` is `(3d6>=5)+1` rather than a surprise,
+   while `4d6>d4` rolls a fresh d4 for every comparison it makes.
+
+   A top-level item of the form `name := expr` defines a variable for that one
+   expression. Variables hold source text and are re-parsed and re-rolled at
+   every occurrence, which is why `2atk` really is two rolls.
    ========================================================================== */
 (function (global) {
   'use strict';
@@ -720,28 +746,56 @@
       noteAttr('data-steps', noteList(item.mods, false));
   }
 
+  /* --------------------------------------------------------------- values
+     Every rolled thing answers the same questions, so they share one
+     prototype and each kind supplies only what differs:
+
+       raw()    the number underneath, never consulting the check
+       total()  the number it counts as, which a check can replace
+       value    what a comparison sees: a word if it has one, else raw()
+       cond()   true, false, or null when it is not a yes-or-no at all
+       html(o)  markup, with `o` carrying state inherited from above
+
+     raw() exists because total() can throw and the display must not: a
+     terminal result type has no number, yet still has to be drawn. */
+  const VALUE = {
+    set: false, die: false, atom: false, custom: false,
+    check: null, dropped: false, note: null, uid: 0, mods: null,
+    raw() { return 0; },
+    total() { const c = checkTotal(this); return c === null ? this.raw() : c; },
+    cond() {
+      if (this.check) return this.check.hit;
+      return this.inner ? this.inner.cond() : null;
+    },
+    get value() {
+      const w = this.word;
+      return (w === undefined || w === null) ? this.raw() : w;
+    },
+    /* a word belongs to whatever is innermost, so a wrapper reports its own */
+    get word() { return this.inner ? this.inner.word : this._word; },
+    set word(w) { this._word = w; },
+    html() { return ''; }
+  };
+  const value = (spec) => Object.assign(Object.create(VALUE), spec);
+
+  /** the classes a value wears once state from above is folded in */
+  const stateCls = (o, item) => inheritClass(o, item) + (isDropped(o, item) ? ' dropped' : '');
+
   function Die(roll, sides, uid) {
-    return {
-      set: false, die: true, atom: true, roll, sides, uid, check: null,
-      get dropped() { return !!roll.dropped; },
-      set dropped(v) { roll.dropped = v; },
-      get value() { return roll.v; },
+    return value({
+      die: true, atom: true, roll, sides, uid,
       raw() { return roll.v; },
-      total() { const c = checkTotal(this); return c === null ? roll.v : c; },
-      cond() { return this.check ? this.check.hit : null; },
       html(o) {
         const tag = uid ? ' data-x="d' + uid + '"' : '';
         return (o && o.plain) ? chipHTML(this, tag, o) : dieHTML(this, shapeFor(sides), tag, o);
       }
-    };
+    });
   }
 
-  /** a word: 'success', 'failure', or anything the user quoted */
+  /** a word: 'success', 'failure', or anything the user wrote */
   function Str(word) {
-    return {
-      set: false, die: false, atom: true, word, check: null, dropped: false,
-      get value() { return word; },
-      raw() { return 0; },
+    return value({
+      atom: true, word,
       total() {
         throw new DiceError('"' + word + '" is a word, not a number, ' +
           'so it cannot be used in a calculation');
@@ -753,56 +807,45 @@
         return null;
       },
       html(o) {
-        return '<span class="r-str' + inheritClass(o, this) +
-          (isDropped(o, this) ? ' dropped' : '') + '">' + esc(word) + '</span>';
+        return '<span class="r-str' + stateCls(o, this) + '">' + esc(word) + '</span>';
       }
-    };
+    });
   }
 
   function Val(v) {
-    return {
-      set: false, die: false, atom: true, check: null, dropped: false,
-      get value() { return v; },
+    return value({
+      atom: true,
       raw() { return v; },
-      total() { const c = checkTotal(this); return c === null ? v : c; },
-      cond() { return this.check ? this.check.hit : null; },
       html(o) {
-        return '<span class="r-num' + inheritClass(o, this) +
-          (isDropped(o, this) ? ' dropped' : '') + '">' + fmt(v) + '</span>';
+        return '<span class="r-num' + stateCls(o, this) + '">' + fmt(v) + '</span>';
       }
-    };
+    });
   }
 
   /* A worked-out expression — a sum, a negation, a function call. It keeps its
      parts rather than a baked string, so state reaching it later (a discard, a
      check, the plain-chip fallback) still travels down to the dice inside. */
   function Expr(v, parts) {
-    return {
-      set: false, die: false, check: null, dropped: false, parts,
-      get value() { return v; },
+    return value({
+      parts,
       raw() { return v; },
-      total() { const c = checkTotal(this); return c === null ? v : c; },
-      cond() { return this.check ? this.check.hit : null; },
       html(o) {
         const co = ctxFor(o, this);
         return parts.map((p) => typeof p === 'string' ? p : p.html(co)).join('');
       }
-    };
+    });
   }
 
   /** a bracket around a value: still a value, drawn with its own subtotal */
   function Group(inner, uid, opts) {
     opts = opts || {};
-    return {
-      set: false, die: false, check: null, dropped: false, uid, inner,
-      note: opts.note || null,
-      get value() { return inner.word !== undefined ? inner.word : inner.raw(); },
-      get word() { return inner.word; },
+    return value({
+      uid, inner, note: opts.note || null,
       raw() { return inner.raw(); },
       total() { const c = checkTotal(this); return c === null ? inner.total() : c; },
-      cond() { return this.check ? this.check.hit : (inner.cond ? inner.cond() : null); },
       html(o) {
         const tag = uid ? ' data-x="' + (opts.tag || 's') + uid + '"' : '';
+        // a word has no subtotal to draw a bracket for
         const sum = inner.word !== undefined ? ''
           : ' data-sum="' + esc(fmt(safeTotal(inner))) + '"' + stateAttr(o, this);
         const co = ctxFor(o, this);
@@ -811,29 +854,26 @@
         return '<span class="r-grp"' + tag + sum + '>' + (opts.prefix || '') +
           open + inner.html(co) + close + '</span>';
       }
-    };
+    });
   }
 
-  /** a face picked off a custom die, drawn as the die it came from */
+  /** a face picked off a custom die */
   function CustomDie(inner, shape, uid) {
-    return {
-      set: false, die: false, custom: true, atom: true, check: null, dropped: false, uid, inner,
-      get value() { return inner.word !== undefined ? inner.word : inner.raw(); },
-      get word() { return inner.word; },
+    return value({
+      custom: true, atom: true, uid, inner,
       raw() { return inner.raw(); },
       total() { const c = checkTotal(this); return c === null ? inner.total() : c; },
-      cond() { return this.check ? this.check.hit : (inner.cond ? inner.cond() : null); },
       html(o) {
         const tag = uid ? ' data-x="c' + uid + '"' : '';
         const w = wordOf(this);
-        const face = w !== null && w !== undefined ? w
-          : (inner.word !== undefined ? inner.word : fmt(safeTotal(inner)));
+        const face = (w === null || w === undefined)
+          ? (inner.word !== undefined ? inner.word : fmt(safeTotal(inner))) : w;
         const mk = inheritClass(o, this);
         /* A word does not sit on a face legibly, and the shape it was drawn from
            says nothing once it has been drawn. Write it out instead. */
         if (typeof face === 'string' && !/^-?\d+(\.\d+)?$/.test(face)) {
-          return '<span class="r-pick' + mk + (isDropped(o, this) ? ' dropped' : '') + '"' +
-            tag + ' title="custom die">' + esc(face) + '</span>';
+          return '<span class="r-pick' + stateCls(o, this) + '"' + tag +
+            ' title="custom die">' + esc(face) + '</span>';
         }
         const cls = ['die', 'custom', 's-' + shape];
         if (mk) cls.push(mk.trim());
@@ -845,7 +885,7 @@
           '<use href="#sh-' + shape + '"/></svg>' +
           '<span class="dieval' + size + '">' + esc(String(face)) + '</span></span>';
       }
-    };
+    });
   }
 
   /* ------------------------------------------------------------ variables */
@@ -896,10 +936,9 @@
 
   function SetVal(members, opts) {
     opts = opts || {};
-    return {
-      set: true, members, check: null, dropped: false, uid: opts.uid,
+    return value({
+      set: true, members, uid: opts.uid,
       brackets: !!opts.brackets, prefix: opts.prefix || '', note: opts.note || null,
-      get value() { return this.raw(); },
       raw() { let s = 0; for (const m of members) if (!m.dropped) s += m.raw(); return s; },
       live() { return members.filter((m) => !m.dropped); },
       total() {
@@ -942,7 +981,7 @@
         return '<span class="r-term' + (squeezed ? ' squeezed' : '') + '"' + tag +
           (members.length > 1 ? sum : '') + squeezeStyle(members.length) + '>' + body + '</span>';
       }
-    };
+    });
   }
 
   /* ------------------------------------------------------------- markup */
@@ -1215,6 +1254,13 @@
           case '/': v = a / b; break;
           case '%': v = a % b; break;
           case '^': v = Math.pow(a, b); break;
+        }
+        // Infinity and NaN mean nothing as a roll, so they are an error here
+        // rather than a total nobody can read
+        if (!isFinite(v)) {
+          throw new DiceError(b === 0 && (node.op === '/' || node.op === '%')
+            ? 'cannot divide by zero'
+            : 'that works out to a number too big to use', node.opSp && node.opSp[0]);
         }
         const tag = uidOf(node, ctx) ? ' data-x="o' + node.uid + '"' : '';
         return Expr(v, [l, '<span class="r-op"' + tag + '>' + esc(node.op) + '</span>', r]);
@@ -1651,17 +1697,32 @@
   /* ==========================================================================
      PUBLIC API
      ========================================================================== */
+  /* Cutting the source up happens before the parser sees it, so it has to know
+     as much about brackets and quotes as the parser does — a comma inside
+     either is part of what it sits in, not a separator. */
   function splitParts(src) {
     const out = [];
-    let depth = 0, start = 0;
+    let depth = 0, quoted = false, start = 0;
     for (let i = 0; i < src.length; i++) {
       const c = src[i];
+      if (c === '"') { quoted = !quoted; continue; }
+      if (quoted) continue;
       if (c === '(' || c === '[') depth++;
       else if (c === ')' || c === ']') depth--;
       else if (c === ',' && depth === 0) { out.push({ text: src.slice(start, i), a: start }); start = i + 1; }
     }
     out.push({ text: src.slice(start), a: start });
     return out;
+  }
+
+  /** where the label starts, or -1. a quoted # is part of the word */
+  function labelAt(src) {
+    let quoted = false;
+    for (let i = 0; i < src.length; i++) {
+      if (src[i] === '"') quoted = !quoted;
+      else if (src[i] === '#' && !quoted) return i;
+    }
+    return -1;
   }
 
   const ASSIGN_RE = /^\s*([a-zA-Z_]+)\s*:=/;
@@ -1672,7 +1733,7 @@
     if (!src) throw new DiceError('nothing to roll', 0);
 
     let label = null, labelSp = null;
-    const hash = src.indexOf('#');
+    const hash = labelAt(src);
     if (hash >= 0) {
       label = src.slice(hash + 1).trim();
       labelSp = [hash, src.length];

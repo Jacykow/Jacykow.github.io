@@ -134,7 +134,9 @@
       ['d6e~=6', 'exactly', 'suffix'],
       ['d6e~>=5', 'at least', 'suffix'],
       ['4d6r~<=2', 'at most', 'suffix'],
-      ['4d6r~!=3', 'anything but', 'suffix']
+      ['4d6r~!=3', 'anything but', 'suffix'],
+      ['4d6~>d4', 'against a fresh roll each time', 'suffix'],
+      ['loot~=gem', 'against a word', 'suffix']
     ]]
   ];
 
@@ -578,19 +580,14 @@
     });
   }
 
-  function insertAtCaret(text) {
-    const t = el.ta;
-    const a = t.selectionStart, b = t.selectionEnd;
-    t.value = t.value.slice(0, a) + text + t.value.slice(b);
-    t.focus();
-    t.setSelectionRange(a + text.length, a + text.length);
-    onInput();
-  }
-
   /* ------------------------------------------------- placement-aware insert
-     Reference snippets say where they attach: `(_)kh3` hangs off a term,
-     `floor(_)` wraps one. Find the innermost dice term or bracket the caret
-     sits in and act on that, so clicking builds on what is already typed. */
+     Reference snippets say where they attach: `kh3` hangs off a term,
+     `max(_)` wraps one. Find the innermost thing a modifier could attach to
+     that the caret sits in, and act on that, so clicking builds on what is
+     already typed. */
+  const ATTACHABLE = { dice: 1, paren: 1, set: 1, rep: 1, custom: 1, word: 1 };
+  const KIDS = ['l', 'r', 'v', 'qty', 'sides', 'cond', 'yes', 'no', 'count'];
+
   function targetSpan() {
     if (!state.inspect) return null;
     const p = state.inspect.parsed, off = p.offset;
@@ -599,13 +596,14 @@
 
     (function walk(n) {
       if (!n || typeof n !== 'object') return;
-      if (n.sp && (n.t === 'dice' || n.t === 'group' || n.t === 'paren')) {
+      if (n.sp && ATTACHABLE[n.t]) {
         if (!last || n.sp[1] > last.sp[1]) last = n;
         if (pos >= n.sp[0] && pos <= n.sp[1] &&
             (!best || (n.sp[1] - n.sp[0]) < (best.sp[1] - best.sp[0]))) best = n;
       }
-      for (const k of ['l', 'r', 'v', 'sub', 'qty', 'sides']) walk(n[k]);
+      for (const k of KIDS) walk(n[k]);
       if (n.args) n.args.forEach(walk);
+      if (n.items) n.items.forEach(walk);
     }({ args: p.parts.map((x) => x.ast) }));
 
     const node = best || last;
