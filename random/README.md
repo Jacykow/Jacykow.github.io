@@ -323,20 +323,31 @@ A variable that refers back to itself is caught at a fixed depth rather than han
   A roll shortcut loads the expression; a variable shortcut edits the value and never the
   name, since the name is what expressions refer to. A whole number gets a −/+ pair,
   which move by one, or by ten with shift or the right mouse button.
-* **Vars** — the named expressions. Each row parses as you type and says what is wrong
-  underneath; an integer gets a −/+ pair. Remove sits ahead of the name, where it is an
-  easy target, and only the two fields take <kbd>Tab</kbd>.
-* **Saved** — expressions kept in `localStorage`. <kbd>Ctrl</kbd>+<kbd>S</kbd> to save.
-* **Copy link** — the address bar already holds the whole state, so this only puts it
-  on the clipboard.
+* **Vars** and **Saved** — the same list twice over, since a variable and a saved roll are
+  the same thing: an expression named by its own `# name`. Each row is remove, bookmark,
+  the name it is called by, what it says, and a −/+ pair when that is a whole number.
+  Clicking the name puts a variable into the expression, or replaces the expression with
+  a saved roll — and <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back, as it does for anything
+  else that writes into the field. <kbd>Ctrl</kbd>+<kbd>S</kbd> saves what you are
+  editing, under its `# name`.
+* **undo / redo** sit under the expression, for a screen with no keyboard to reach them
+  from.
+* **Setup** — export and import. A *setup* is your saved rolls and your variables
+  together, carried in one link.
 
-The URL carries the expression being edited, every variable and every saved roll, and
-keeps up as you work. A bare hash is just an expression (`#4d6dl1`), readable and
-hand-editable; add a variable or a saved roll and it becomes a packed payload instead.
-Opening someone else's link merges their variables and saved rolls into yours rather
-than replacing them. The fragment never reaches the server, so length is only a
-question of what a browser holds — a full saved list of 60 comes to about 4KB, which
-is comfortable everywhere, though some chat clients truncate links near that size.
+### Two kinds of link
+
+They are for two different things:
+
+* **An expression link** is what the address bar holds — just the roll, plainly readable
+  (`#2d20kh1+5`), updated when you roll. Copy it out of the browser and send it to
+  someone. **Copy link** in the top bar puts it on the clipboard.
+* **A setup link** carries every saved roll and variable. Opening one takes on that setup
+  whole; pasting one into the Setup tab lists what it holds and waits to be told. The
+  setup it replaced is kept, and one button puts it back.
+
+Neither reaches the server — a fragment never leaves the browser — so length is only a
+question of what a browser holds, which a setup of any sane size comes nowhere near.
 
 The tool drawer collapses to just its tab strip via the chevron on the right, handing the
 full screen to the results — worth it on a phone. The choice is remembered. Layout uses

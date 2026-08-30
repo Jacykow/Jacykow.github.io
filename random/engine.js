@@ -720,7 +720,14 @@
     const c = cv.check;
     if (!c || !c.op) return cv.html();
     const op = c.hit ? c.op : CMP_NEG[c.op];
-    return cv.html() + '<span class="r-cmp">' + CMP_SYM[op] + '</span>' + sideHTML(c.rhs);
+    let out = cv.html() + '<span class="r-cmp">' + CMP_SYM[op] + '</span>' + sideHTML(c.rhs);
+    /* In a chain the arm that held says only half of it. Naming the arm that
+       failed just before gives the band both its edges. */
+    if (c.also) {
+      out += '<span class="r-kw">and</span>' +
+        '<span class="r-cmp">' + CMP_SYM[c.also.op] + '</span>' + sideHTML(c.also.rhs);
+    }
+    return out;
   }
 
   const SOLIDS = {
@@ -1394,13 +1401,18 @@
         const uid = uidOf(node, ctx);
         const tag = uid ? ' data-x="b' + uid + '"' : '';
         const answer = (cv) => {
-          let taken = null;
+          let taken = null, before = null;
           for (const arm of node.arms) {
             const rhs = cpEval(arm.cp, ctx);
             const hit = compare(arm.cp.op, cv.value, rhs.v);
             // the last comparison tried is the one a miss reads as the opposite of
             cv.check = { kind: arm.check, hit, bare: arm.bare, op: arm.cp.op, rhs };
+            // ...and the one before it is the band's other edge
+            if (hit && before) {
+              cv.check.also = { op: CMP_NEG[before.op], rhs: before.rhs };
+            }
             if (hit) { taken = arm; break; }
+            before = { op: arm.cp.op, rhs };
           }
           const out = evalNode(taken ? taken.then : node.otherwise, ctx);
           const pre = '<span class="r-cond"' + tag + '>' + condHTML(cv) +

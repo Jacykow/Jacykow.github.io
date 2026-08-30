@@ -89,11 +89,16 @@ rendered as a `Ref` that holds no `inner`, so its dice are counted once.
   padding and line height must match exactly or the caret drifts.
 - **Cutting the source up happens before the parser sees it** (`splitParts`,
   `labelAt`), so those two have to know about brackets and quotes independently.
-- **The URL is the state**, written through `replaceState` — Safari rate-limits
-  that to roughly a hundred calls per half minute, so the write is debounced and
-  must stay that way. A bare hash is an expression; a `~` hash is a packed
-  payload. Reading one merges, so a shared link cannot cost you your own saved
-  rolls.
+- **Two kinds of link, for two jobs.** The address bar holds the expression and
+  nothing else, written on a roll — never on a keystroke, because Safari
+  rate-limits `replaceState` to about a hundred calls per half minute. A setup
+  link (`#setup=`) carries the saved rolls and variables; it is adopted whole,
+  and what it replaced is stashed so it can be had back.
+- **Everything that writes into the field goes through `typeInto`**, which uses
+  `execCommand('insertText')` so the browser keeps its own undo history.
+  Assigning `.value` wipes it, and then Ctrl+Z does nothing.
+- **Vars and Saved are one list rendered twice** (`LISTS`, `renderList`). They
+  differ only in where they are stored and what clicking the name does.
 - **Reference clicks must never leave the field unparseable.** `applySnippet`
   builds candidates in preference order and takes the first that parses;
   refusing the click is an acceptable outcome.

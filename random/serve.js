@@ -12,7 +12,8 @@ const TYPES = {
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon'
+  '.ico': 'image/x-icon',
+  '.md': 'text/plain; charset=utf-8'   // the reference links to the README
 };
 
 http.createServer((req, res) => {

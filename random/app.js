@@ -38,7 +38,7 @@
     spans: [],         // spans actually painted (overlaps removed)
     error: null,
     log: [],           // [{roll, expanded}] newest first
-    activeTab: 'explain',
+    activeTab: window.matchMedia('(min-width: 1000px)').matches ? 'explain' : 'reference',
     statsToken: 0,
     curRow: null,      // Explain row the caret last sat on
     hot: null, hotScope: null   // token currently hovered, and in which expression
@@ -56,98 +56,98 @@
        term the caret is in; wrap wraps that term. */
   const REFERENCE = [
     ['Dice', [
-      ['~d20', 'one die — a value', 'atom'],
-      ['~4d6', 'four dice — a set, summed when a value is needed', 'atom'],
-      ['~(2+2)~d6', 'computed quantity', 'atom'],
-      ['3d~(2*6)', 'computed number of sides', 'atom']
+      ['~d20', 'one die — a value', 'atom', 'One die is a value, not a set. Set modifiers like kh have nothing to work on and are refused.'],
+      ['~4d6', 'four dice — a set, summed when a value is needed', 'atom', 'A count makes a set. Summing is the only thing that ever turns one back into a value.'],
+      ['~(2+2)~d6', 'computed quantity', 'atom', 'The bracket is worked out first and used as the number of dice.'],
+      ['3d~(2*6)', 'computed number of sides', 'atom', 'Sides can be computed too, so a die can be as big as the maths makes it.']
     ]],
     ['Sets', [
-      ['~(~d6,d8~)', 'a set built by listing values', 'atom'],
-      ['~4(~d10+d6~)', 'repeat an expression into a set of 4', 'atom'],
-      ['~2(~d10,2d6~)', 'sets inside sets unpack', 'atom'],
-      ['(d10,~-~2d6)', 'a minus flips every member', 'atom']
+      ['~(~d6,d8~)', 'a set built by listing values', 'atom', 'The comma is what builds a set. Whitespace never does: d10-2d6 and d10 -2d6 are the same roll.'],
+      ['~4(~d10+d6~)', 'repeat an expression into a set of 4', 'atom', '4d6 is shorthand for 4(d6). Anything can be repeated this way, not just a die.'],
+      ['~2(~d10,2d6~)', 'sets inside sets unpack', 'atom', 'Nesting never compounds — the inner set is flattened into the outer one.'],
+      ['(d10,~-~2d6)', 'a minus flips every member', 'atom', 'A minus in front of a set negates each member rather than the sum.']
     ]],
     ['Advantage', [
-      ['2d6~a', 'roll it all again, keep the better total', 'suffix'],
-      ['2d6~da', 'keep the worse total', 'suffix'],
-      ['2d6~a3', 'best of three', 'suffix'],
-      ['d20~a', 'the familiar one', 'suffix']
+      ['2d6~a', 'roll it all again, keep the better total', 'suffix', 'Everything to the left is rolled again and the better result kept. Each attempt is summed before they are compared, so this is the better total, not the better die. It has to be the last modifier.'],
+      ['2d6~da', 'keep the worse total', 'suffix', 'The same, keeping the worse.'],
+      ['2d6~a3', 'best of three', 'suffix', 'The number is how many attempts to make in total.'],
+      ['d20~a', 'the familiar one', 'suffix', 'On a single die this is the usual advantage roll; 2d20kh1 says the same thing.']
     ]],
     ['Keep & drop', [
-      ['4d6~kh3', 'keep the highest 3 — needs a set', 'suffix'],
-      ['2d20~kl1', 'keep the lowest die', 'suffix'],
+      ['4d6~kh3', 'keep the highest 3 — needs a set', 'suffix', 'Keep and drop need a set. On one value there is nothing to choose between, and it is refused before the roll.'],
+      ['2d20~kl1', 'keep the lowest die', 'suffix', 'This picks a die. To pick between whole totals instead, use da.'],
       ['4d6~dl1', 'drop the lowest', 'suffix'],
       ['4d6~dh1', 'drop the highest', 'suffix'],
-      ['(3d6,2d8)~kh3', 'best 3 across a listed set', 'suffix']
+      ['(3d6,2d8)~kh3', 'best 3 across a listed set', 'suffix', 'Brackets only group. (3d6+2d8) is a value and refuses kh; (3d6,2d8) is a set and takes it.']
     ]],
     ['Exploding', [
-      ['d6~e', 'roll again and add when it lands on 6', 'suffix'],
-      ['d6~ei', 'keep exploding while it hits 6', 'suffix'],
+      ['d6~e', 'roll again and add when it lands on 6', 'suffix', 'Explode needs dice, so it cannot attach to a bracket. The plain letter does it once.'],
+      ['d6~ei', 'keep exploding while it hits 6', 'suffix', 'A trailing i means for as long as it keeps qualifying, up to a safety limit.'],
       ['d6~e5', 'explode on 5 or more', 'suffix'],
-      ['d6~ep', 'penetrating: the extra die takes -1', 'suffix'],
+      ['d6~ep', 'penetrating: the extra die takes -1', 'suffix', 'Every extra roll comes in one lower.'],
       ['d6~epi', 'penetrating, repeated', 'suffix']
     ]],
     ['Re-rolling', [
-      ['4d6~r', 're-roll a 1, once', 'suffix'],
-      ['4d6~ri', 're-roll 1s until they stop', 'suffix'],
+      ['4d6~r', 're-roll a 1, once', 'suffix', 'The new value stands. The die shows what it was before, struck out.'],
+      ['4d6~ri', 're-roll 1s until they stop', 'suffix', 'Repeats while it keeps qualifying.'],
       ['4d6~r2', 're-roll 2 and below, once', 'suffix'],
-      ['4d10~u', 'force every die to a different value', 'suffix'],
+      ['4d10~u', 'force every die to a different value', 'suffix', 'Duplicates are re-rolled. Needs dice, and a set of them.'],
       ['4d10~u3', 'give up after three attempts', 'suffix']
     ]],
     ['Results', [
-      ['3d6~s5', 'mark each 5+ a success — counts as 1', 'suffix'],
-      ['3d6~>=5', 'the same, with s left out', 'suffix'],
-      ['3d6~f2', 'mark each 2 or less a failure', 'suffix'],
-      ['2d20~cs19', 'mark 19+ a critical success', 'suffix'],
+      ['3d6~s5', 'mark each 5+ a success — counts as 1', 'suffix', 'Writing the s says what a hit is and nothing about the rest, so a miss stays blank. A hit counts as 1, so this can still be used in a calculation.'],
+      ['3d6~>=5', 'the same, with s left out', 'suffix', 'A bare comparison is a plain yes or no, so it names both sides: success or failure.'],
+      ['3d6~f2', 'mark each 2 or less a failure', 'suffix', 'A failure check carries no number, so using it in a calculation is refused before the roll.'],
+      ['2d20~cs19', 'mark 19+ a critical success', 'suffix', 'A result type with no number of its own. If criticals are possible at all, the tally shows a nought when none turn up.'],
       ['2d20~cf2', 'mark 2 or less a critical failure', 'suffix']
     ]],
     ['Clamp', [
-      ['4d6~min2', 'treat any face below 2 as 2', 'suffix'],
+      ['4d6~min2', 'treat any face below 2 as 2', 'suffix', 'Clamps a face rather than re-rolling it; the die shows what it was.'],
       ['4d6~max5', 'treat any face above 5 as 5', 'suffix']
     ]],
     ['Maths', [
       ['2d6~+2', 'add', 'suffix'],
       ['2d6~-2', 'subtract', 'suffix'],
-      ['2d6~*2', 'multiply — the set is summed first', 'suffix'],
+      ['2d6~*2', 'multiply — the set is summed first', 'suffix', 'A set is summed before multiplying, never multiplied out member by member.'],
       ['2d6~/2', 'divide', 'suffix'],
       ['2d6~%2', 'remainder', 'suffix'],
       ['2d6~^2', 'raise to a power', 'suffix'],
-      ['~max(~d20,10~)', 'the largest value', 'wrap'],
+      ['~max(~d20,10~)', 'the largest value', 'wrap', 'One of the two functions left. Each argument is reduced to a value first.'],
       ['~min(~d20,10~)', 'the smallest value', 'wrap']
     ]],
     ['Words & choices', [
-      ['d20>=15~?hit:miss', 'pick between two results', 'suffix'],
+      ['d20>=15~?hit:miss', 'pick between two results', 'suffix', 'The choice distributes exactly as the comparison does: 4d20>10?hit:miss is four choices, not one taken on the sum.'],
       ['~\"a long word\"', 'a quoted word, spaces allowed', 'atom'],
-      ['~hit', 'a bare word — a variable if one is set', 'atom'],
-      ['~{atk}', 'always the variable, never a word', 'atom']
+      ['~hit', 'a bare word — a variable if one is set', 'atom', 'A bare word becomes a variable when one of that name exists, and stays a word otherwise.'],
+      ['~{atk}', 'always the variable, never a word', 'atom', 'Insists on the variable, and says so if none is set.']
     ]],
     ['Variables', [
-      ['~atk:=d20+5,~2atk', 'set one for this expression only', 'prefix'],
-      ['~2atk', 'used twice means rolled twice', 'atom'],
-      ['~roll::=2d6,~roll', 'rolled once, however often it is named', 'prefix']
+      ['~atk:=d20+5,~2atk', 'set one for this expression only', 'prefix', 'Has to stand as its own top-level item. It shadows a variable of the same name in the panel, and is worked out afresh at every mention.'],
+      ['~2atk', 'used twice means rolled twice', 'atom', 'A variable holds text, not a result, so every mention is a fresh roll.'],
+      ['~roll::=2d6,~roll', 'rolled once, however often it is named', 'prefix', 'The opposite of :=. Rolled once, so a chain of comparisons can ask about the same result several times. It stands for what the roll came to, so it is a value and never a set.']
     ]],
     ['Chained choices', [
-      ['d6>4?yes~:>2?maybe~:no', 'more comparisons on the same roll', 'append'],
-      ['(2d6)>=10?good~:>=7?mixed~:bad', 'bracket what the chain is about', 'atom']
+      ['d6>4?yes~:>2?maybe~:no', 'more comparisons on the same roll', 'append', 'An else that opens with a comparison carries on about the same subject. The subject is worked out once and each comparison tried in the order written.'],
+      ['(2d6)>=10?good~:>=7?mixed~:bad', 'bracket what the chain is about', 'atom', 'A comparison binds to a term, not a sum, so 2d6+3>=10 would compare the 3. Bracket what the chain is about.']
     ]],
     ['Custom dice', [
-      ['~[1,1,1,1,1,6]', 'six faces, mostly ones', 'atom'],
-      ['~[hit,hit,miss]', 'faces can be words', 'atom'],
-      ['~[d6,d10]', 'a face can be another roll', 'atom'],
+      ['~[1,1,1,1,1,6]', 'six faces, mostly ones', 'atom', 'A die whose faces you write out. It is drawn with the shape matching the face count.'],
+      ['~[hit,hit,miss]', 'faces can be words', 'atom', 'A face that is a word is written out rather than fitted onto a die.'],
+      ['~[d6,d10]', 'a face can be another roll', 'atom', 'One face is picked, then whatever is written on it is worked out.'],
       ['~3[a,b]', 'roll a custom die three times', 'atom']
     ]],
     ['Whole roll', [
-      ['~6x~4d6dl1', 'repeat the whole expression 6 times', 'prefix'],
-      ['2d6~,3d8', 'separate rolls, reported together', 'append'],
-      ['2d20kh1~#attack', 'label, ignored by the maths', 'append']
+      ['~6x~4d6dl1', 'repeat the whole expression 6 times', 'prefix', 'Rolls the whole expression separately that many times and reports each.'],
+      ['2d6~,3d8', 'separate rolls, reported together', 'append', 'At the top level a comma starts another roll. Inside brackets the same comma builds a set.'],
+      ['2d20kh1~#attack', 'label, ignored by the maths', 'append', 'The label names the roll. It is also what a saved roll or a variable is called, and saving needs one.']
     ]],
     ['Comparisons', [
       ['d6e~=6', 'exactly', 'suffix'],
       ['d6e~>=5', 'at least', 'suffix'],
       ['4d6r~<=2', 'at most', 'suffix'],
       ['4d6r~!=3', 'anything but', 'suffix'],
-      ['4d6~>d4', 'against a fresh roll each time', 'suffix'],
-      ['loot~=gem', 'against a word', 'suffix']
+      ['4d6~>d4', 'against a fresh roll each time', 'suffix', 'The other side of an explicit comparison can be any expression that works out to one value, rolled again for every comparison it takes part in.'],
+      ['loot~=gem', 'against a word', 'suffix', 'Words compare by being the same word.']
     ]]
   ];
 
@@ -176,7 +176,17 @@
      base64 payload. The fragment never reaches the server, so the only real
      ceiling is what a browser will hold, which a saved list of 60 comes
      nowhere near. */
-  const URL_TAG = '~';
+  /* There are two kinds of link, because they are for two different things.
+
+     The address bar holds only the expression, plainly readable and updated
+     when you roll, so a link copied from the browser is a roll you can send
+     someone. A setup link is asked for, and carries the saved rolls and the
+     variables: opening one adopts it whole, while pasting one into the Setup
+     tab lists what it holds and waits to be told.
+
+     Neither reaches the server — a fragment never leaves the browser. */
+  const SETUP_TAG = 'setup=';
+  const LS_UNDO = 're.setup.prev';
 
   const b64 = {
     enc(s) {
@@ -190,71 +200,66 @@
     }
   };
 
-  function urlPayload() {
-    const vars = loadVars().filter((v) => nameOf(v.expr));
-    const saved = loadSaved();
-    const expr = el.ta.value;
-    if (!vars.length && !saved.length) return encodeURIComponent(expr.trim());
-    return URL_TAG + b64.enc(JSON.stringify({
-      e: expr,
-      v: vars.map((v) => [v.expr, v.mark ? 1 : 0]),
-      s: saved.map((x) => [x.expr, x.mark ? 1 : 0])
+  const here = () => location.origin === 'null'
+    ? location.href.split('#')[0] : location.origin + location.pathname;
+
+  /* Safari rate-limits replaceState to about a hundred calls per half minute,
+     so this is only ever called on a roll, never on a keystroke. */
+  function syncURL() {
+    const e = el.ta.value.trim();
+    try {
+      history.replaceState(null, '', e ? '#' + encodeURIComponent(e) : location.pathname);
+    } catch (err) { /* file:// refuses replaceState */ }
+  }
+
+  function setupLink() {
+    return here() + '#' + SETUP_TAG + b64.enc(JSON.stringify({
+      v: loadVars().filter((v) => nameOf(v.expr)).map((v) => [v.expr, v.mark ? 1 : 0]),
+      s: loadSaved().filter((x) => nameOf(x.expr)).map((x) => [x.expr, x.mark ? 1 : 0])
     }));
   }
 
-  /* Safari rate-limits replaceState to about a hundred calls per half minute,
-     which typing would blow through, so the write waits for a pause. */
-  let urlTimer = null;
-  function syncURL(now) {
-    clearTimeout(urlTimer);
-    const write = () => {
-      const p = urlPayload();
-      try {
-        history.replaceState(null, '', p ? '#' + p : location.pathname + location.search);
-      } catch (e) { /* file:// refuses replaceState */ }
-    };
-    if (now) write(); else urlTimer = setTimeout(write, 400);
-  }
-
-  function readURL() {
-    const raw = location.hash.replace(/^#/, '');
-    if (!raw) return null;
-    if (raw[0] !== URL_TAG) {
-      try { return { expr: decodeURIComponent(raw) }; } catch (e) { return { expr: raw }; }
-    }
+  /** read a setup out of a link, a bare payload, or the address bar */
+  function readSetup(text) {
+    const raw = String(text == null ? location.hash : text).trim();
+    const at = raw.indexOf(SETUP_TAG);
+    if (at < 0) return null;
     try {
-      const d = JSON.parse(b64.dec(raw.slice(1)));
-      // a link written before the label named things put the name first
-      const pairs = (a) => Array.isArray(a)
-        ? a.filter(Array.isArray).map((row) => normalise(row.length > 2
-            ? { name: String(row[0]), expr: String(row[1]), mark: !!row[2] }
-            : { expr: String(row[0]), mark: !!row[1] }))
-        : null;
-      return { expr: typeof d.e === 'string' ? d.e : '', vars: pairs(d.v), saved: pairs(d.s) };
+      const d = JSON.parse(b64.dec(raw.slice(at + SETUP_TAG.length).replace(/[#?].*$/, '')));
+      const pairs = (a) => (Array.isArray(a) ? a.filter(Array.isArray) : [])
+        .map((row) => normalise(row.length > 2
+          ? { name: String(row[0]), expr: String(row[1]), mark: !!row[2] }
+          : { expr: String(row[0]), mark: !!row[1] }))
+        .filter((x) => nameOf(x.expr));
+      return { vars: pairs(d.v), saved: pairs(d.s) };
     } catch (e) { return null; }
   }
 
-  /** A link brings its own variables and saved rolls. They are merged rather
-      than swapped in, so opening someone else's link never costs you yours. */
-  function applyURL(st) {
+  /** what the address bar says to put in the field, if anything */
+  function readExpr() {
+    const raw = location.hash.replace(/^#/, '');
+    if (!raw || raw.indexOf(SETUP_TAG) === 0) return null;
+    try { return decodeURIComponent(raw); } catch (e) { return raw; }
+  }
+
+  /* A setup is adopted whole rather than merged: it is a setup, not an
+     addition. The one it replaced is kept so it can be had back. */
+  function adoptSetup(st) {
     if (!st) return false;
-    if (st.vars && st.vars.length) {
-      const by = new Map(loadVars().map((v) => [nameOf(v.expr), v]));
-      for (const v of st.vars) if (nameOf(v.expr)) by.set(nameOf(v.expr), v);
-      pushVars(Array.from(by.values()));
-      renderVars(); renderShortcuts();
-    }
-    if (st.saved && st.saved.length) {
-      const items = loadSaved();
-      const seen = new Set(items.map((x) => x.expr));
-      for (const s of st.saved) {
-        const key = s.expr;
-        if (!seen.has(key)) { items.push(s); seen.add(key); }
-      }
-      store.write(LS_SAVED, items.slice(0, 60));
-      renderSaved(); renderShortcuts();
-    }
-    if (typeof st.expr === 'string') el.ta.value = st.expr;
+    store.write(LS_UNDO, { v: loadVars(), s: loadSaved() });
+    pushVars(st.vars);
+    store.write(LS_SAVED, st.saved);
+    renderVars(); renderSaved(); renderShortcuts();
+    return true;
+  }
+
+  function restoreSetup() {
+    const prev = store.read(LS_UNDO, null);
+    if (!prev) return false;
+    store.write(LS_UNDO, { v: loadVars(), s: loadSaved() });
+    pushVars(Array.isArray(prev.v) ? prev.v : []);
+    store.write(LS_SAVED, Array.isArray(prev.s) ? prev.s : []);
+    renderVars(); renderSaved(); renderShortcuts();
     return true;
   }
 
@@ -279,10 +284,46 @@
     const named = (x && x.name && !E.splitLabel(expr).label) ? expr + ' # ' + x.name : expr;
     return { expr: named, mark: !!(x && x.mark) };
   };
+  /* A first visit gets the three rolls almost everyone starts from, rather than
+     an empty bar that says nothing about what the bar is for. */
+  const FIRST_ROLLS = [
+    { expr: 'd6 # d6', mark: true },
+    { expr: '2d6 # 2d6', mark: true },
+    { expr: 'd20 # d20', mark: true }
+  ];
   const loadSaved = () => {
-    const v = store.read(LS_SAVED, []);
-    return Array.isArray(v) ? v.map(normalise) : [];
+    const v = store.read(LS_SAVED, null);
+    return Array.isArray(v) ? v.map(normalise) : FIRST_ROLLS.slice();
   };
+
+  /* ------------------------------------------------------------- editing
+     Everything that writes into the field types it the way a person would, so
+     the browser keeps its own undo history and Ctrl+Z does what it should. */
+  function typeInto(text, replaceAll) {
+    el.ta.focus();
+    if (replaceAll) el.ta.select();
+    let done = false;
+    try { done = document.execCommand('insertText', false, text); } catch (e) { done = false; }
+    if (!done) {
+      const a = el.ta.selectionStart, b = el.ta.selectionEnd;
+      el.ta.value = el.ta.value.slice(0, a) + text + el.ta.value.slice(b);
+      el.ta.setSelectionRange(a + text.length, a + text.length);
+    }
+    onInput();
+  }
+
+  /** the same undo the keyboard reaches, for a screen that has no keyboard */
+  function editUndo(which) {
+    el.ta.focus();
+    try { document.execCommand(which); } catch (e) { /* unsupported */ }
+    onInput();
+  }
+
+  function copy(text, ok, fallback) {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(() => toast(ok), () => toast(fallback));
+    } else toast(fallback);
+  }
 
   /* ============================================================ shortcuts
      A bookmarked saved roll or variable gets a chip under the expression, so a
@@ -378,9 +419,7 @@
       if (!r) return;
       const item = loadSaved().filter((x) => x.mark && nameOf(x.expr))[+r.getAttribute('data-roll')];
       if (!item) return;
-      el.ta.value = item.expr;
-      el.ta.focus();
-      onInput();
+      typeInto(item.expr, true);
     });
     // the right button is the quick way to move by ten without a keyboard
     el.shortcuts.addEventListener('contextmenu', (ev) => {
@@ -677,6 +716,7 @@
     const entry = makeRoll();
     if (!entry) { flashError(); return; }
     state.log.unshift(entry);
+    syncURL();                 // the link in the bar is the roll you just made
     if (state.log.length > LOG_MAX) state.log.length = LOG_MAX;
     renderResult();
     el.result.scrollTop = 0;
@@ -779,14 +819,32 @@
     return { html, active, plain, template };
   }
 
+  /* The reference is a reminder, not a manual: one line each, with whatever
+     else is worth knowing on hover. The README is where the rules are set out
+     in full, for anyone — or anything — that wants to read them all. */
+  const HINT = {
+    atom: 'click to insert at the caret',
+    suffix: 'click to attach to the term the caret is in',
+    wrap: 'click to wrap the term the caret is in',
+    prefix: 'click to add to the front of the expression',
+    append: 'click to add to the end of the expression'
+  };
+
   function renderReference() {
     const html = '<div class="refgrid">' + galleryHTML() + REFERENCE.map(([name, items]) =>
-      '<div class="refgroup"><h3>' + esc(name) + '</h3>' + items.map(([code, desc, form]) => {
+      '<div class="refgroup"><h3>' + esc(name) + '</h3>' + items.map(([code, desc, form, note]) => {
         const s = snippet(code);
-        const tag = form ? ' data-ins="' + esc(code) + '" data-form="' + form + '"' : ' class="inert"';
-        return '<div class="refrow"><code' + tag + '>' + s.html + '</code>' +
-          '<span>' + esc(desc) + '</span></div>';
-      }).join('') + '</div>').join('') + '</div>';
+        const tip = (note ? note + '\n\n' : '') + (form ? HINT[form] || HINT.atom : '');
+        const tag = form
+          ? ' data-ins="' + esc(code) + '" data-form="' + form + '"'
+          : ' class="inert"';
+        return '<div class="refrow" title="' + esc(tip) + '"><code' + tag + '>' + s.html +
+          '</code><span>' + esc(desc) + '</span></div>';
+      }).join('') + '</div>').join('') +
+      '<div class="refgroup"><a class="refdoc" href="README.md" target="_blank" ' +
+        'rel="noopener">Full rules in the README &rarr;</a>' +
+        '<div class="refrow"><span>Every rule set out at length: the type model, ' +
+        'what each modifier needs, and how to build a whole setup.</span></div></div></div>';
 
     // wide screens get the permanent left rail, narrow ones the drawer tab
     const host = wide.matches ? el.refSide : el.reference;
@@ -794,16 +852,8 @@
     other.innerHTML = '';
     host.innerHTML = html;
 
-    const HINT = {
-      atom: 'click to insert at the caret',
-      suffix: 'click to attach to the term the caret is in',
-      wrap: 'click to wrap the term the caret is in',
-      prefix: 'click to add to the front of the expression',
-      append: 'click to add to the end of the expression'
-    };
     host.querySelectorAll('[data-ins]').forEach((c) => {
       const form = c.getAttribute('data-form') || 'atom';
-      c.title = HINT[form] || HINT.atom;
       const parts = snippet(c.getAttribute('data-ins'));
       c.addEventListener('click', () => applySnippet({
         form, plain: parts.plain, active: parts.active, template: parts.template
@@ -886,10 +936,9 @@
 
     for (const [candidate, caret] of tries) {
       if (!parses(candidate)) continue;
-      t.value = candidate;
-      t.focus();
+      typeInto(candidate, true);
       t.setSelectionRange(caret, caret);
-      return onInput();
+      return;
     }
     toast('that snippet does not fit here');
   }
@@ -999,49 +1048,142 @@
   }
 
   /* ================================================================ saved */
-  function renderSaved() {
-    const items = loadSaved();
-    if (!items.length) {
-      el.saved.innerHTML = '<div class="muted">nothing saved yet &mdash; hit Save (or Ctrl+S) to keep the current expression</div>';
-      return;
+  /* ================================================================ lists
+     A variable and a saved roll are the same thing — an expression named by
+     its own label — so one pair of functions draws and wires both. All that
+     differs is where they are kept and what clicking the name does. */
+  const LISTS = {
+    var: {
+      pane: 'vars', add: '+ add a variable',
+      hint: 'A variable holds an expression and is worked out again at every occurrence. ' +
+        'It is named by the <code>#&nbsp;name</code> at its end, and its name can only use ' +
+        'letters and _. Inside an expression, <code>atk:=d20+5</code> as its own item sets ' +
+        'one for that roll alone, and <code>atk::=d20+5</code> rolls it once however often ' +
+        'it is mentioned.',
+      placeholder: 'd20+5 # name',
+      nameHint: 'put this name into the expression',
+      load: loadVars,
+      keep(list) { pushVars(list); },
+      use(item) { typeInto(nameOf(item.expr)); },
+      error: varError
+    },
+    saved: {
+      pane: 'saved', add: '+ add a saved roll',
+      hint: 'A saved roll is an expression named by the <code>#&nbsp;name</code> at its end. ' +
+        'Save the one you are editing with the Save button, or ' +
+        '<kbd>Ctrl</kbd>+<kbd>S</kbd>.',
+      placeholder: '4d6dl1 # name',
+      nameHint: 'put this roll into the expression',
+      load: loadSaved,
+      keep(list) { store.write(LS_SAVED, list); },
+      use(item) { typeInto(item.expr, true); },
+      error: savedError
     }
-    el.saved.innerHTML = items.map((it, i) =>
-      '<div class="savedrow" data-i="' + i + '">' +
-        '<button class="pin' + (it.mark ? " on" : "") + '" data-pin="' + i +
-          '" title="show as a shortcut under the expression">★</button>' +
-        '<span class="nm">' + esc(nameOf(it.expr) || '') + '</span>' +
-        '<code>' + esc(bodyOf(it.expr)) + '</code>' +
-        '<button class="del" data-del="' + i + '" title="delete">&times;</button>' +
-      '</div>').join('');
+  };
 
-    el.saved.querySelectorAll('.savedrow').forEach((row) => {
-      row.addEventListener('click', (ev) => {
-        if (ev.target.closest('[data-del], [data-pin]')) return;
-        const it = loadSaved()[+row.getAttribute('data-i')];
-        if (it) { el.ta.value = it.expr; onInput(); commitRoll(); }
-      });
-    });
-    el.saved.querySelectorAll('[data-pin]').forEach((b) => {
-      b.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        const items = loadSaved();
-        const it = items[+b.getAttribute('data-pin')];
-        if (!it) return;
-        it.mark = !it.mark;
-        store.write(LS_SAVED, items);
-        renderSaved(); renderShortcuts(); syncURL();
-      });
-    });
-    el.saved.querySelectorAll('[data-del]').forEach((b) => {
-      b.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        const items = loadSaved();
-        items.splice(+b.getAttribute('data-del'), 1);
-        store.write(LS_SAVED, items);
-        renderSaved(); renderShortcuts(); syncURL();
-      });
+  function renderList(kind) {
+    const L = LISTS[kind], host = el[L.pane], list = L.load();
+    host.innerHTML =
+      '<div class="varhint">' + L.hint + '</div>' +
+      list.map((it, i) => {
+        const err = L.error(it.expr);
+        return '<div class="lrow" data-kind="' + kind + '" data-i="' + i + '">' +
+          '<div class="lmain">' +
+            '<button class="del" title="remove" tabindex="-1">&times;</button>' +
+            '<button class="pin' + (it.mark ? ' on' : '') + '" tabindex="-1" ' +
+              'title="show as a shortcut under the expression">★</button>' +
+            '<button class="lname" title="' + esc(L.nameHint) + '">' +
+              esc(nameOf(it.expr) || '—') + '</button>' +
+            '<input class="lexpr" value="' + esc(it.expr) + '" spellcheck="false" ' +
+              'placeholder="' + esc(L.placeholder) + '">' +
+            '<span class="step' + (isInt(bodyOf(it.expr)) ? '' : ' off') + '">' +
+              '<button class="vdec" title="subtract 1, or 10 with shift" tabindex="-1">&minus;</button>' +
+              '<button class="vinc" title="add 1, or 10 with shift" tabindex="-1">+</button>' +
+            '</span>' +
+          '</div>' +
+          '<div class="lerr' + (err ? ' on' : '') + '">' + esc(err || '') + '</div>' +
+        '</div>';
+      }).join('') +
+      '<button class="varadd" data-kind="' + kind + '">' + esc(L.add) + '</button>';
+
+    host.querySelectorAll('.lexpr').forEach((inp) => {
+      inp.addEventListener('input', () => commitList(kind));
+      inp.addEventListener('change', () => commitList(kind));
+      inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') inp.blur(); });
     });
   }
+
+  /** what the rows currently say, which may be ahead of what is stored */
+  function readList(kind) {
+    const stored = LISTS[kind].load();
+    const out = [];
+    el[LISTS[kind].pane].querySelectorAll('.lrow').forEach((row, i) => {
+      out.push({ expr: row.querySelector('.lexpr').value,
+                 mark: !!(stored[i] && stored[i].mark) });
+    });
+    return out;
+  }
+
+  /* Saving must not rebuild the rows, or it would steal the caret mid-word.
+     Only the name, the error line and the stepper move. */
+  function commitList(kind) {
+    const L = LISTS[kind], list = readList(kind);
+    L.keep(list);
+    el[L.pane].querySelectorAll('.lrow').forEach((row, i) => {
+      const it = list[i] || { expr: '' };
+      const err = L.error(it.expr);
+      const box = row.querySelector('.lerr');
+      box.textContent = err || '';
+      box.classList.toggle('on', !!err);
+      row.querySelector('.lname').textContent = nameOf(it.expr) || '—';
+      row.querySelector('.step').classList.toggle('off', !isInt(bodyOf(it.expr)));
+    });
+    renderShortcuts();
+    onInput();                 // the expression may now mean something different
+  }
+
+  /** one delegated listener per pane, so redrawing the rows never loses it */
+  function wireList(kind) {
+    const L = LISTS[kind];
+    el[L.pane].addEventListener('click', (ev) => {
+      if (ev.target.closest('.varadd')) {
+        const list = readList(kind);
+        list.push({ expr: '' });
+        L.keep(list);
+        renderList(kind);
+        const box = el[L.pane].querySelector('.lrow:last-of-type .lexpr');
+        if (box) box.focus();
+        return;
+      }
+      const row = ev.target.closest('.lrow');
+      if (!row) return;
+      const i = +row.getAttribute('data-i');
+      const list = readList(kind);
+
+      if (ev.target.closest('.lname')) { if (list[i]) L.use(list[i]); return; }
+      if (ev.target.closest('.pin')) {
+        if (!list[i]) return;
+        list[i].mark = !list[i].mark;
+        L.keep(list); renderList(kind); renderShortcuts();
+        return;
+      }
+      if (ev.target.closest('.del')) {
+        list.splice(i, 1);
+        L.keep(list); renderList(kind); renderShortcuts(); onInput();
+        return;
+      }
+      const inc = ev.target.closest('.vinc'), dec = ev.target.closest('.vdec');
+      if (!inc && !dec) return;
+      const box = row.querySelector('.lexpr');
+      const body = bodyOf(box.value);
+      if (!isInt(body)) return;
+      box.value = withBody(box.value,
+        String(parseInt(body, 10) + (inc ? 1 : -1) * (ev.shiftKey ? STEP_BIG : 1)));
+      commitList(kind);
+    });
+  }
+
+  const renderSaved = () => renderList('saved');
 
   /* The label names it, so there is nothing to ask for — and nothing that can
      drift out of step with what the expression actually says. */
@@ -1055,7 +1197,7 @@
     const items = loadSaved().filter((x) => nameOf(x.expr) !== nameOf(expr));
     items.unshift({ expr, mark: false });
     store.write(LS_SAVED, items.slice(0, 60));
-    renderSaved(); renderShortcuts(); syncURL();
+    renderSaved(); renderShortcuts();
     switchTab('saved');
     toast('saved');
   }
@@ -1086,120 +1228,83 @@
     store.write(LS_VARS, list);
   }
 
-  /* One field holds the whole thing, name and all, so there is nothing to tab
-     between and no second place for the name to disagree with itself. */
-  function renderVars() {
-    const list = loadVars();
-    el.vars.innerHTML =
-      '<div class="varhint">A variable holds an expression and is worked out again at every ' +
-      'occurrence. It is named by the <code>#&nbsp;name</code> at its end. Use the bare name, ' +
-      'or <code>{name}</code> when a plain word would be ambiguous. Inside an expression, ' +
-      '<code>atk:=d20+5</code> as its own item sets one for that roll alone, and ' +
-      '<code>atk::=d20+5</code> rolls it once however often it is mentioned.</div>' +
-      list.map((v, i) =>
-        '<div class="varitem" data-i="' + i + '">' +
-          '<div class="varrow">' +
-            '<button class="del" title="remove" tabindex="-1">&times;</button>' +
-            '<button class="pin' + (v.mark ? ' on' : '') + '" title="show as a shortcut under ' +
-              'the expression" tabindex="-1">★</button>' +
-            '<input class="vexpr" value="' + esc(v.expr) + '" spellcheck="false" ' +
-              'placeholder="d20+5 # name">' +
-            '<span class="step' + (isInt(bodyOf(v.expr)) ? '' : ' off') + '">' +
-              '<button class="vdec" title="subtract 1" tabindex="-1">&minus;</button>' +
-              '<button class="vinc" title="add 1" tabindex="-1">+</button>' +
-            '</span>' +
-          '</div>' +
-          '<div class="varerr' + (varError(v.expr) ? ' on' : '') + '">' +
-            esc(varError(v.expr) || '') + '</div>' +
-        '</div>').join('') +
-      '<button class="varadd">+ add a variable</button>';
+  const renderVars = () => renderList('var');
 
-    el.vars.querySelectorAll('.varitem input').forEach((inp) => {
-      inp.addEventListener('input', () => commitVars());
-      inp.addEventListener('change', () => commitVars());
-      inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') inp.blur(); });
-    });
-  }
+  /** the two panes wire themselves the same way */
+  function wireLists() { wireList('var'); wireList('saved'); }
 
-  /** the fields the panel shows, with anything it does not show carried over */
-  function readVars() {
-    const stored = loadVars();
-    const out = [];
-    el.vars.querySelectorAll('.varitem').forEach((row, i) => {
-      out.push({ expr: row.querySelector('.vexpr').value,
-                 mark: !!(stored[i] && stored[i].mark) });
-    });
-    return out.length ? out : stored;
-  }
-
-  /* Saving must not rebuild the rows, or it would steal the caret mid-word.
-     Only the error line and the stepper move. */
-  function commitVars() {
-    const list = readVars();
-    pushVars(list);
-    el.vars.querySelectorAll('.varitem').forEach((row, i) => {
-      const v = list[i] || { expr: '' };
-      const err = varError(v.expr);
-      const box = row.querySelector('.varerr');
-      box.textContent = err || '';
-      box.classList.toggle('on', !!err);
-      row.querySelector('.step').classList.toggle('off', !isInt(bodyOf(v.expr)));
-    });
-    renderShortcuts();
-    onInput();                 // the expression may now mean something different
-  }
-
-  /** one delegated listener, so re-rendering the rows never loses the wiring */
-  function wireVars() {
-    el.vars.addEventListener('click', (ev) => {
-      if (ev.target.closest('.varadd')) {
-        const list = readVars();
-        list.push({ expr: '' });
-        pushVars(list);
-        renderVars();
-        const box = el.vars.querySelector('.varitem:last-of-type .vexpr');
-        if (box) box.focus();
-        return;
-      }
-      const item = ev.target.closest('.varitem');
-      if (!item) return;
-      if (ev.target.closest('.pin')) {
-        const list = readVars();
-        const v = list[+item.getAttribute('data-i')];
-        if (!v) return;
-        v.mark = !v.mark;
-        pushVars(list);
-        renderVars(); renderShortcuts();
-        return;
-      }
-      if (ev.target.closest('.del')) {
-        const list = readVars();
-        list.splice(+item.getAttribute('data-i'), 1);
-        pushVars(list);
-        renderVars(); renderShortcuts();
-        onInput();
-        return;
-      }
-      const inc = ev.target.closest('.vinc'), dec = ev.target.closest('.vdec');
-      if (!inc && !dec) return;
-      const box = item.querySelector('.vexpr');
-      const body = bodyOf(box.value);
-      if (!isInt(body)) return;
-      const big = ev.shiftKey;
-      box.value = withBody(box.value,
-        String(parseInt(body, 10) + (inc ? 1 : -1) * (big ? STEP_BIG : 1)));
-      commitVars();
-    });
-  }
-
-  function varError(expr) {
+  /** a saved roll may be called anything; a variable's name has to be a word */
+  function savedError(expr) {
     const src = String(expr || '');
     if (!src.trim()) return null;
     const cut = E.splitLabel(src);
     if (!cut.label) return 'needs a name — write it as # name at the end';
-    if (!/^[a-zA-Z_]+$/.test(cut.label)) return 'a name can only use letters and _';
     if (!cut.body.trim()) return 'needs an expression before the # name';
     try { E.parse(cut.body); return null; } catch (e) { return e.message; }
+  }
+
+  function varError(expr) {
+    const first = savedError(expr);
+    if (first) return first;
+    const label = nameOf(expr);
+    if (label && !/^[a-zA-Z_]+$/.test(label)) return 'a name can only use letters and _';
+    return null;
+  }
+
+  /* ================================================================ setup */
+  function renderSetup() {
+    const link = setupLink();
+    const prev = store.read(LS_UNDO, null);
+    $('tab-setup').innerHTML =
+      '<div class="varhint">A <b>setup</b> is your saved rolls and your variables together. ' +
+      'The link below carries them: opening it takes on that setup whole, or paste one ' +
+      'into the box to look it over first. The expression link in the top bar is a ' +
+      'different thing — it holds only the roll you last made.</div>' +
+      '<div class="setrowb"><label>Your setup</label>' +
+        '<textarea class="setbox" id="setOut" readonly rows="2">' + esc(link) + '</textarea>' +
+        '<button class="varadd" id="setCopy">copy</button></div>' +
+      '<div class="setrowb"><label>Paste one</label>' +
+        '<textarea class="setbox" id="setIn" rows="2" spellcheck="false" ' +
+          'placeholder="paste a setup link here"></textarea>' +
+        '<button class="varadd" id="setLoad">look</button></div>' +
+      '<div id="setPreview"></div>' +
+      (prev ? '<button class="varadd" id="setBack">restore the setup this replaced</button>' : '');
+
+    $('setCopy').addEventListener('click', () => copy(link, 'setup link copied', 'could not copy'));
+    $('setLoad').addEventListener('click', showImport);
+    if (prev) $('setBack').addEventListener('click', () => {
+      if (restoreSetup()) { toast('setup restored'); renderSetup(); onInput(); }
+    });
+  }
+
+  /** nothing is taken on until the list of what it holds has been shown */
+  function showImport() {
+    const st = readSetup($('setIn').value);
+    const box = $('setPreview');
+    if (!st || (!st.vars.length && !st.saved.length)) {
+      box.innerHTML = '<div class="varerr on">that is not a setup link</div>';
+      return;
+    }
+    const row = (x) => '<li><b>' + esc(nameOf(x.expr)) + '</b> ' + esc(bodyOf(x.expr)) + '</li>';
+    box.innerHTML =
+      '<div class="setlist">' +
+        (st.saved.length ? '<h4>' + st.saved.length + ' saved ' +
+          (st.saved.length === 1 ? 'roll' : 'rolls') + '</h4><ul>' +
+          st.saved.map(row).join('') + '</ul>' : '') +
+        (st.vars.length ? '<h4>' + st.vars.length + ' variable' +
+          (st.vars.length === 1 ? '' : 's') + '</h4><ul>' +
+          st.vars.map(row).join('') + '</ul>' : '') +
+        '<div class="setwarn">This replaces everything you have now. ' +
+        'You can put it back afterwards.</div>' +
+        '<button class="varadd" id="setGo">take this setup</button>' +
+      '</div>';
+    $('setGo').addEventListener('click', () => {
+      adoptSetup(st);
+      $('setIn').value = '';
+      renderSetup();
+      onInput();
+      toast('setup loaded');
+    });
   }
 
   /* ================================================================= tabs */
@@ -1207,9 +1312,10 @@
     state.activeTab = name;
     el.tabs.querySelectorAll('button').forEach((b) =>
       b.classList.toggle('on', b.getAttribute('data-tab') === name));
-    ['explain', 'details', 'reference', 'vars', 'saved'].forEach((n) =>
+    ['reference', 'explain', 'details', 'vars', 'saved', 'setup'].forEach((n) =>
       $('tab-' + n).classList.toggle('on', n === name));
     if (name === 'details') renderDetails();
+    if (name === 'setup') renderSetup();
   }
 
   /* ================================================================ input */
@@ -1229,7 +1335,6 @@
 
     const raw = el.ta.value;
     store.write(LS_LAST, raw);
-    syncURL();
 
     if (!raw.trim()) {
       state.inspect = null; state.error = null;
@@ -1297,13 +1402,15 @@
     renderSaved();
     pushVars(loadVars());
     renderVars();
-    wireVars();
+    wireLists();
     renderShortcuts();
     wireShortcuts();
+    renderSetup();
+    switchTab(state.activeTab);   // on a phone that is the reference, not Explain
 
-    // a link carries everything; without one, pick up where the last visit left off
-    const fromURL = applyURL(readURL());
-    if (!fromURL || !el.ta.value) el.ta.value = store.read(LS_LAST, '') || DEFAULT_EXPR;
+    // a setup link is adopted whole; anything else in the bar is an expression
+    if (adoptSetup(readSetup())) toast('setup loaded');
+    el.ta.value = readExpr() || store.read(LS_LAST, '') || DEFAULT_EXPR;
 
     el.ta.addEventListener('input', onInput);
     el.ta.addEventListener('scroll', () => { el.hl.scrollLeft = el.ta.scrollLeft; });
@@ -1336,7 +1443,7 @@
       const again = ev.target.closest('[data-again]');
       if (again) {
         const e = state.log[+again.getAttribute('data-again')];
-        if (e) { el.ta.value = e.roll.input; onInput(); commitRoll(); }
+        if (e) { typeInto(e.roll.input, true); commitRoll(); }
         return;
       }
       const open = ev.target.closest('[data-open]');
@@ -1357,11 +1464,11 @@
     });
     $('btnSave').addEventListener('click', saveCurrent);
     $('btnLink').addEventListener('click', () => {
-      syncURL(true);
-      const url = location.href;
-      if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => toast('link copied'), () => toast('link is in the address bar'));
-      else toast('link is in the address bar');
+      syncURL();
+      copy(location.href, 'link copied', 'link is in the address bar');
     });
+    $('btnUndo').addEventListener('click', () => editUndo('undo'));
+    $('btnRedo').addEventListener('click', () => editUndo('redo'));
 
     setDrawer(store.read(LS_DRAWER, false) === true);
     el.drawer.addEventListener('click', () =>
@@ -1376,7 +1483,9 @@
 
     // only a person can cause this: replaceState never fires it
     window.addEventListener('hashchange', () => {
-      if (applyURL(readURL())) onInput();
+      if (adoptSetup(readSetup())) { toast('setup loaded'); renderSetup(); onInput(); return; }
+      const e = readExpr();
+      if (e !== null && e !== el.ta.value) { el.ta.value = e; onInput(); }
     });
 
     onInput();

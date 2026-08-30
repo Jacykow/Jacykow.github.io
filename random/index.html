@@ -234,7 +234,7 @@
   <div class="brand">Random<span>Engine</span></div>
   <div class="tagline">advanced dice notation, explained as you type</div>
   <div class="spacer"></div>
-  <button class="tb" id="btnSave" title="Save the current expression">Save</button>
+  <button class="tb" id="btnSave" title="Save the current expression under its # name">Save</button>
   <button class="tb" id="btnLink" title="Copy a link to this expression">Copy link</button>
 </header>
 
@@ -266,6 +266,10 @@
                 placeholder="4d6dl1 &nbsp; 2d20kh1+5 &nbsp; {2d6, 3d8}kh1 &nbsp; 10d10>=7f<=1 &nbsp; 6x 4d6dl1 # stats"></textarea>
     </div>
     <div class="status" id="status">&nbsp;</div>
+    <div class="undoredo">
+      <button class="mini" id="btnUndo" title="Undo (Ctrl+Z)">&#8630; undo</button>
+      <button class="mini" id="btnRedo" title="Redo (Ctrl+Y)">&#8631; redo</button>
+    </div>
     <div class="shortcuts" id="shortcuts"></div>
   </section>
 
@@ -284,20 +288,22 @@
   <section class="pane" id="paneTools">
     <div class="tabsrow">
       <div class="tabs" id="tabs">
+        <button data-tab="reference">Reference</button>
         <button data-tab="explain" class="on">Explain</button>
         <button data-tab="details">Details</button>
-        <button data-tab="reference">Reference</button>
         <button data-tab="vars">Vars</button>
         <button data-tab="saved">Saved</button>
+        <button data-tab="setup">Setup</button>
       </div>
       <button class="drawer" id="drawerToggle" aria-label="Collapse panel" aria-expanded="true">&#9662;</button>
     </div>
     <div class="toolbody">
+      <div class="tabpane" id="tab-reference"></div>
       <div class="tabpane on" id="tab-explain"></div>
       <div class="tabpane" id="tab-details"></div>
-      <div class="tabpane" id="tab-reference"></div>
       <div class="tabpane" id="tab-vars"></div>
       <div class="tabpane" id="tab-saved"></div>
+      <div class="tabpane" id="tab-setup"></div>
     </div>
   </section>
 
