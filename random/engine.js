@@ -564,24 +564,46 @@
      VALUES
      ========================================================================== */
   /** the value being compared against, rolled once for this one comparison */
-  function cpSide(cp, ctx) {
-    if (!cp.node) return cp.v;
+  function cpEval(cp, ctx) {
+    if (!cp.node) return { v: cp.v, node: null };
     const r = evalNode(cp.node, ctx || { dice: 0, depth: 0, vars: null });
     if (r.set) throw new DiceError('the other side of a comparison has to be a single value');
-    return (r.word !== undefined && r.word !== null) ? r.word : r.total();
+    return { v: (r.word !== undefined && r.word !== null) ? r.word : r.total(), node: r };
   }
 
-  function cpTest(cp, val, ctx) {
-    const v = val, b = cpSide(cp, ctx);
-    switch (cp.op) {
-      case '=': return v === b;
-      case '!=': return v !== b;
-      case '<': return v < b;
-      case '>': return v > b;
-      case '<=': return v <= b;
-      case '>=': return v >= b;
+  function compare(op, a, b) {
+    switch (op) {
+      case '=': return a === b;
+      case '!=': return a !== b;
+      case '<': return a < b;
+      case '>': return a > b;
+      case '<=': return a <= b;
+      case '>=': return a >= b;
     }
     return false;
+  }
+
+  const cpTest = (cp, val, ctx) => compare(cp.op, val, cpEval(cp, ctx).v);
+
+  /* Written out, a comparison should read as something that is true. When the
+     check missed, the statement that held is the opposite one. */
+  /* written as entities: these go straight into markup, and a bare < would eat it */
+  const CMP_SYM = { '=': '=', '!=': '≠', '<': '&lt;', '>': '&gt;', '<=': '≤', '>=': '≥' };
+  const CMP_NEG = { '=': '!=', '!=': '=', '<': '>=', '>': '<=', '<=': '>', '>=': '<' };
+
+  function sideHTML(side) {
+    if (side.node) return side.node.html();
+    return typeof side.v === 'string'
+      ? '<span class="r-str">' + esc(side.v) + '</span>'
+      : '<span class="r-num">' + fmt(side.v) + '</span>';
+  }
+
+  /** a value, and the comparison that decided it, for a choice to point at */
+  function condHTML(cv) {
+    const c = cv.check;
+    if (!c || !c.op) return cv.html();
+    const op = c.hit ? c.op : CMP_NEG[c.op];
+    return cv.html() + '<span class="r-cmp">' + CMP_SYM[op] + '</span>' + sideHTML(c.rhs);
   }
 
   const SOLIDS = {
@@ -1018,7 +1040,12 @@
       return;
     }
     if (m.t === 'check') {
-      item.check = { kind: m.check, hit: cpTest(m.cp, item.value, ctx), bare: !!m.bare };
+      // the other side is kept, not just its verdict: a choice shows its reason
+      const rhs = cpEval(m.cp, ctx);
+      item.check = {
+        kind: m.check, hit: compare(m.cp.op, item.value, rhs.v),
+        bare: !!m.bare, op: m.cp.op, rhs
+      };
     }
   }
 
@@ -1157,7 +1184,7 @@
         const tag = uid ? ' data-x="t' + uid + '"' : '';
         const answer = (cv) => {
           const v = evalNode(truth(cv) ? node.yes : node.no, ctx);
-          const pre = '<span class="r-cond"' + tag + '>' + cv.html() +
+          const pre = '<span class="r-cond"' + tag + '>' + condHTML(cv) +
             '<span class="r-kw"' + tag + '>so</span></span>';
           return Group(v, uid, { prefix: pre, bare: true });
         };
@@ -1539,7 +1566,7 @@
     let out = '';
     for (const m of node.mods || []) {
       if (m.t !== 'check') continue;
-      out += '<span class="r-op">' + esc((m.bare ? '' : m.check) + m.cp.op) + '</span>' +
+      out += '<span class="r-cmp">' + esc(m.bare ? '' : m.check) + CMP_SYM[m.cp.op] + '</span>' +
         (m.cp.node ? previewNode(m.cp.node, ctx)
                    : '<span class="r-num">' + fmt(m.cp.v) + '</span>');
     }
@@ -1594,9 +1621,13 @@
         const items = (node.t === 'paren' ? [node.v] : node.items).map(kid)
           .join('<span class="r-op">,</span>');
         const pre = node.t === 'rep' ? '<span class="r-num">' + esc(plain(node.count)) + '</span>' : '';
+        // `2atk` never had brackets; drawing a pair round what the variable
+        // already brackets for itself only reads as a doubled one
+        const typed = node.brk[0][0] !== node.brk[0][1];
+        const open = typed ? '<span class="r-brk"' + tag + '>(</span>' : '';
+        const close = typed ? '<span class="r-brk"' + tag + '>)</span>' : '';
         return '<span class="r-grp"' + tag + steps + '>' + pre +
-          '<span class="r-brk"' + tag + '>(</span>' + items +
-          '<span class="r-brk"' + tag + '>)</span></span>' + cmp;
+          open + items + close + '</span>' + cmp;
       }
       case 'dice': {
         const sides = constOf(node.sides);

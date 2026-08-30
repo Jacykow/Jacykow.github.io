@@ -576,6 +576,8 @@ kbd{
 /* if / then / else while it is being written, so once it has happened */
 .r-kw{color:var(--pink); padding:0 5px; font-size:11.5px}
 .r-cond .r-kw{color:var(--dimmer)}
+/* the comparison that held, written the way it would be read aloud */
+.r-cmp{color:var(--dim); padding:0 4px}
 
 /* Faces stay one size, as every die should read alike. Names are the exception:
    a preview says "D100" and a custom die may carry a whole word. */

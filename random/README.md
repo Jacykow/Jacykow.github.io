@@ -202,7 +202,9 @@ A variable that refers back to itself is caught at a fixed depth rather than han
   every type the expression could possibly produce, best to worst, so a critical that
   never turned up still shows its nought. A roll that lands on a word shows the word.
 
-  A choice shows only the branch it took, joined to its condition by **so** — `19+5 so 24`.
+  A choice shows only the branch it took, joined to the comparison that caused it by
+  **so** — `18 ≥ 15 so hit`, `7 < 15 so miss`. The statement written out is always the one
+  that held, so a check that missed shows the opposite comparison rather than a false one.
   The preview above the field, where neither branch has happened yet, spells both out
   with **if / then / else** instead.
 
