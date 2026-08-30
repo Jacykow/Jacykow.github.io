@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d0f14">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Advanced dice notation console — type an expression, see it explained and rolled live.">
+<title>Random Engine — Dice Notation Console</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Dice, drawn once and referenced with <use>. Each is the real polyhedron,
+     projected and shaded by tools/gen-dice.js — do not hand-edit, regenerate.
+     The body path inherits its fill from CSS; faces use currentColor at a baked
+     Lambert opacity so one colour drives every roll state. 64x64 user units. -->
+<svg id="dice-sprite" width="0" height="0" aria-hidden="true" focusable="false">
+  <defs>
+<symbol id="sh-d2">
+      <path d="M2.6 29.8L3.3 24L5.5 18.4L9 13.5L13.7 9.3L19.3 6.2L25.5 4.3L32.1 3.6L38.6 4.3L44.8 6.3L50.4 9.4L55.1 13.6L58.5 18.5L60.7 24.1L61.4 29.9L61.4 34.2L60.7 40L58.5 45.6L55 50.5L50.3 54.7L44.7 57.8L38.5 59.7L31.9 60.4L25.4 59.7L19.2 57.7L13.6 54.6L8.9 50.4L5.5 45.5L3.3 39.9L2.6 34.1Z"/>
+      <path d="M3.3 39.9L3.3 35.6L2.6 29.8L2.6 34.1Z" fill="currentColor" fill-opacity="0.188" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M60.7 35.8L60.7 40L61.4 34.2L61.4 29.9Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M9 13.5L5.5 18.4L3.3 24L2.6 29.8L3.3 35.6L5.5 41.2L8.9 46.2L13.6 50.3L19.2 53.5L25.4 55.4L31.9 56.1L38.5 55.4L44.7 53.5L50.3 50.4L55 46.3L58.5 41.3L60.7 35.8L61.4 29.9L60.7 24.1L58.5 18.5L55.1 13.6L50.4 9.4L44.8 6.3L38.6 4.3L32.1 3.6L25.5 4.3L19.3 6.2L13.7 9.3Z" fill="currentColor" fill-opacity="0.358" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M3.3 39.9L5.5 45.5L5.5 41.2L3.3 35.6Z" fill="currentColor" fill-opacity="0.156" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M58.5 41.3L58.5 45.6L60.7 40L60.7 35.8Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M5.5 45.5L8.9 50.4L8.9 46.2L5.5 41.2Z" fill="currentColor" fill-opacity="0.115" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M55 46.3L55 50.5L58.5 45.6L58.5 41.3Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M8.9 50.4L13.6 54.6L13.6 50.3L8.9 46.2Z" fill="currentColor" fill-opacity="0.054" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M50.3 50.4L50.3 54.7L55 50.5L55 46.3Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M13.6 54.6L19.2 57.7L19.2 53.5L13.6 50.3Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M44.7 53.5L44.7 57.8L50.3 54.7L50.3 50.4Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M19.2 53.5L19.2 57.7L25.4 59.7L25.4 55.4Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M38.5 55.4L38.5 59.7L44.7 57.8L44.7 53.5Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M25.4 55.4L25.4 59.7L31.9 60.4L31.9 56.1Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M31.9 56.1L31.9 60.4L38.5 59.7L38.5 55.4Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M2.6 29.8L3.3 24L5.5 18.4L9 13.5L13.7 9.3L19.3 6.2L25.5 4.3L32.1 3.6L38.6 4.3L44.8 6.3L50.4 9.4L55.1 13.6L58.5 18.5L60.7 24.1L61.4 29.9L61.4 34.2L60.7 40L58.5 45.6L55 50.5L50.3 54.7L44.7 57.8L38.5 59.7L31.9 60.4L25.4 59.7L19.2 57.7L13.6 54.6L8.9 50.4L5.5 45.5L3.3 39.9L2.6 34.1Z" fill="none" stroke-width="2.6"/>
+    </symbol>
+    <symbol id="sh-d4">
+      <path d="M7.7 24L32 18.5L56.3 24L32 61.5Z"/>
+      <path d="M32 61.5L56.3 24L32 18.5Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M32 61.5L32 18.5L7.7 24Z" fill="currentColor" fill-opacity="0.225" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M7.7 24L32 18.5L56.3 24L32 61.5Z" fill="none" stroke-width="2.6"/>
+    </symbol>
+    <symbol id="sh-d5">
+      <path d="M3.1 36.3L50.5 9.9L55.7 14.1L60.9 24.8L58.9 27.2L11.5 53.6L5.1 44.4Z"/>
+      <path d="M11.5 53.6L58.9 27.2L60.9 24.8L13.5 51.2Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M3.1 36.3L8.3 40.5L55.7 14.1L50.5 9.9Z" fill="currentColor" fill-opacity="0.386" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M5.1 44.4L11.5 53.6L13.5 51.2L8.3 40.5L3.1 36.3Z" fill="currentColor" fill-opacity="0.115" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M13.5 51.2L60.9 24.8L55.7 14.1L8.3 40.5Z" fill="currentColor" fill-opacity="0.233" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M3.1 36.3L50.5 9.9L55.7 14.1L60.9 24.8L58.9 27.2L11.5 53.6L5.1 44.4Z" fill="none" stroke-width="2.6"/>
+    </symbol>
+    <symbol id="sh-d6">
+      <path d="M8.3 19.3L37.5 3.1L55.7 29.1L55.7 44.7L26.5 60.9L8.3 34.9Z"/>
+      <path d="M26.5 45.3L8.3 19.3L8.3 34.9L26.5 60.9Z" fill="currentColor" fill-opacity="0.115" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M55.7 29.1L26.5 45.3L26.5 60.9L55.7 44.7Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M55.7 29.1L37.5 3.1L8.3 19.3L26.5 45.3Z" fill="currentColor" fill-opacity="0.358" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M8.3 19.3L37.5 3.1L55.7 29.1L55.7 44.7L26.5 60.9L8.3 34.9Z" fill="none" stroke-width="2.6"/>
+    </symbol>
+    <symbol id="sh-d7">
+      <path d="M3 38.6L4 36.2L51.4 9.8L55.7 14.1L60 22L61 27.5L13.6 53.9L10.7 52.8L5.9 46Z"/>
+      <path d="M13.6 53.9L61 27.5L60 22L12.6 48.4Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M51.4 9.8L4 36.2L8.3 40.5L55.7 14.1Z" fill="currentColor" fill-opacity="0.388" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M3 38.6L5.9 46L10.7 52.8L13.6 53.9L12.6 48.4L8.3 40.5L4 36.2Z" fill="currentColor" fill-opacity="0.115" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M60 22L55.7 14.1L8.3 40.5L12.6 48.4Z" fill="currentColor" fill-opacity="0.279" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M3 38.6L4 36.2L51.4 9.8L55.7 14.1L60 22L61 27.5L13.6 53.9L10.7 52.8L5.9 46Z" fill="none" stroke-width="2.6"/>
+    </symbol>
+    <symbol id="sh-d8">
+      <path d="M7.7 24.9L43.4 5L56.3 39.1L20.6 59Z"/>
+      <path d="M20.6 59L56.3 39.1L44.9 42.6Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M44.9 42.6L56.3 39.1L43.4 5Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M20.6 59L44.9 42.6L7.7 24.9Z" fill="currentColor" fill-opacity="0.137" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M7.7 24.9L44.9 42.6L43.4 5Z" fill="currentColor" fill-opacity="0.358" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M7.7 24.9L43.4 5L56.3 39.1L20.6 59Z" fill="none" stroke-width="2.6"/>
+    </symbol>
+    <symbol id="sh-d9">
+      <path d="M2.9 36.7L50.3 10.3L52.2 10.2L55.7 14.1L59.2 20.2L61.1 25.7L60.4 27.9L13.1 54.3L10.2 52.3L6.4 46.9L3.6 40.8Z"/>
+      <path d="M50.3 10.3L2.9 36.7L4.8 36.6L52.2 10.2Z" fill="currentColor" fill-opacity="0.349" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M13.1 54.3L60.4 27.9L61.1 25.7L13.7 52.1Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M2.9 36.7L3.6 40.8L6.4 46.9L10.2 52.3L13.1 54.3L13.7 52.1L11.8 46.6L8.3 40.5L4.8 36.6Z" fill="currentColor" fill-opacity="0.115" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M52.2 10.2L4.8 36.6L8.3 40.5L55.7 14.1Z" fill="currentColor" fill-opacity="0.386" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M13.7 52.1L61.1 25.7L59.2 20.2L11.8 46.6Z" fill="currentColor" fill-opacity="0.078" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M59.2 20.2L55.7 14.1L8.3 40.5L11.8 46.6Z" fill="currentColor" fill-opacity="0.301" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M2.9 36.7L50.3 10.3L52.2 10.2L55.7 14.1L59.2 20.2L61.1 25.7L60.4 27.9L13.1 54.3L10.2 52.3L6.4 46.9L3.6 40.8Z" fill="none" stroke-width="2.6"/>
+    </symbol>
+    <symbol id="sh-d10">
+      <path d="M3 38.7L5 19.5L16.3 8.8L34.6 3.3L50.9 12.4L61 25.3L59 44.5L47.7 55.2L29.4 60.7L13.1 51.6Z"/>
+      <path d="M13.1 51.6L29.4 60.7L29.6 41.9L3 38.7Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M29.4 60.7L47.7 55.2L59 44.5L29.6 41.9Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M3 38.7L29.6 41.9L16.3 8.8L5 19.5Z" fill="currentColor" fill-opacity="0.314" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M29.6 41.9L59 44.5L61 25.3L50.9 12.4Z" fill="currentColor" fill-opacity="0.147" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M29.6 41.9L50.9 12.4L34.6 3.3L16.3 8.8Z" fill="currentColor" fill-opacity="0.358" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M3 38.7L5 19.5L16.3 8.8L34.6 3.3L50.9 12.4L61 25.3L59 44.5L47.7 55.2L29.4 60.7L13.1 51.6Z" fill="none" stroke-width="2.6"/>
+    </symbol>
+    <symbol id="sh-d11">
+      <path d="M2.9 38.1L3.3 36.1L50.7 9.7L52.7 10.6L55.7 14.1L58.7 19.1L60.7 24L61.1 27.2L13.7 53.6L12.4 54.2L9.8 51.9L6.8 47.5L4.2 42.4Z"/>
+      <path d="M50.7 9.7L3.3 36.1L5.3 37L52.7 10.6Z" fill="currentColor" fill-opacity="0.371" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M13.7 53.6L61.1 27.2L60.7 24L13.3 50.4Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M2.9 38.1L4.2 42.4L6.8 47.5L9.8 51.9L12.4 54.2L13.7 53.6L13.3 50.4L11.3 45.5L8.3 40.5L5.3 37L3.3 36.1Z" fill="currentColor" fill-opacity="0.115" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M52.7 10.6L5.3 37L8.3 40.5L55.7 14.1Z" fill="currentColor" fill-opacity="0.383" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M13.3 50.4L60.7 24L58.7 19.1L11.3 45.5Z" fill="currentColor" fill-opacity="0.160" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M58.7 19.1L55.7 14.1L8.3 40.5L11.3 45.5Z" fill="currentColor" fill-opacity="0.313" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M2.9 38.1L3.3 36.1L50.7 9.7L52.7 10.6L55.7 14.1L58.7 19.1L60.7 24L61.1 27.2L13.7 53.6L12.4 54.2L9.8 51.9L6.8 47.5L4.2 42.4Z" fill="none" stroke-width="2.6"/>
+    </symbol>
+    <symbol id="sh-d12">
+      <path d="M3.6 40.8L4.9 19.7L16.5 12.4L34 3.4L50.8 14.6L60.4 23.2L59.1 44.3L47.5 51.6L30 60.6L13.2 49.4Z"/>
+      <path d="M15.2 15.2L33.3 5.2L34 3.4L16.5 12.4L4.9 19.7Z" fill="currentColor" fill-opacity="0.340" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M34 3.4L33.3 5.2L49.6 17.3L60.4 23.2L50.8 14.6Z" fill="currentColor" fill-opacity="0.230" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M20.4 33.6L15.2 15.2L4.9 19.7L3.6 40.8L13.2 49.4Z" fill="currentColor" fill-opacity="0.286" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M60.4 23.2L49.6 17.3L41.6 34.9L47.5 51.6L59.1 44.3Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M41.6 34.9L20.4 33.6L13.2 49.4L30 60.6L47.5 51.6Z" fill="currentColor" fill-opacity="0.116" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M33.3 5.2L15.2 15.2L20.4 33.6L41.6 34.9L49.6 17.3Z" fill="currentColor" fill-opacity="0.358" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M3.6 40.8L4.9 19.7L16.5 12.4L34 3.4L50.8 14.6L60.4 23.2L59.1 44.3L47.5 51.6L30 60.6L13.2 49.4Z" fill="none" stroke-width="2.6"/>
+    </symbol>
+    <symbol id="sh-d14">
+      <path d="M8.8 9.2L46.4 8.5L56.7 23.8L55.2 54.8L27.8 56.7L10.3 49.6L9.1 29.2Z"/>
+      <path d="M8.8 9.2L25.2 10.9L46.4 8.5Z" fill="currentColor" fill-opacity="0.327" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M8.8 9.2L9.1 29.2L25.2 10.9Z" fill="currentColor" fill-opacity="0.349" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M10.3 49.6L27.8 56.7L55.2 54.8Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M55.2 54.8L56.7 23.8L46.4 8.5Z" fill="currentColor" fill-opacity="0.109" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M10.3 49.6L55.2 54.8L9.1 29.2Z" fill="currentColor" fill-opacity="0.183" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M55.2 54.8L46.4 8.5L25.2 10.9Z" fill="currentColor" fill-opacity="0.324" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M9.1 29.2L55.2 54.8L25.2 10.9Z" fill="currentColor" fill-opacity="0.346" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M8.8 9.2L46.4 8.5L56.7 23.8L55.2 54.8L27.8 56.7L10.3 49.6L9.1 29.2Z" fill="none" stroke-width="2.6"/>
+    </symbol>
+    <symbol id="sh-d16">
+      <path d="M7.3 36.1L9 9.6L34.7 7.3L51.4 11.6L56.7 27.9L55 54.4L29.3 56.7L12.6 52.4Z"/>
+      <path d="M9 9.6L7.3 36.1L16.5 17.5Z" fill="currentColor" fill-opacity="0.308" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M9 9.6L16.5 17.5L34.7 7.3Z" fill="currentColor" fill-opacity="0.359" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M12.6 52.4L29.3 56.7L55 54.4Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M55 54.4L56.7 27.9L51.4 11.6Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M12.6 52.4L55 54.4L7.3 36.1Z" fill="currentColor" fill-opacity="0.108" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M55 54.4L51.4 11.6L34.7 7.3Z" fill="currentColor" fill-opacity="0.268" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M7.3 36.1L55 54.4L16.5 17.5Z" fill="currentColor" fill-opacity="0.307" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M55 54.4L34.7 7.3L16.5 17.5Z" fill="currentColor" fill-opacity="0.358" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M7.3 36.1L9 9.6L34.7 7.3L51.4 11.6L56.7 27.9L55 54.4L29.3 56.7L12.6 52.4Z" fill="none" stroke-width="2.6"/>
+    </symbol>
+    <symbol id="sh-d18">
+      <path d="M7.3 41.4L9 9.8L41.9 7.2L54.2 15.2L56.2 31.2L55 54.2L30.5 56.5L14.9 54.1Z"/>
+      <path d="M9 9.8L25 10.7L41.9 7.2Z" fill="currentColor" fill-opacity="0.334" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M9 9.8L7.3 41.4L11.3 24.2Z" fill="currentColor" fill-opacity="0.258" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M9 9.8L11.3 24.2L25 10.7Z" fill="currentColor" fill-opacity="0.352" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M55 54.2L56.2 31.2L54.2 15.2Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M14.9 54.1L30.5 56.5L55 54.2Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M55 54.2L54.2 15.2L41.9 7.2Z" fill="currentColor" fill-opacity="0.207" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M14.9 54.1L55 54.2L7.3 41.4Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M55 54.2L41.9 7.2L25 10.7Z" fill="currentColor" fill-opacity="0.336" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M7.3 41.4L55 54.2L11.3 24.2Z" fill="currentColor" fill-opacity="0.259" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M55 54.2L25 10.7L11.3 24.2Z" fill="currentColor" fill-opacity="0.353" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M7.3 41.4L9 9.8L41.9 7.2L54.2 15.2L56.2 31.2L55 54.2L30.5 56.5L14.9 54.1Z" fill="none" stroke-width="2.6"/>
+    </symbol>
+    <symbol id="sh-d20">
+      <path d="M2.7 35.4L16.5 7.3L40.5 7L45.7 11.5L61.3 28.6L47.5 56.7L23.5 57L18.3 52.5Z"/>
+      <path d="M40.5 7L61.3 28.6L45.7 11.5Z" fill="currentColor" fill-opacity="0.170" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M18.3 52.5L23.5 57L47.5 56.7Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M2.7 35.4L13.9 21.8L16.5 7.3Z" fill="currentColor" fill-opacity="0.311" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M13.9 21.8L40.5 7L16.5 7.3Z" fill="currentColor" fill-opacity="0.381" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M18.3 52.5L13.9 21.8L2.7 35.4Z" fill="currentColor" fill-opacity="0.238" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M41.6 34.9L47.5 56.7L61.3 28.6Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M40.5 7L41.6 34.9L61.3 28.6Z" fill="currentColor" fill-opacity="0.232" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M41.6 34.9L18.3 52.5L47.5 56.7Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M13.9 21.8L41.6 34.9L40.5 7Z" fill="currentColor" fill-opacity="0.358" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M41.6 34.9L13.9 21.8L18.3 52.5Z" fill="currentColor" fill-opacity="0.271" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M2.7 35.4L16.5 7.3L40.5 7L45.7 11.5L61.3 28.6L47.5 56.7L23.5 57L18.3 52.5Z" fill="none" stroke-width="2.6"/>
+    </symbol>
+    <symbol id="sh-d100">
+      <path d="M2.7 29.3L5.2 19.1L18.1 5.8L33.8 2.8L35.4 2.8L45 6.5L48.9 8.6L58.1 17.9L60 24.1L61.3 34.7L58.8 44.9L45.9 58.2L30.2 61.2L28.6 61.2L19 57.5L15.1 55.4L5.9 46.1L4 39.9Z"/>
+      <path d="M15.1 55.4L19 57.5L28.6 61.2Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M18.1 5.8L35.4 2.8L33.8 2.8Z" fill="currentColor" fill-opacity="0.328" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M59.5 31.4L61.3 34.7L60 24.1Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M59.5 31.4L58.8 44.9L61.3 34.7Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M52.8 13.5L58.1 17.9L48.9 8.6Z" fill="currentColor" fill-opacity="0.193" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M59.5 31.4L60 24.1L58.1 17.9Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M15.1 55.4L28.6 61.2L30.2 61.2Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M45.9 58.2L58.8 44.9L56.4 47.1Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M5.2 19.1L10.7 13.5L18.1 5.8Z" fill="currentColor" fill-opacity="0.320" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M15.1 55.4L4 39.9L5.9 46.1Z" fill="currentColor" fill-opacity="0.070" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M45 6.5L52.8 13.5L48.9 8.6Z" fill="currentColor" fill-opacity="0.203" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M18.1 5.8L26.8 4.8L35.4 2.8Z" fill="currentColor" fill-opacity="0.333" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M56.4 47.1L58.8 44.9L59.5 31.4Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M10.7 13.5L18.9 10.4L18.1 5.8Z" fill="currentColor" fill-opacity="0.364" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M32.1 57.3L30.2 61.2L45.9 58.2Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M18.9 10.4L26.8 4.8L18.1 5.8Z" fill="currentColor" fill-opacity="0.365" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M52.8 13.5L59.5 31.4L58.1 17.9Z" fill="currentColor" fill-opacity="0.144" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M2.7 29.3L9.6 26.8L5.2 19.1Z" fill="currentColor" fill-opacity="0.322" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M50.8 47.2L45.9 58.2L56.4 47.1Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M15.1 55.4L30.2 61.2L32.1 57.3Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M15.1 55.4L8.9 42.7L4 39.9Z" fill="currentColor" fill-opacity="0.084" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M9.6 26.8L2.7 29.3L4 39.9Z" fill="currentColor" fill-opacity="0.269" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M9.6 26.8L10.7 13.5L5.2 19.1Z" fill="currentColor" fill-opacity="0.328" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M37.1 12L45 6.5L35.4 2.8Z" fill="currentColor" fill-opacity="0.349" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M42.1 53.7L32.1 57.3L45.9 58.2Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M50.8 47.2L56.4 47.1L59.5 31.4Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M26.8 4.8L37.1 12L35.4 2.8Z" fill="currentColor" fill-opacity="0.354" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M42.1 53.7L45.9 58.2L50.8 47.2Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M37.1 12L52.8 13.5L45 6.5Z" fill="currentColor" fill-opacity="0.306" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M8.9 42.7L9.6 26.8L4 39.9Z" fill="currentColor" fill-opacity="0.266" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M51.2 19.9L59.5 31.4L52.8 13.5Z" fill="currentColor" fill-opacity="0.152" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M24 52L15.1 55.4L32.1 57.3Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M9.6 26.8L18.9 10.4L10.7 13.5Z" fill="currentColor" fill-opacity="0.372" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M16.9 44.1L8.9 42.7L15.1 55.4Z" fill="currentColor" fill-opacity="0.108" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M18.9 10.4L37.1 12L26.8 4.8Z" fill="currentColor" fill-opacity="0.384" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M24 52L16.9 44.1L15.1 55.4Z" fill="currentColor" fill-opacity="0.101" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M37.1 12L51.2 19.9L52.8 13.5Z" fill="currentColor" fill-opacity="0.303" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M50.1 37.9L50.8 47.2L59.5 31.4Z" fill="currentColor" fill-opacity="0.050" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M47.1 27.8L59.5 31.4L51.2 19.9Z" fill="currentColor" fill-opacity="0.160" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M16.9 44.1L9.6 26.8L8.9 42.7Z" fill="currentColor" fill-opacity="0.281" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M9.6 26.8L21.8 17.2L18.9 10.4Z" fill="currentColor" fill-opacity="0.373" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M47.1 27.8L50.1 37.9L59.5 31.4Z" fill="currentColor" fill-opacity="0.153" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M18.9 10.4L21.8 17.2L37.1 12Z" fill="currentColor" fill-opacity="0.385" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M35.2 42.7L32.1 57.3L42.1 53.7Z" fill="currentColor" fill-opacity="0.061" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M35.2 42.7L42.1 53.7L50.8 47.2Z" fill="currentColor" fill-opacity="0.080" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M24 52L32.1 57.3L35.2 42.7Z" fill="currentColor" fill-opacity="0.073" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M37.1 12L47.1 27.8L51.2 19.9Z" fill="currentColor" fill-opacity="0.309" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M35.2 42.7L50.8 47.2L50.1 37.9Z" fill="currentColor" fill-opacity="0.092" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M16.9 44.1L20.8 35.2L9.6 26.8Z" fill="currentColor" fill-opacity="0.285" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M16.9 44.1L24 52L35.2 42.7Z" fill="currentColor" fill-opacity="0.199" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M9.6 26.8L26.1 25.9L21.8 17.2Z" fill="currentColor" fill-opacity="0.351" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M21.8 17.2L26.1 25.9L37.1 12Z" fill="currentColor" fill-opacity="0.362" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M9.6 26.8L20.8 35.2L26.1 25.9Z" fill="currentColor" fill-opacity="0.346" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M36.9 26.5L47.1 27.8L37.1 12Z" fill="currentColor" fill-opacity="0.312" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M35.2 42.7L50.1 37.9L47.1 27.8Z" fill="currentColor" fill-opacity="0.216" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M20.8 35.2L16.9 44.1L35.2 42.7Z" fill="currentColor" fill-opacity="0.210" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M26.1 25.9L36.9 26.5L37.1 12Z" fill="currentColor" fill-opacity="0.358" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M36.9 26.5L35.2 42.7L47.1 27.8Z" fill="currentColor" fill-opacity="0.226" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M20.8 35.2L35.2 42.7L26.1 25.9Z" fill="currentColor" fill-opacity="0.277" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M26.1 25.9L35.2 42.7L36.9 26.5Z" fill="currentColor" fill-opacity="0.278" stroke-opacity=".30" stroke-width="1"/>
+      <path d="M2.7 29.3L5.2 19.1L18.1 5.8L33.8 2.8L35.4 2.8L45 6.5L48.9 8.6L58.1 17.9L60 24.1L61.3 34.7L58.8 44.9L45.9 58.2L30.2 61.2L28.6 61.2L19 57.5L15.1 55.4L5.9 46.1L4 39.9Z" fill="none" stroke-width="2.6"/>
+    </symbol>
+  </defs>
+</svg>
+
+<header id="topbar">
+  <div class="brand">Random<span>Engine</span></div>
+  <div class="spacer"></div>
+  <button class="tb" id="btnSave" title="Save the current expression under its # name">Save</button>
+  <button class="tb" id="btnLink" title="Copy a link to this expression">Copy link</button>
+</header>
+
+<div id="app">
+
+  <!-- On a wide screen the reference lives here, permanently open. Below the
+       breakpoint it moves into the tool drawer as a tab. -->
+  <aside id="sidebar">
+    <div class="panehead"><span class="ttl">Reference</span></div>
+    <div class="sidebody" id="refSide"></div>
+  </aside>
+
+  <div id="main">
+
+  <!-- ------------------------------------------------------ expression -->
+  <section class="pane" id="paneExpr">
+    <div class="panehead">
+      <span class="ttl">Expression</span>
+      <button class="roll sec" id="btnUndo" title="Undo">undo<kbd class="onpc">Ctrl Z</kbd><kbd class="onphone">&#8630;</kbd></button>
+      <button class="roll sec" id="btnRedo" title="Redo">redo<kbd class="onpc">Ctrl Y</kbd><kbd class="onphone">&#8631;</kbd></button>
+      <span class="spacer"></span>
+      <span class="notation" id="notation"></span>
+      <button class="roll" id="rollBtn">Roll<kbd class="onpc">&crarr;</kbd><span class="onphone rolldie"><svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><use href="#sh-d6"/></svg></span></button>
+    </div>
+    <!-- what the expression would roll, by die name; updates as you type -->
+    <div class="preview" id="preview"></div>
+    <div class="editor" id="editorWrap">
+      <pre class="hl" id="hl" aria-hidden="true"></pre>
+      <textarea id="expr" rows="1" wrap="off" spellcheck="false" enterkeyhint="go"
+                autocomplete="off" autocorrect="off" autocapitalize="off"
+                placeholder="4d6dl1 &nbsp; 2d20kh1+5 &nbsp; {2d6, 3d8}kh1 &nbsp; 10d10>=7f<=1 &nbsp; 6x 4d6dl1 # stats"></textarea>
+    </div>
+    <div class="status" id="status">&nbsp;</div>
+    <div class="shortcuts" id="shortcuts"></div>
+  </section>
+
+  <!-- ---------------------------------------------------------- result -->
+  <section class="pane grow" id="paneResult">
+    <div class="panehead">
+      <span class="ttl">Result</span>
+      <span class="hint"><kbd>Enter</kbd> to roll &mdash; click an entry to open it</span>
+      <span class="spacer"></span>
+      <button class="mini" id="btnClear">clear</button>
+    </div>
+    <div class="resultbody" id="result"></div>
+  </section>
+
+  <!-- ----------------------------------------------------------- tools -->
+  <section class="pane" id="paneTools">
+    <div class="tabsrow">
+      <div class="tabs" id="tabs">
+        <button data-tab="reference">Reference</button>
+        <button data-tab="explain" class="on">Explain</button>
+        <button data-tab="details">Details</button>
+        <button data-tab="vars">Variables</button>
+        <button data-tab="saved">Rolls</button>
+        <button data-tab="setup">Preset</button>
+      </div>
+      <button class="drawer" id="drawerToggle" aria-label="Collapse panel" aria-expanded="true">&#9662;</button>
+    </div>
+    <div class="toolbody">
+      <div class="tabpane" id="tab-reference"></div>
+      <div class="tabpane on" id="tab-explain"></div>
+      <div class="tabpane" id="tab-details"></div>
+      <div class="tabpane" id="tab-vars"></div>
+      <div class="tabpane" id="tab-saved"></div>
+      <div class="tabpane" id="tab-setup"></div>
+    </div>
+  </section>
+
+  </div>
+</div>
+
+<footer id="botbar">
+  <span class="fnote">Nothing is rolled until you ask, and nothing leaves this browser.</span>
+  <span class="spacer"></span>
+  <a class="flink" href="README.md" target="_blank" rel="noopener">Full rules</a>
+  <a class="flink" href="https://www.gulij.com" target="_blank" rel="noopener">gulij.com</a>
+</footer>
+
+<div id="toast"></div>
+
+<script src="engine.js"></script>
+<script src="presets.js"></script>
+<script src="reference.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
