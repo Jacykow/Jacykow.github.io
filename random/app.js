@@ -62,7 +62,7 @@
       ['3d~(2*6)', 'computed number of sides', 'atom', 'Sides can be computed too, so a die can be as big as the maths makes it.']
     ]],
     ['Sets', [
-      ['~(~d6,d8~)', 'a set built by listing values', 'atom', 'The comma is what builds a set. Whitespace never does: d10-2d6 and d10 -2d6 are the same roll.'],
+      ['(d6~,~d8)', 'a set built by listing values', 'atom', 'The comma is what builds a set. Whitespace never does: d10-2d6 and d10 -2d6 are the same roll.'],
       ['~4(~d10+d6~)', 'repeat an expression into a set of 4', 'atom', '4d6 is shorthand for 4(d6). Anything can be repeated this way, not just a die.'],
       ['~2(~d10,2d6~)', 'sets inside sets unpack', 'atom', 'Nesting never compounds — the inner set is flattened into the outer one.'],
       ['(d10,~-~2d6)', 'a minus flips every member', 'atom', 'A minus in front of a set negates each member rather than the sum.']
@@ -122,20 +122,20 @@
       ['~{atk}', 'always the variable, never a word', 'atom', 'Insists on the variable, and says so if none is set.']
     ]],
     ['Variables', [
-      ['~roll:=d6,roll,roll', 'a fresh roll at every mention', 'atom', 'A variable holds text, not a result, so every mention rolls again — this throws two dice. It has to stand as its own top-level item, and it shadows a variable of the same name in the panel.'],
-      ['~roll::=d6,roll,roll', 'rolled once, however often it is named', 'atom', 'The opposite of :=. One die, and both mentions are that same result, which is what lets a chain of comparisons ask about one roll several times. It stands for what the roll came to, so it is a value and never a set.'],
+      ['~roll:=d6~,roll,roll', 'a fresh roll at every mention', 'atom', 'A variable holds text, not a result, so every mention rolls again — this throws two dice. It has to stand as its own top-level item, and it shadows a variable of the same name in the panel.'],
+      ['~roll::=d6~,roll,roll', 'rolled once, however often it is named', 'atom', 'The opposite of :=. One die, and both mentions are that same result, which is what lets a chain of comparisons ask about one roll several times. It stands for what the roll came to, so it is a value and never a set.'],
       ['~atk:=d20+5,~2atk', 'set one for this expression only', 'prefix', 'Has to stand as its own top-level item. It shadows a variable of the same name in the panel, and is worked out afresh at every mention.'],
-      ['~2atk', 'used twice means rolled twice', 'atom', 'A variable holds text, not a result, so every mention is a fresh roll.']
+      ['~2~atk', 'used twice means rolled twice', 'atom', 'A variable holds text, not a result, so every mention is a fresh roll.']
     ]],
     ['Chained choices', [
-      ['d6>4?yes~:>2?maybe~:no', 'more comparisons on the same roll', 'append', 'An else that opens with a comparison carries on about the same subject. The subject is worked out once and each comparison tried in the order written.'],
-      ['(2d6)>=10?good~:>=7?mixed~:bad', 'bracket what the chain is about', 'atom', 'A comparison binds to a term, not a sum, so 2d6+3>=10 would compare the 3. Bracket what the chain is about.']
+      ['d6>4?yes~:>2?maybe:no~', 'more comparisons on the same roll', 'atom', 'An else that opens with a comparison carries on about the same subject. The subject is worked out once and each comparison tried in the order written.'],
+      ['(2d6)>=10?good~:>=7?mixed:bad~', 'bracket what the chain is about', 'atom', 'A comparison binds to a term, not a sum, so 2d6+3>=10 would compare the 3. Bracket what the chain is about.']
     ]],
     ['Custom dice', [
       ['~[1,1,1,1,1,6]', 'six faces, mostly ones', 'atom', 'A die whose faces you write out. It is drawn with the shape matching the face count.'],
       ['~[hit,hit,miss]', 'faces can be words', 'atom', 'A face that is a word is written out rather than fitted onto a die.'],
       ['~[d6,d10]', 'a face can be another roll', 'atom', 'One face is picked, then whatever is written on it is worked out.'],
-      ['~3[a,b]', 'roll a custom die three times', 'atom']
+      ['~3~[a,b]', 'roll a custom die three times', 'atom']
     ]],
     ['Whole roll', [
       ['~6x~4d6dl1', 'repeat the whole expression 6 times', 'prefix', 'Rolls the whole expression separately that many times and reports each.'],
@@ -352,15 +352,13 @@
   };
   /* A first visit gets the three rolls almost everyone starts from, rather than
      an empty bar that says nothing about what the bar is for. */
-  const FIRST_ROLLS = [
-    { expr: 'd4 # <d4>', mark: true },
-    { expr: 'd6 # <d6>', mark: true },
-    { expr: 'd8 # <d8>', mark: true },
-    { expr: 'd10 # <d10>', mark: true },
-    { expr: 'd12 # <d12>', mark: true },
-    { expr: 'd20 # <d20>', mark: true },
-    { expr: '2d6 # 2x <d6>', mark: true }
-  ];
+  const PRESETS = (window.RandomEnginePresets || []).map((x) => ({
+    name: x.name,
+    note: x.note,
+    vars: (x.vars || []).map((expr) => ({ expr, mark: true })),
+    saved: (x.saved || []).map((expr) => ({ expr, mark: true }))
+  }));
+  const FIRST_ROLLS = PRESETS.length ? PRESETS[0].saved.map((x) => ({ expr: x.expr, mark: true })) : [];
   const loadSaved = () => {
     const v = store.read(LS_SAVED, null);
     return Array.isArray(v) ? v.map(normalise) : FIRST_ROLLS.slice();
@@ -1406,7 +1404,8 @@
      afresh at every occurrence, so `2atk` rolls twice. */
   function loadVars() {
     const v = store.read(LS_VARS, null);
-    return Array.isArray(v) ? v.map(normalise) : [{ expr: 'd20+5 # atk' }];
+    if (Array.isArray(v)) return v.map(normalise);
+    return PRESETS.length ? PRESETS[0].vars.map((x) => ({ expr: x.expr, mark: true })) : [];
   }
 
   function pushVars(list) {
@@ -1446,10 +1445,7 @@
      A preset is everything you have set up — the saved rolls and the
      variables — carried in one link. It lives in localStorage between visits
      like everything else, so a link is only ever a way of moving one about. */
-  const DEFAULT_PRESET = {
-    vars: [],
-    saved: FIRST_ROLLS.map((x) => ({ expr: x.expr, mark: true }))
-  };
+
 
   function renderSetup() {
     const link = setupLink();
@@ -1466,8 +1462,10 @@
         '<textarea class="setbox" id="setIn" rows="2" spellcheck="false" ' +
           'placeholder="paste a link here"></textarea>' +
         '<button class="varadd" id="setLoad">import</button></div>' +
-      '<div class="setrowb"><label>Or start from</label>' +
-        '<button class="varadd" id="setDefault">the starting preset</button></div>' +
+      '<div class="setrowb"><label>Or take one</label>' +
+        '<div class="presets">' + PRESETS.map((x, i) =>
+          '<button class="varadd" data-preset="' + i + '" title="' + esc(x.note || '') + '">' +
+          esc(x.name) + '</button>').join('') + '</div></div>' +
       (back ? '<button class="varadd" id="setBack">' +
         (back.whole ? 'put back the preset this replaced' : 'undo the last import&hellip;') +
         '</button>' : '') +
@@ -1479,7 +1477,9 @@
       if (!st || (!st.vars.length && !st.saved.length)) { toast('that is not a preset link'); return; }
       pickDialog('add', st);
     });
-    $('setDefault').addEventListener('click', () => pickDialog('add', DEFAULT_PRESET));
+    $('tab-setup').querySelectorAll('[data-preset]').forEach((b) => {
+      b.addEventListener('click', () => pickDialog('add', PRESETS[+b.getAttribute('data-preset')]));
+    });
     if (back) $('setBack').addEventListener('click', () => {
       if (!back.whole) { pickDialog('remove', back); return; }
       pushVars(back.whole.v || []);

@@ -354,7 +354,9 @@ A variable that refers back to itself is caught at a fixed depth rather than han
   to another browser. Opening one loads it straight away. Pasting one into the panel
   instead offers what it holds first, marking each entry **new**, **update** or **same**,
   with everything but the sames selected; what you take is added to what you already have,
-  and one button offers the same list back to undo it. A button loads the starting preset.
+  or replaces the lot outright, and one button offers the same list back to undo it. Ready-made
+  presets for a dozen games sit at the bottom — the first of them is what a browser with
+  nothing stored starts from.
 
 ### Two kinds of link
 
@@ -381,6 +383,8 @@ don't clip it.
 |---|---|
 | `engine.js` | tokenizer, recursive-descent parser, evaluator, explainer. No DOM. |
 | `app.js` | UI: highlighting, caret sync, result log, tools, storage. |
+| `presets.js` | ready-made rolls per game, as data |
+| `SYSTEMS.md` | what each game asks for, and what the notation cannot yet say |
 | `index.html`, `style.css` | markup and theme |
 | `tools/gen-dice.js` | builds the dice art (see below) |
 | `tools/splice.js` | regenerates and writes it into `index.html` + `style.css` |

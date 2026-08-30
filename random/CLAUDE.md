@@ -18,6 +18,8 @@ node tools/splice.js   # regenerate the dice art into index.html + style.css
 | `app.js` | everything DOM: highlighting, caret sync, result log, subtotal trees, tools, storage. |
 | `index.html`, `style.css` | markup and theme. Both contain a **generated** dice-art block. |
 | `tools/gen-dice.js`, `tools/splice.js` | the generator behind that block. |
+| `presets.js` | ready-made rolls per game, pure data. `PRESETS[0]` is what a fresh browser gets. |
+| `SYSTEMS.md` | what each game's dice ask for, and which of them the notation cannot yet say. Read it before adding a preset. |
 | `serve.js` | 25-line static server. |
 
 Never hand-edit the `<svg id="dice-sprite">` in `index.html` or the generated CSS
@@ -113,6 +115,10 @@ rendered as a `Ref` that holds no `inner`, so its dice are counted once.
   Assigning `.value` wipes it, and then Ctrl+Z does nothing.
 - **Vars and Saved are one list rendered twice** (`LISTS`, `renderList`). They
   differ only in where they are stored and what clicking the name does.
+- **In the reference, what is coloured and what is inserted are two questions.**
+  The `~` marks the part that does the work named in the description; an atom
+  still inserts its whole example. Do not colour scaffolding to make an insert
+  come out right.
 - **Reference clicks must never leave the field unparseable.** `applySnippet`
   builds candidates in preference order and takes the first that parses;
   refusing the click is an acceptable outcome.

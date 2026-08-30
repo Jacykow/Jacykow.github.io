@@ -788,3 +788,7 @@ button.roll.sec kbd{background:#171b23; color:var(--dimmer)}
   display:flex; gap:8px; flex-wrap:wrap; margin-top:1px;
 }
 .card .defs span{color:var(--dimmer)}
+
+/* the ready-made presets, laid out to be picked from */
+.presets{display:flex; flex-wrap:wrap; gap:6px; flex:1; min-width:0}
+.presets .varadd{font-size:11.5px; padding:4px 10px}
