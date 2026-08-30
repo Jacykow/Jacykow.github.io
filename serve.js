@@ -1,4 +1,5 @@
-/* Minimal static file server for local development: `node serve.js [port]` */
+/* The whole site, served from this directory for local development:
+   `node serve.js [port]` puts the portfolio at / and Random Engine at /random/. */
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -13,12 +14,15 @@ const TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
-  '.md': 'text/plain; charset=utf-8'   // the reference links to the README
+  '.md': 'text/plain; charset=utf-8',  // Random Engine's reference links to its README
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.webm': 'video/webm', '.mp4': 'video/mp4',
+  '.pdf': 'application/pdf', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8'
 };
 
 http.createServer((req, res) => {
   const url = decodeURIComponent(req.url.split('?')[0]);
-  const rel = url === '/' ? '/index.html' : url;
+  // a directory means its index, the way GitHub Pages serves one
+  const rel = url.endsWith('/') ? url + 'index.html' : url;
   const file = path.join(ROOT, path.normalize(rel).replace(/^([/\\])+/, ''));
 
   if (!file.startsWith(ROOT)) { res.writeHead(403).end('forbidden'); return; }
@@ -31,4 +35,4 @@ http.createServer((req, res) => {
     });
     res.end(data);
   });
-}).listen(PORT, () => console.log('Random Engine on http://localhost:' + PORT));
+}).listen(PORT, () => console.log('site on http://localhost:' + PORT + '  (Random Engine at /random/)'));

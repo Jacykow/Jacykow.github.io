@@ -5,9 +5,15 @@ you type, and rolled only when you ask. No build step, no dependencies, no
 network. `README.md` is the user-facing documentation — read it first, it is the
 spec. This file is the parts that are not obvious from the outside.
 
+This directory is one part of the site it lives in; `../CLAUDE.md` covers the
+rest of it, including how any of it reaches the web.
+
+Paths below are from the site root, where you probably are:
+
 ```bash
-node serve.js          # http://localhost:5173
-node tools/splice.js   # regenerate the dice art into index.html + style.css
+node serve.js                # the whole site; this is at /random/
+node random/tools/check.js   # the engine’s checks; see Testing at the end
+node random/tools/splice.js  # regenerate the dice art into index.html + style.css
 ```
 
 ## The files
@@ -15,13 +21,13 @@ node tools/splice.js   # regenerate the dice art into index.html + style.css
 | File | What lives there |
 |---|---|
 | `engine.js` | tokenizer, parser, evaluator, explainer, preview. **No DOM.** Exposes `window.DiceEngine`. |
-| `app.js` | everything DOM: highlighting, caret sync, result log, subtotal trees, tools, storage. Data lives in the two files below, not here. |
+| `app.js` | everything DOM: highlighting, caret sync, result log, subtotal trees, tools, storage. Data lives in `presets.js` and `reference.js`, not here. |
 | `index.html`, `style.css` | markup and theme. Both contain a **generated** dice-art block. |
 | `tools/gen-dice.js`, `tools/splice.js` | the generator behind that block. |
+| `tools/check.js` | everything worth checking before committing an engine change. |
 | `presets.js` | ready-made rolls per game, pure data. `PRESETS[0]` is what a fresh browser gets. |
 | `reference.js` | the reference panel, pure data: example, description, form, hover note. |
 | `SYSTEMS.md` | what each game's dice ask for, and which of them the notation cannot yet say. Read it before adding a preset. |
-| `serve.js` | 25-line static server. |
 
 Never hand-edit the `<svg id="dice-sprite">` in `index.html` or the generated CSS
 block. Change `tools/gen-dice.js` and run `tools/splice.js`.
@@ -39,6 +45,17 @@ attaches to the second and errors on the first.
 the status line that fails on Enter is a bug; if you add a construct that can
 fail at roll time, add the static check with it.
 
+**`@` is the one modifier that hands back a different value than it was given.**
+Every other one reshapes what a roll produced; `applyMap` builds new members, so
+it is the only branch of `applyMods` whose result is assigned back. A set's
+markup closes over the members array, which is why the rewritten members go into
+that same array rather than into a new set.
+
+**Numbers are whole where dice are.** `/` truncates toward zero (`idiv`), which
+is what lets `d100/10` and `d100%10` read the two digits of a percentile roll and
+keeps `(a/b)*b + a%b` equal to `a`. `arith` is the one place a `+`, a `@` or a
+computed die size does the sum, so all three refuse an infinity the same way.
+
 **Element modifiers distribute, and so does `?:`.** `4d20>5?hit:miss` is four
 comparisons and four choices, never one taken on the sum. Anything that reads a
 condition should follow that shape.
@@ -47,11 +64,14 @@ condition should follow that shape.
 `primary()` otherwise**, so `3d6>=5+1` stays `(3d6>=5)+1`. It is evaluated once
 per comparison, which is what makes `4d6>d4` roll four separate d4s.
 
-**Values share one prototype** (`VALUE`, built by `value()`). Two methods that
+**Values share one prototype** (`VALUE`, built by `value()`). Three methods that
 look redundant are not: `total()` is what a value counts as and may throw —
 a terminal result type has no number — while `raw()` is the number underneath
 and never consults the check. The display always uses `raw()` via `safeTotal`,
-which is what keeps a non-castable check drawable.
+which is what keeps a non-castable check drawable. `base()` is the third: what a
+comparison reads, which is `total()` so that a checked pool counts as its hits
+(`h::=4d6=6, h>=2`), with the value's *own* check set aside so every arm of a
+chain reads the same number instead of the verdict the arm before it wrote.
 
 **State travels down `html(o)`, not up.** A discard or a check high in the tree
 reaches the dice under it through the options object, closest check winning
@@ -97,6 +117,34 @@ there would be a lie. Hovering one lights the variable as a whole instead.
 `::=` is the opposite — rolled once into `ctx.fixed`, with later mentions
 rendered as a `Ref` that holds no `inner`, so its dice are counted once.
 
+**Categories are headings, not namespaces.** A category says where something is
+shown and nothing about what it means, so a variable under one is written the
+same way from anywhere. One shared list (`LS_CATS`) serves both panes and the
+shortcut bar; each item carries the name of the one it sits under, or none. That
+is why an empty category still renders — it is a drop target — and why the loose
+group at the end never disappears while any category exists.
+
+**Details draws two answers at once.** `distribution()` works the answer out where the
+shape of the expression allows it, and the sampler is laid over the top; a chart
+that agrees with itself is the point of drawing both. `null` from the solver
+means *cannot say* and travels all the way out — a partial answer would be
+worse than none, since the chart would quietly stop being true. Three things
+force it: a dependence the arithmetic cannot see (a `::=` binding, a choice
+about the same roll), an unbounded support (an exploding die), and sheer size.
+
+**A distribution is one number at a time, so it cannot see a set.** Everything
+element-shaped — a check, a map, a clamp — acts on each member, so `withMods`
+refuses outright on anything `isSet` says is a set. `(2d6)>=5` is two
+comparisons, not one on the sum, and the solver has to say so by saying nothing.
+Clamps are the odd one out even on a value: `min`/`max` only ever move a die
+face, so once a value has been bracketed or named they do nothing at all —
+which is what the engine does too.
+
+**`study()` is the plan, not the answer.** It parses once and hands back a
+sampler per section that can be filled in as slowly as the screen needs, so the
+chart arrives in bursts instead of one stretch long enough to be felt. Nothing
+is thrown while it is being built.
+
 ## Things that are easy to break
 
 - **Node ids are the wiring.** Every piece of the editor, Explain, preview and
@@ -116,6 +164,24 @@ rendered as a `Ref` that holds no `inner`, so its dice are counted once.
   Assigning `.value` wipes it, and then Ctrl+Z does nothing.
 - **Vars and Saved are one list rendered twice** (`LISTS`, `renderList`). They
   differ only in where they are stored and what clicking the name does.
+- **A colour means one thing.** Five roles and two verdicts, listed at the top
+  of `style.css` and in the README. A number and a word are one role — a value —
+  and a die is a name in the same sense a variable is. Green and red are spent
+  entirely on verdicts. `describe` colours a bare word as a name only when a
+  variable of that name is set, so it takes the variables to answer that. The
+  reference and the Explain chips paint themselves with the editor's own `t-*`
+  classes rather than a colour of their own; emphasis there is carried by
+  fading, never by recolouring.
+- **Every die value is one size**, however long. A D8 and a D10 side by side
+  have to read as the same kind of thing, and a long one spilling over its shape
+  beats one too small to read.
+- **Where a row is kept and where it is drawn are two orders.** Rows are grouped
+  under their headings, so `readList` and `commitList` read `data-i` off each row
+  rather than counting them off the page.
+- **`draggable` belongs on the handle, never on the row.** A `dragstart` names
+  the draggable element itself, so a row that carried it could never say which
+  part of itself the drag began on — a check for the handle there cancels every
+  drag. The listeners hang off the pane, since every drop redraws the rows.
 - **In the reference, what is coloured and what is inserted are two questions.**
   The `~` marks the part that does the work named in the description; an atom
   still inserts its whole example. Do not colour scaffolding to make an insert
@@ -123,7 +189,7 @@ rendered as a `Ref` that holds no `inner`, so its dice are counted once.
 - **Reference clicks must never leave the field unparseable.** `applySnippet`
   builds candidates in preference order and takes the first that parses;
   refusing the click is an acceptable outcome.
-- **The shortcut bar and the Vars panel are two views of one list.** Whichever
+- **The shortcut bar and the Variables panel are two views of one list.** Whichever
   is being typed into does not get rebuilt — the other does. Stepping a number
   never rebuilds the bar either, or the button would move out from under the
   cursor as the number gains a digit.
@@ -146,27 +212,33 @@ rendered as a `Ref` that holds no `inner`, so its dice are counted once.
 
 ## Testing
 
-There is no test runner. `engine.js` is pure and loads under Node with two stubs,
-which is enough for a throwaway harness:
+There is no test framework and nothing to install. `engine.js` is pure and loads
+under Node with one stub, which is all `tools/check.js` needs:
 
-```js
-global.window = {}; global.crypto = require('crypto').webcrypto;
-new Function(require('fs').readFileSync('engine.js', 'utf8'))();
-const E = window.DiceEngine;
+```bash
+node random/tools/check.js        # about half a minute
+node random/tools/check.js full   # ten times the samples, for a real change
 ```
 
-Worth doing on any change to the engine: run a list of expressions through
-`roll` + `html` + `inspect` + `preview` and re-`roll` the returned `notation` to
-check it round-trips; check a few means against their analytic values
-(`4d6dl1` ≈ 12.24, `2d20kh1` ≈ 13.83); and fuzz. A `DiceError` is a fine answer
-to nonsense — anything else, or a non-finite total, is a bug in the engine.
+The check that earns its keep is the first one it runs: wherever
+`distribution()` claims an exact answer, the same expression is thrown a great
+many times and the two are compared. Two independent answers agreeing is the
+only evidence either is right, and it has caught every solver bug so far.
+
+Because it makes hundreds of those comparisons, its thresholds are deliberately
+loose — tight enough to catch a systematic error, loose enough not to cry wolf.
+If one expression fails, throw it a million times by hand before believing it:
+sampling noise looks exactly like a small bug.
+
+The rest is what you would expect. Every preset expression and every reference
+example must parse, roll, draw, explain, and survive being re-rolled from its
+own printed notation. A handful of means are checked against their analytic
+values. And nonsense is generated by the thousand: a `DiceError` is a fine
+answer to it, but anything else, or a non-finite total, is a bug in the engine.
 
 ## Shipping
 
-Live at <https://www.gulij.com/random>, served from the `Jacykow/Jacykow.github.io`
-repo (a GitHub Pages user site, no build step). Work happens here; the deploy
-copy is `../Jacykow.github.io/random/` on branch `random-engine`, kept as a plain
-copy of this directory.
-
-Branch and commit freely. **Never push and never merge to `main`** — Jacek
-reviews `git diff main..random-engine` and does both himself.
+Live at <https://www.gulij.com/random>. What is in this directory is what is
+served — there is no build step and no separate working copy, so editing a file
+here changes the site. See `../CLAUDE.md` for the branch rules, which are the
+one thing worth reading before committing anything.

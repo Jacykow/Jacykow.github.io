@@ -17,12 +17,17 @@
    A value is a number, or a word. Words carry no number, so a word can only
    ever be a result. Comparing produces one: `d6>4` reads success or failure.
 
+   Numbers are whole where dice are: `/` divides and throws the fraction away,
+   truncating toward zero, so `d100/10` and `d100%10` read the two digits of a
+   percentile roll and `(a/b)*b + a%b` still comes back to `a`.
+
    MODIFIERS declare the type they need, so every mismatch is caught before
    anything is rolled:
 
      die       e, r, u                   need dice to re-roll
      element   min, max, s, f, cs, cf    applied to each member in turn
      set       kh, kl, dh, dl            need a collection, error on a value
+     map       @                         rewrite each member on its own
      repeat    a, da                     roll the whole term again and choose
 
    Element modifiers distribute, and so does `?:` — `4d20>5?hit:miss` is four
@@ -39,7 +44,7 @@
      expr    := sum ['?' expr ':' (expr | chain)]
      chain   := comparison '?' expr ':' (expr | chain)
      sum     := term (('+' | '-') term)*
-     term    := power (('*' | '/' | '%') power)*
+     term    := power (('*' | '/' | '%') power)*      -- '/' is whole-number
      power   := unary (('^' | '**') power)?
      unary   := ('-' | '+')? primary
      primary := number ['(' list ')' | 'd' sides | word | custom] modifier*
@@ -48,7 +53,7 @@
               | '"' text '"' modifier*  | word modifier*
               | 'd' sides modifier*
      list    := expr (',' expr)*
-     modifier:= name [comparison]
+     modifier:= name [comparison] | '@' op unary
      comparison := ('=' | '!=' | '<' | '>' | '<=' | '>=') (integer | primary)
 
    A modifier's comparison takes a plain integer where there is one, and
@@ -101,11 +106,15 @@
     unique: { kind: 'set', order: 5, dice: true },
     keep: { kind: 'set', order: 6 },
     drop: { kind: 'set', order: 7 },
-    check: { kind: 'element', order: 8 },
+    /* Arithmetic sums a set before touching it. This is the way round that —
+       the one modifier that hands back a different value than it was given,
+       so it runs after the survivors are settled and before they are read. */
+    map: { kind: 'map', order: 8 },
+    check: { kind: 'element', order: 9 },
     /* Advantage is the odd one out: every other modifier reshapes what a roll
        produced, while this one rolls the whole term again. It is handled where
        evaluation begins rather than in applyMods, and has to be written last. */
-    adv: { kind: 'repeat', order: 9 }
+    adv: { kind: 'repeat', order: 10 }
   };
 
   /* The four checks. Only `s` carries a number through to arithmetic.
@@ -140,8 +149,14 @@
     constructor(msg, pos) { super(msg); this.name = 'DiceError'; this.pos = pos; }
   }
 
+  /* the operators a map may use, longest first so ** is not read as * */
+  const MAP_OPS = ['**', '^', '*', '/', '%', '+', '-'];
+
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  /* Division is whole-number, truncated toward zero: dice deal in whole
+     numbers, and rounding here is what lets `/` and `%` read digits off a roll. */
+  const idiv = (a, b) => Math.trunc(a / b);
   const fmt = (n) => !isFinite(n) ? String(n)
     : (Number.isInteger(n) ? String(n) : String(Math.round(n * 1000) / 1000));
   /* The other side of a comparison is either a literal or an expression, in
@@ -511,6 +526,19 @@
       const start = this.mark();
       const back = () => { this.i = start; return null; };
 
+      /* `@` takes what follows and applies it to each member on its own rather
+         than to the sum. One operator and one operand at a time, so `2d6@*2+3`
+         doubles each die and then adds 3 once; write `@*2@+3` to do both to
+         each. Keeping it short is what keeps the reading unambiguous. */
+      if (this.lit('@')) {
+        const oA = this.mark();
+        const op = MAP_OPS.find((x) => this.lit(x));
+        if (!op) this.fail('expected an operator after "@", like 2d6@*2');
+        return this.fin(start, {
+          t: 'map', op: op === '**' ? '^' : op, opSp: [oA, this.i], r: this.unary()
+        });
+      }
+
       if (this.lit('min')) {
         const n = this.signedInt();
         return n === null ? back() : this.fin(start, { t: 'min', n });
@@ -625,6 +653,13 @@
           throw new DiceError('advantage compares sums, and a ' + CHECKS[c].label.toLowerCase() +
             ' carries no number', m.sp && m.sp[0]);
         }
+      }
+      if (m.t === 'map') {
+        if (isSet(m.r)) {
+          throw new DiceError('"@" applies one value to each member, so what follows it ' +
+            'has to be a single value, not a set', m.r.sp && m.r.sp[0]);
+        }
+        typeCheck(m.r, true);
       }
       if (m.cp && m.cp.node) {
         if (isSet(m.cp.node)) {
@@ -815,6 +850,7 @@
       case 'keep': return w('keep ', 'kept ') + m.n + ' ' + end(m.end);
       case 'drop': return w('drop ', 'dropped ') + m.n + ' ' + end(m.end);
       case 'check': return CHECK_SHORT[m.check] + ' on ' + cpShort(m.cp);
+      case 'map': return w('each ', 'each ') + m.op + plain(m.r);
       case 'adv': {
         const best = m.end === 'h';
         if (m.n === 2) return best ? 'advantage' : 'disadvantage';
@@ -864,7 +900,8 @@
 
        raw()    the number underneath, never consulting the check
        total()  the number it counts as, which a check can replace
-       value    what a comparison sees: a word if it has one, else raw()
+       base()   the same, ignoring a verdict already pinned on from outside
+       value    what a comparison sees: a word if it has one, else base()
        cond()   true, false, or null when it is not a yes-or-no at all
        html(o)  markup, with `o` carrying state inherited from above
 
@@ -875,13 +912,24 @@
     check: null, dropped: false, note: null, uid: 0, mods: null,
     raw() { return 0; },
     total() { const c = checkTotal(this); return c === null ? this.raw() : c; },
+    /* What a comparison reads this as. It is total(), not raw(), because a
+       set of checked dice counts as its hits — that is what lets `h::=4d6=6`
+       then `h>=2` ask about two sixes rather than about their faces. Its own
+       check is set aside first, so every arm of a chain reads the same number
+       rather than the verdict the arm before it wrote. */
+    base() {
+      const c = this.check;
+      if (!c) return this.total();
+      this.check = null;
+      try { return this.total(); } finally { this.check = c; }
+    },
     cond() {
       if (this.check) return this.check.hit;
       return this.inner ? this.inner.cond() : null;
     },
     get value() {
       const w = this.word;
-      return (w === undefined || w === null) ? this.raw() : w;
+      return (w === undefined || w === null) ? this.base() : w;
     },
     /* a word belongs to whatever is innermost, so a wrapper reports its own */
     get word() { return this.inner ? this.inner.word : this._word; },
@@ -1009,12 +1057,10 @@
         const cls = ['die', 'custom', 's-' + shape];
         if (mk) cls.push(mk.trim());
         if (isDropped(o, this)) cls.push('dropped');
-        const len = String(face).length;
-        const size = len >= 5 ? ' v5' : (len >= 4 ? ' v4' : (len === 3 ? ' v3' : (len === 2 ? ' v2' : '')));
         return '<span class="' + cls.join(' ') + '"' + tag + ' title="custom die">' +
           '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
           '<use href="#sh-' + shape + '"/></svg>' +
-          '<span class="dieval' + size + '">' + esc(String(face)) + '</span></span>';
+          '<span class="dieval">' + esc(String(face)) + '</span></span>';
       }
     });
   }
@@ -1123,7 +1169,6 @@
     const mk = inheritClass(o, item);
     if (mk) cls.push(mk.trim());
     const face = fmt(r.v);
-    const size = face.length >= 3 ? ' v3' : (face.length === 2 ? ' v2' : '');
     let badge = '';
     if (r.from !== null && r.from !== undefined) badge = '<s>' + esc(fmt(r.from)) + '</s>';
     else if (r.tags.indexOf('exploded') >= 0) badge = '!';
@@ -1132,7 +1177,7 @@
     return '<span class="' + cls.join(' ') + '"' + tag + ' title="' + esc(title) + '">' +
       '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
       '<use href="#sh-' + shape + '"/></svg>' +
-      '<span class="dieval' + size + '">' + esc(face) + '</span>' +
+      '<span class="dieval">' + esc(face) + '</span>' +
       (badge ? '<span class="diebadge">' + badge + '</span>' : '') + '</span>';
   }
 
@@ -1152,6 +1197,26 @@
      ========================================================================== */
   const makeDie = (sides) => rng.int(1, sides);
   const num = (node, ctx) => evalNode(node, ctx).total();
+
+  /* Infinity and NaN mean nothing as a roll, so they are an error here rather
+     than a total nobody can read. A sum and a map both come through here. */
+  function arith(op, a, b, sp) {
+    let v;
+    switch (op) {
+      case '+': v = a + b; break;
+      case '-': v = a - b; break;
+      case '*': v = a * b; break;
+      case '/': v = idiv(a, b); break;
+      case '%': v = a % b; break;
+      case '^': v = Math.pow(a, b); break;
+    }
+    if (!isFinite(v)) {
+      throw new DiceError(b === 0 && (op === '/' || op === '%')
+        ? 'cannot divide by zero'
+        : 'that works out to a number too big to use', sp && sp[0]);
+    }
+    return v;
+  }
 
   function applyDieMods(rolls, sides, mods, ctx) {
     const tag = (r, t) => { if (r.tags.indexOf(t) < 0) r.tags.push(t); };
@@ -1219,6 +1284,25 @@
     }
   }
 
+  /* Every other modifier reshapes what it was handed; this one replaces it.
+     The right-hand side is worked out once per member, the same way a
+     comparison is, so `2d6@*d4` rolls a fresh d4 for each die. A member already
+     thrown away is left as it is: it takes no further part.
+
+     The set's own markup closes over the members array, so the rewritten
+     members go back into that same array rather than into a new set. */
+  function applyMap(value, m, ctx) {
+    const one = (item) => {
+      if (item.dropped) return item;
+      const r = evalNode(m.r, ctx);
+      const v = arith(m.op, item.total(), r.total(), m.opSp);
+      return Expr(v, [item, '<span class="r-op">' + esc(m.op) + '</span>', r]);
+    };
+    if (!value.set) return one(value);
+    value.members.splice(0, value.members.length, ...value.members.map(one));
+    return value;
+  }
+
   function applySet(value, m, sides, ctx) {
     if (!value.set) throw new DiceError('"' + modText(m) + '" needs a set of values');
     const members = value.members;
@@ -1251,7 +1335,6 @@
   }
 
   function applyMods(value, mods, sides, ctx) {
-    if (mods && mods.length) value.mods = mods;   // the subtotal bracket names them
     const ordered = mods.filter((m) => {
       const k = MODS[m.t === 'check' ? 'check' : m.t];
       return k && k.kind !== 'die';
@@ -1263,9 +1346,12 @@
 
     for (const m of ordered) {
       const kind = MODS[m.t === 'check' ? 'check' : m.t].kind;
-      if (kind === 'element') eachMember(value, (item) => applyElement(item, m, ctx));
+      // a map hands back a different value, so it is the one that is assigned
+      if (kind === 'map') value = applyMap(value, m, ctx);
+      else if (kind === 'element') eachMember(value, (item) => applyElement(item, m, ctx));
       else applySet(value, m, sides, ctx);
     }
+    if (mods && mods.length) value.mods = mods;   // the subtotal bracket names them
     return value;
   }
 
@@ -1445,23 +1531,7 @@
 
       case 'bin': {
         const l = evalNode(node.l, ctx), r = evalNode(node.r, ctx);
-        const a = l.total(), b = r.total();
-        let v;
-        switch (node.op) {
-          case '+': v = a + b; break;
-          case '-': v = a - b; break;
-          case '*': v = a * b; break;
-          case '/': v = a / b; break;
-          case '%': v = a % b; break;
-          case '^': v = Math.pow(a, b); break;
-        }
-        // Infinity and NaN mean nothing as a roll, so they are an error here
-        // rather than a total nobody can read
-        if (!isFinite(v)) {
-          throw new DiceError(b === 0 && (node.op === '/' || node.op === '%')
-            ? 'cannot divide by zero'
-            : 'that works out to a number too big to use', node.opSp && node.opSp[0]);
-        }
+        const v = arith(node.op, l.total(), r.total(), node.opSp);
         const tag = uidOf(node, ctx) ? ' data-x="o' + node.uid + '"' : '';
         return Expr(v, [l, '<span class="r-op"' + tag + '>' + esc(node.op) + '</span>', r]);
       }
@@ -1520,6 +1590,7 @@
       case 'keep': return 'k' + m.end + m.n;
       case 'drop': return 'd' + m.end + m.n;
       case 'check': return (m.bare ? '' : m.check) + cpText(m.cp);
+      case 'map': return '@' + m.op + plain(m.r);
       case 'adv': return (m.end === 'h' ? 'a' : 'da') + (m.n === 2 ? '' : m.n);
     }
     return '';
@@ -1591,6 +1662,10 @@
       case 'drop': return ['Drop ' + (m.end === 'h' ? 'highest' : 'lowest'),
         'Throw away the ' + (m.n === 1 ? '' : m.n + ' ') + (m.end === 'h' ? 'highest' : 'lowest') +
         ' member. Needs a set.'];
+      case 'map': return ['Each',
+        'Apply ' + m.op + plain(m.r) + ' to every member on its own, instead of to the sum. ' +
+        'The right side is worked out afresh for each one, so 2d6@*d4 rolls a d4 per die. ' +
+        'One operator at a time — chain another @ for more.'];
       case 'adv': {
         const best = m.end === 'h' ? 'best' : 'worst';
         return [m.end === 'h' ? 'Advantage' : 'Disadvantage',
@@ -1617,14 +1692,18 @@
     '+': ['Add', 'Each side is reduced to a value first — a set is summed.'],
     '-': ['Subtract', 'Each side is reduced to a value first — a set is summed.'],
     '*': ['Multiply', 'A set is summed before multiplying, never multiplied out.'],
-    '/': ['Divide', 'Fractions are kept.'],
-    '%': ['Remainder', 'The remainder after dividing.'],
+    '/': ['Divide', 'Whole numbers only — the fraction is dropped, so 7/2 is 3. ' +
+      'Together with % this reads the digits of a roll: d100/10 is the tens, d100%10 the units.'],
+    '%': ['Remainder', 'What is left after whole-number division.'],
     '^': ['Power', 'Raise the left side to the power of the right.']
   };
 
-  function describe(ast, src) {
+  function describe(ast, src, vars) {
     const spans = [], rows = [];
     let uid = 0;
+    // a bare word only reads as a variable while one of that name is set
+    const known = (name) =>
+      (vars && vars[name] !== undefined) || VARS[name] !== undefined;
 
     const push = (sp, cls, row, fixedId) => {
       if (!sp) return null;
@@ -1654,18 +1733,23 @@
           }, 'w' + node.uid);
           mods(node, depth);
           break;
-        case 'word':
-          push(node.sp, node.forced ? 't-var' : 't-str', {
-            title: node.forced ? 'Variable' : 'Word or variable',
+        case 'word': {
+          const isVar = node.forced || known(node.name);
+          push(node.sp, isVar ? 't-var' : 't-str', {
+            title: node.forced ? 'Variable' : (isVar ? 'Variable' : 'Word'),
             desc: node.forced
               ? 'Always the variable ' + node.name + ', worked out afresh wherever it appears.'
-              : 'If a variable named ' + node.name + ' is set it is used here and worked out afresh; ' +
-                'otherwise this is just the word ' + node.name + '. Write {' + node.name +
-                '} to insist on the variable.',
+              : (isVar
+                ? 'The variable ' + node.name + ', worked out afresh wherever it appears. ' +
+                  'Unset it and this becomes the plain word ' + node.name + '; write {' +
+                  node.name + '} to insist on the variable.'
+                : 'The word ' + node.name + '. Words carry no number, so a word can only be a ' +
+                  'result. Set a variable of that name and this becomes the variable instead.'),
             depth
           }, 'w' + node.uid);
           mods(node, depth);
           break;
+        }
         case 'custom': {
           const cid = 'c' + node.uid;
           push(node.brk[0], 't-brk', {
@@ -1816,7 +1900,7 @@
         if (a === null || b === null) return null;
         switch (node.op) {
           case '+': return a + b; case '-': return a - b; case '*': return a * b;
-          case '/': return a / b; case '%': return a % b; case '^': return Math.pow(a, b);
+          case '/': return idiv(a, b); case '%': return a % b; case '^': return Math.pow(a, b);
         }
         return null;
       }
@@ -1831,13 +1915,16 @@
     (n.t === 'num' || n.t === 'str' || n.t === 'word' || n.t === 'custom' ||
      (n.t === 'dice' && n.qty === null));
 
-  /** a die that has not been rolled, wearing its name rather than a face */
+  /* A die that has not been rolled, wearing its name rather than a face. Every
+     die value and every die name is drawn at one size, whatever its length: a
+     D8 and a D10 sitting side by side have to read as the same kind of thing,
+     and a long one spilling over its shape is better than one too small to
+     read. */
   function ghostDie(shape, face, tag, extra) {
-    const size = face.length >= 4 ? ' v4' : (face.length === 3 ? ' v3' : (face.length === 2 ? ' v2' : ''));
     return '<span class="die ghost' + (extra || '') + ' s-' + shape + '"' + tag + '>' +
       '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
       '<use href="#sh-' + shape + '"/></svg>' +
-      '<span class="dieval' + size + '">' + esc(face) + '</span></span>';
+      '<span class="dieval">' + esc(face) + '</span></span>';
   }
 
   /** comparisons belong in the preview: they are what the roll is being read for */
@@ -2063,12 +2150,17 @@
         spans.push({ a: part.nameSp[0], b: part.nameSp[1], cls: 't-var', id: aid });
         spans.push({ a: part.opSp[0], b: part.opSp[1], cls: 't-op', id: aid });
         rows.push({
-          id: aid, code: part.assign + ':=', depth: 0, title: 'Assignment',
+          id: aid, code: part.assign + (part.once ? '::=' : ':='), depth: 0,
+          title: part.once ? 'Assignment, rolled once' : 'Assignment',
           desc: 'Sets ' + part.assign + ' for this expression only, shadowing any variable ' +
-            'of that name in the panel. It is still worked out afresh wherever it is used.'
+            'of that name in the panel. ' + (part.once
+              ? 'It is rolled once and every mention is that same result, which is what ' +
+                'lets several comparisons ask about one roll. It stands for what the roll ' +
+                'came to, so it is a value and never a set.'
+              : 'It is worked out afresh wherever it is used.')
         });
       }
-      const d = describe(part.ast, part.src);
+      const d = describe(part.ast, part.src, p.vars);
       for (const s of d.spans) spans.push({ a: s.a + part.a, b: s.b + part.a, cls: s.cls, id: s.id });
       for (const r of d.rows) rows.push(Object.assign({}, r));
       if (i < p.parts.length - 1) {
@@ -2250,6 +2342,26 @@
     return { min: Math.min.apply(null, c), max: Math.max.apply(null, c) };
   }
 
+  /* What a binary operator can come to, given what each side can. Division
+     needs a divisor that never touches zero; a remainder and a power are only
+     pinned down when the right side is fixed. */
+  function opBounds(op, l, r) {
+    if (!l || !r) return null;
+    if (op === '+') return pair(l, r, (x, y) => x + y);
+    if (op === '-') return pair(l, r, (x, y) => x - y);
+    if (op === '*') return pair(l, r, (x, y) => x * y);
+    if (op === '/') return (r.min <= 0 && r.max >= 0) ? null : pair(l, r, idiv);
+    if (op === '%') {
+      if (r.min !== r.max || r.min <= 0 || l.min < 0) return null;
+      return span(0, Math.min(r.min - 1, Math.floor(l.max)));
+    }
+    if (op === '^') {
+      if (r.min !== r.max || r.min < 0 || l.min < 0) return null;
+      return pair(l, r, (x, y) => Math.pow(x, y));
+    }
+    return null;
+  }
+
   function boundsOf(node, ctx) {
     if (!node || typeof node !== 'object') return null;
     const mods = node.mods || [];
@@ -2263,21 +2375,17 @@
 
   function rawBounds(node, ctx) {
     const mods = node.mods || [];
+    // anywhere but on dice, a map lands on members this cannot see one by one
+    if (node.t !== 'dice' && mods.some((m) => m.t === 'map')) return null;
     let b = null;
 
     switch (node.t) {
       case 'num': b = span(node.v, node.v); break;
       case 'neg': { const v = boundsOf(node.v, ctx); b = v && span(-v.min, -v.max); break; }
       case 'paren': b = boundsOf(node.v, ctx); break;
-      case 'bin': {
-        const l = boundsOf(node.l, ctx), r = boundsOf(node.r, ctx);
-        if (node.op === '+') b = pair(l, r, (x, y) => x + y);
-        else if (node.op === '-') b = pair(l, r, (x, y) => x - y);
-        else if (node.op === '*') b = pair(l, r, (x, y) => x * y);
-        else if (node.op === '/') b = (r && r.min <= 0 && r.max >= 0) ? null : pair(l, r, (x, y) => x / y);
-        else b = null;                      // % and ^ are not worth guessing at
+      case 'bin':
+        b = opBounds(node.op, boundsOf(node.l, ctx), boundsOf(node.r, ctx));
         break;
-      }
       case 'func': {
         const parts = node.args.map((a) => boundsOf(a, ctx));
         if (parts.some((x) => !x)) return null;
@@ -2342,7 +2450,14 @@
           if (m.t === 'drop') n = Math.max(0, n - m.n);
         }
         if (hi < lo) hi = lo;
-        b = span(n * lo, n * hi);
+        // a map rewrites each face, so it lands before the faces are added up
+        let face = span(lo, hi);
+        for (const m of mods) {
+          if (m.t !== 'map') continue;
+          face = opBounds(m.op, face, boundsOf(m.r, ctx));
+          if (!face) return null;
+        }
+        b = span(n * face.min, n * face.max);
         break;
       }
       default: return null;
@@ -2381,46 +2496,62 @@
 
   /* A roll that lands on a word has no total, so the run counts words instead
      of summing them. Both may happen in the same expression. */
-  function runOne(input, n) {
+  /* A run that can be added to. The expression is parsed once and then thrown
+     as often as asked, so a chart can be filled in a few short bursts rather
+     than in one stretch long enough to be felt. */
+  function sampler(input) {
     const p = parse(input);
     const can = outcomes(input);
     const totals = [];
     const tally = {};
     for (const w of can.words) tally[w] = 0;
+    let n = 0;
 
-    for (let i = 0; i < n; i++) {
-      let t = 0, word = null;
-      for (let r = 0; r < p.repeat; r++) {
-        const ctx = rollCtx(p);
-        for (const part of p.rolls) {
-          const v = evalNode(part.ast, ctx);
-          try { t += v.total(); }
-          catch (e) { word = wordText(v) || word; }
+    function run(k) {
+      for (let i = 0; i < k; i++) {
+        let t = 0, word = null;
+        for (let r = 0; r < p.repeat; r++) {
+          const ctx = rollCtx(p);
+          for (const part of p.rolls) {
+            const v = evalNode(part.ast, ctx);
+            try { t += v.total(); }
+            catch (e) { word = wordText(v) || word; }
+          }
         }
+        if (word !== null) tally[word] = (tally[word] || 0) + 1;
+        else totals.push(t);
+        n++;
       }
-      if (word !== null) tally[word] = (tally[word] || 0) + 1;
-      else totals.push(t);
     }
 
-    const out = {
-      n, totals, tally,
-      words: can.words.concat(Object.keys(tally).filter((w) => can.words.indexOf(w) < 0)),
-      canMin: can.min, canMax: can.max
-    };
-    if (!totals.length) return Object.assign(out, { numeric: 0 });
+    function stats() {
+      const out = {
+        n, totals, tally,
+        words: can.words.concat(Object.keys(tally).filter((w) => can.words.indexOf(w) < 0)),
+        canMin: can.min, canMax: can.max
+      };
+      if (!totals.length) return Object.assign(out, { numeric: 0 });
 
-    let sum = 0, min = Infinity, max = -Infinity;
-    for (const t of totals) { sum += t; if (t < min) min = t; if (t > max) max = t; }
-    const mean = sum / totals.length;
-    let varsum = 0;
-    for (const t of totals) varsum += (t - mean) * (t - mean);
-    const sorted = totals.slice().sort((a, b) => a - b);
-    return Object.assign(out, {
-      numeric: totals.length, min, max, mean, stdev: Math.sqrt(varsum / totals.length),
-      median: sorted[Math.floor(sorted.length / 2)],
-      p10: sorted[Math.floor(sorted.length * 0.10)],
-      p90: sorted[Math.floor(sorted.length * 0.90)]
-    });
+      let sum = 0, min = Infinity, max = -Infinity;
+      for (const t of totals) { sum += t; if (t < min) min = t; if (t > max) max = t; }
+      const mean = sum / totals.length;
+      let varsum = 0;
+      for (const t of totals) varsum += (t - mean) * (t - mean);
+      const sorted = totals.slice().sort((a, b) => a - b);
+      const at = (q) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))];
+      return Object.assign(out, {
+        numeric: totals.length, min, max, mean, stdev: Math.sqrt(varsum / totals.length),
+        median: at(0.5), p10: at(0.10), p25: at(0.25), p75: at(0.75), p90: at(0.90)
+      });
+    }
+
+    return { run, stats, count() { return n; } };
+  }
+
+  function runOne(input, n) {
+    const s = sampler(input);
+    s.run(n);
+    return s.stats();
   }
 
   /* `3d10` produces three values, all of them a d10; `4(x),d10,d10` produces
@@ -2467,10 +2598,12 @@
     return { src: plain(u.node), times: u.times };
   };
 
-  function analyse(input, n) {
-    n = n || 20000;
+  /* A study is the plan for a chart: which sub-expressions are worth reporting
+     on, the exact answer for each where there is one, and a sampler for each
+     that can be filled in as slowly as the screen needs. Nothing is thrown
+     until `run` is called, so building one is cheap. */
+  function study(input) {
     const p = parse(input);
-    const whole = runOne(input, n);
 
     // a binding rolled once cannot be taken apart without changing what it means
     const preamble = p.parts.filter((x) => x.assign && !x.once)
@@ -2486,52 +2619,509 @@
         else units.push({ src: u.src, times: u.times * p.repeat });
       }
     }
-
     const many = units.reduce((a, u) => a + u.times, 0) > 1 || units.length > 1;
-    const groups = (many ? units : []).map((u) => {
+
+    const open = (src) => {
+      let sam = null, exact = null;
+      try { sam = sampler(src); } catch (e) { return null; }
+      try { exact = distribution(src); } catch (e) { exact = null; }
+      return { sam, exact };
+    };
+
+    const sections = [];
+    for (const u of (many ? units : [])) {
       const src = preamble ? preamble + ', ' + u.src : u.src;
-      let r = null;
-      try { r = runOne(src, n); } catch (e) { r = null; }
-      return r && Object.assign({ src: u.src, times: u.times }, r);
-    }).filter(Boolean);
-
-    /* The whole result is one value per unit, so what it can be is every way
-       of choosing one from each — `2(band)` over four words is sixteen, not
-       four. That multiplies out fast, so past a point it is left to what the
-       run actually turned up. */
-    const lists = [];
-    for (const g of groups) {
-      if (!g.words.length) continue;
-      for (let i = 0; i < g.times; i++) lists.push(g.words);
+      const o = open(src);
+      if (o) sections.push({ title: u.src, src, times: u.times, sam: o.sam, exact: o.exact });
     }
-    const size = lists.reduce((a, l) => a * l.length, 1);
-    if (lists.length && size <= LIMIT.combos) {
-      let combos = [''];
-      for (const l of lists) {
-        const next = [];
-        for (const head of combos) for (const w of l) next.push(head ? head + ', ' + w : w);
-        combos = next;
+    const w = open(input);
+    // the sum is only news when there was more than one thing to add up
+    if (w && (many || !sections.length)) {
+      sections.push({ title: sections.length ? 'total' : null, src: input,
+                      times: 1, whole: true, sam: w.sam, exact: w.exact });
+    }
+
+    function run(k) { for (const sec of sections) sec.sam.run(k); }
+    function count() { return sections.length ? sections[0].sam.count() : 0; }
+
+    function snapshot() {
+      const out = sections.map((sec) =>
+        Object.assign({ title: sec.title, src: sec.src, times: sec.times,
+                        whole: !!sec.whole, exact: sec.exact }, sec.sam.stats()));
+      const groups = out.filter((x) => !x.whole);
+      const whole = out.find((x) => x.whole);
+
+      /* The whole result is one value per unit, so what it can be is every way
+         of choosing one from each — `2(band)` over four words is sixteen, not
+         four. That multiplies out fast, so past a point it is left to what the
+         run actually turned up. */
+      if (whole) {
+        const lists = [];
+        for (const g of groups) {
+          if (!g.words.length) continue;
+          for (let i = 0; i < g.times; i++) lists.push(g.words);
+        }
+        const size = lists.reduce((a, l) => a * l.length, 1);
+        if (lists.length && size <= LIMIT.combos) {
+          let combos = [''];
+          for (const l of lists) {
+            const next = [];
+            for (const head of combos) for (const x of l) next.push(head ? head + ', ' + x : x);
+            combos = next;
+          }
+          whole.words = combos;
+          const tally = {};
+          for (const c of combos) tally[c] = whole.tally[c] || 0;
+          whole.tally = tally;
+        } else if (lists.length) {
+          // too many to name, so report the ones that happened, commonest first
+          whole.words = Object.keys(whole.tally)
+            .sort((a, b) => whole.tally[b] - whole.tally[a]).slice(0, LIMIT.combos);
+        }
       }
-      whole.words = combos;
-      const tally = {};
-      for (const c of combos) tally[c] = whole.tally[c] || 0;
-      whole.tally = tally;
-    } else if (lists.length) {
-      // too many to name, so report the ones that happened, commonest first
-      whole.words = Object.keys(whole.tally)
-        .sort((a, b) => whole.tally[b] - whole.tally[a]).slice(0, LIMIT.combos);
+      return { notation: p.notation, sections: out };
     }
 
-    return Object.assign({}, whole, {
-      notation: p.notation,
-      groups,
-      // the sum is only news when there was more than one thing to add up
-      showWhole: many || !groups.length
+    return { notation: p.notation, run, count, snapshot, sections };
+  }
+
+  /** the old shape: build a study, run it all at once, and read it off */
+  function analyse(input, n) {
+    const st = study(input);
+    st.run(n || 20000);
+    const snap = st.snapshot();
+    const whole = snap.sections.find((x) => x.whole);
+    const groups = snap.sections.filter((x) => !x.whole);
+    return Object.assign({}, whole || { words: [], tally: {}, numeric: 0, n: n || 20000 }, {
+      notation: snap.notation, groups, showWhole: !!whole
     });
+  }
+
+  /* ==========================================================================
+     WHAT AN EXPRESSION COMES TO, EXACTLY
+     A simulation only ever approaches the answer. Where the shape of an
+     expression allows it, the answer can be worked out instead: every value it
+     can reach and how likely each one is.
+
+     A distribution is a Map from value to probability. `null` at any point
+     means "cannot say", and it travels all the way out — a partial answer
+     would be worse than none, since the chart would quietly stop being true.
+     Three things force it: a dependence the arithmetic cannot see (a `::=`
+     binding, a choice about the same roll), an unbounded support (an exploding
+     die), and sheer size (the caps below).
+     ========================================================================== */
+  const DLIM = { vals: 30000, pairs: 2000000, multisets: 400000, dice: 400 };
+
+  const dOne = (v) => new Map([[v, 1]]);
+
+  /* A count or a number of sides may be written as a variable rather than
+     typed. Anything that comes to exactly one value is as good as a constant
+     here, which is what lets a pool written as (pool)d10 be worked out. */
+  function constVal(node, ctx) {
+    const c = constOf(node);
+    if (c !== null) return c;
+    const d = distOf(node, ctx);
+    if (!d || d.size !== 1) return null;
+    return d.keys().next().value;
+  }
+
+  /** every pair of one distribution with another, combined by f */
+  function dPair(a, b, f) {
+    if (!a || !b) return null;
+    if (a.size * b.size > DLIM.pairs) return null;
+    const out = new Map();
+    for (const [x, px] of a) {
+      for (const [y, py] of b) {
+        const v = f(x, y);
+        if (!isFinite(v)) return null;
+        out.set(v, (out.get(v) || 0) + px * py);
+      }
+    }
+    return out.size > DLIM.vals ? null : out;
+  }
+
+  /** the sum of n independent copies, by repeated squaring */
+  function dPower(d, n) {
+    if (!d || !(n >= 0)) return null;
+    let out = dOne(0), base = d, k = Math.floor(n);
+    while (k > 0) {
+      if (k & 1) { out = dPair(out, base, (x, y) => x + y); if (!out) return null; }
+      k >>= 1;
+      if (k) { base = dPair(base, base, (x, y) => x + y); if (!base) return null; }
+    }
+    return out;
+  }
+
+  /** weighted mixture, for a custom die and for a variable read more than once */
+  function dMix(parts, weights) {
+    const out = new Map();
+    parts.forEach((d, i) => {
+      if (!d) return;
+      for (const [v, p] of d) out.set(v, (out.get(v) || 0) + p * weights[i]);
+    });
+    return (parts.some((d) => !d) || out.size > DLIM.vals) ? null : out;
+  }
+
+  /* ------------------------------------------------------------ one die
+     The faces of a single die once everything that acts on a face alone has
+     been applied. A re-roll is exact both ways round: once over, the old face
+     hands its weight to a fresh throw; repeated, the qualifying faces simply
+     cannot be where it stops, so what is left is renormalised. */
+  function faceDist(node, ctx) {
+    const sides = constVal(node.sides, ctx);
+    if (sides === null || !(sides >= 1) || sides > 4096) return null;
+    const n = Math.floor(sides);
+    let faces = new Map();
+    for (let f = 1; f <= n; f++) faces.set(f, 1 / n);
+
+    const mods = (node.mods || []).slice()
+      .sort((a, b) => (MODS[a.t === 'check' ? 'check' : a.t] || { order: 99 }).order -
+                      (MODS[b.t === 'check' ? 'check' : b.t] || { order: 99 }).order);
+
+    for (const m of mods) {
+      if (m.t === 'explode' || m.t === 'unique') return null;   // no ceiling, or coupled
+      if (m.t === 'min' || m.t === 'max') {
+        const out = new Map();
+        for (const [f, p] of faces) {
+          const v = m.t === 'min' ? Math.max(f, m.n) : Math.min(f, m.n);
+          out.set(v, (out.get(v) || 0) + p);
+        }
+        faces = out;
+        continue;
+      }
+      if (m.t === 'reroll') {
+        const cp = m.cp || { op: '=', v: 1 };
+        const hits = (f) => { const r = cpConst(cp, f); return r === null ? null : r; };
+        let bad = 0;
+        for (const [f, p] of faces) {
+          const h = hits(f);
+          if (h === null) return null;
+          if (h) bad += p;
+        }
+        if (bad >= 1) return null;                     // nothing left to land on
+        const out = new Map();
+        for (const [f, p] of faces) {
+          const h = hits(f);
+          // once over: the old face keeps its weight and passes on the rest
+          const kept = h ? 0 : p;
+          out.set(f, (out.get(f) || 0) + (m.inf ? kept / (1 - bad) : kept + bad * p));
+        }
+        faces = out;
+        continue;
+      }
+      if (m.t === 'map') {
+        const r = distOf(m.r, ctx);
+        const out = dPair(faces, r, (x, y) => arith(m.op, x, y, m.opSp));
+        if (!out) return null;
+        faces = out;
+        continue;
+      }
+      if (m.t === 'keep' || m.t === 'drop' || m.t === 'check' || m.t === 'adv') continue;
+      return null;
+    }
+    return faces;
+  }
+
+  /** a comparison against a fixed face, when the other side is a plain number */
+  function cpConst(cp, v) {
+    if (cp.node) {
+      const c = constOf(cp.node);
+      return c === null ? null : compare(cp.op, v, c);
+    }
+    return compare(cp.op, v, cp.v);
+  }
+
+  /* Keeping or dropping couples the dice, so they have to be looked at
+     together: every multiset of n faces, weighted by how many orders produce
+     it. That count grows quickly, which is what the cap is for. */
+  function keptSumDist(faces, n, keep) {
+    const vals = Array.from(faces.keys()).sort((a, b) => a - b);
+    const probs = vals.map((v) => faces.get(v));
+    const F = vals.length;
+    // C(n + F - 1, F - 1) multisets; refuse before building any of them
+    let count = 1;
+    for (let i = 1; i <= F - 1; i++) count = count * (n + i) / i;
+    if (!(count <= DLIM.multisets)) return null;
+
+    // log factorials, so the multinomial coefficient never overflows
+    const lf = [0];
+    for (let i = 1; i <= n; i++) lf.push(lf[i - 1] + Math.log(i));
+
+    const out = new Map();
+    const counts = new Array(F).fill(0);
+    (function place(i, left) {
+      if (i === F - 1) {
+        counts[i] = left;
+        let logw = lf[n], sum = 0, taken = 0;
+        for (let k = 0; k < F; k++) {
+          logw -= lf[counts[k]];
+          logw += counts[k] * Math.log(probs[k]);
+        }
+        // the kept ones, taken from whichever end the modifier asks for
+        for (let k = F - 1; k >= 0 && taken < keep.n; k--) {
+          const idx = keep.high ? k : F - 1 - k;
+          const c = counts[idx], take = Math.min(c, keep.n - taken);
+          sum += vals[idx] * take;
+          taken += take;
+        }
+        const w = Math.exp(logw);
+        if (w > 0) out.set(sum, (out.get(sum) || 0) + w);
+        return;
+      }
+      for (let c = 0; c <= left; c++) { counts[i] = c; place(i + 1, left - c); }
+    }(0, n));
+    return out.size > DLIM.vals ? null : out;
+  }
+
+  /* ------------------------------------------------- a whole dice term */
+  function diceDist(node, ctx) {
+    const qty = node.qty === null ? 1 : constVal(node.qty, ctx);
+    if (qty === null || !(qty >= 0) || qty > DLIM.dice) return null;
+    const n = Math.floor(qty);
+    const faces = faceDist(node, ctx);
+    if (!faces) return null;
+
+    const mods = node.mods || [];
+    const chk = mods.filter((m) => m.t === 'check').pop();
+    const keepMod = mods.filter((m) => m.t === 'keep' || m.t === 'drop').pop();
+    if (mods.filter((m) => m.t === 'keep' || m.t === 'drop').length > 1) return null;
+
+    if (chk) {
+      // a check counts hits, and hits are independent, so this is binomial
+      if (!CHECKS[chk.check].castable) return null;
+      if (keepMod) return null;                    // keeping first changes what is counted
+      let p = 0;
+      for (const [f, q] of faces) {
+        const h = cpConst(chk.cp, f);
+        if (h === null) return null;
+        if (h) p += q;
+      }
+      const out = new Map();
+      let term = Math.pow(1 - p, n);
+      for (let k = 0; k <= n; k++) {
+        out.set(k, term);
+        if (k < n) term = term * (n - k) / (k + 1) * (p / (1 - p));
+        if (!isFinite(term)) return p === 1 ? dOne(n) : null;
+      }
+      return out;
+    }
+
+    if (keepMod) {
+      if (node.qty === null) return null;          // nothing to keep from
+      const want = keepMod.t === 'keep' ? keepMod.n : n - keepMod.n;
+      const high = keepMod.t === 'keep' ? keepMod.end === 'h' : keepMod.end === 'l';
+      if (!(want >= 0)) return null;
+      return keptSumDist(faces, n, { n: Math.min(want, n), high });
+    }
+    return node.qty === null ? faces : dPower(faces, n);
+  }
+
+  /* ------------------------------------------------------- the whole tree */
+  function distOf(node, ctx) {
+    if (!node || typeof node !== 'object') return null;
+    const mods = node.mods || [];
+
+    /* Advantage rolls the term again and keeps the best or worst total, so it
+       is the extreme of n independent copies — exact from the running sum. */
+    const adv = mods.find((m) => m.t === 'adv');
+    if (adv) {
+      const inner = distOf(Object.assign({}, node, { mods: mods.filter((m) => m !== adv) }), ctx);
+      if (!inner) return null;
+      const vals = Array.from(inner.keys()).sort((a, b) => a - b);
+      const out = new Map();
+      let below = 0;
+      for (const v of vals) {
+        const p = inner.get(v), atOrBelow = below + p;
+        // P(best = v) = P(all <= v) - P(all < v); the worst is the mirror image
+        out.set(v, adv.end === 'h'
+          ? Math.pow(atOrBelow, adv.n) - Math.pow(below, adv.n)
+          : Math.pow(1 - below, adv.n) - Math.pow(1 - atOrBelow, adv.n));
+        below = atOrBelow;
+      }
+      return out;
+    }
+
+    switch (node.t) {
+      case 'num': return dOne(node.v);
+      case 'neg': { const d = distOf(node.v, ctx); return d && dPair(d, dOne(0), (x) => -x); }
+      case 'paren': return withMods(distOf(node.v, ctx), node, ctx);
+      case 'bin': return dPair(distOf(node.l, ctx), distOf(node.r, ctx),
+        (x, y) => arith(node.op, x, y, node.opSp));
+      case 'func': {
+        const f = FUNCS[node.name];
+        let acc = distOf(node.args[0], ctx);
+        for (let i = 1; i < node.args.length; i++) {
+          acc = dPair(acc, distOf(node.args[i], ctx), (x, y) => f(x, y));
+        }
+        return acc;
+      }
+      case 'dice': return diceDist(node, ctx);
+      case 'custom': {
+        const parts = node.items.map((i) => distOf(i, ctx));
+        const w = node.items.map(() => 1 / node.items.length);
+        return withMods(dMix(parts, w), node, ctx);
+      }
+      case 'set': case 'rep': {
+        let acc = dOne(0);
+        for (const it of node.items) {
+          acc = dPair(acc, distOf(it, ctx), (x, y) => x + y);
+          if (!acc) return null;
+        }
+        if (node.t === 'rep') {
+          const times = constVal(node.count, ctx);
+          if (times === null || !(times >= 0) || times > DLIM.dice) return null;
+          acc = dPower(acc, times);
+        }
+        return withMods(acc, node, ctx);
+      }
+      case 'word': {
+        if (ctx.fixed && ctx.fixed[node.name]) return null;   // one roll, read twice
+        const src = varSrc(node.name, ctx);
+        if (src === undefined) return null;                   // a word carries no number
+        if (ctx.depth >= LIMIT.varDepth) return null;
+        let ast;
+        try { ast = varAst(node.name, src); } catch (e) { return null; }
+        ctx.depth++;
+        const d = distOf(ast, ctx);
+        ctx.depth--;
+        return withMods(d, node, ctx, isSet(ast));
+      }
+    }
+    return null;
+  }
+
+  /* Modifiers on anything that is not a dice term. A distribution is one
+     number at a time, so it cannot see the members of a set — and a check, a
+     map and a clamp all act on each member. On a set, then, there is nothing
+     to say; only a single value can be answered for.
+
+     A clamp is the odd one out even there: min and max only ever move a die
+     face, and by the time a value has been bracketed or named there is no face
+     left to move, so they do nothing at all. */
+  function withMods(d, node, ctx, set) {
+    if (!d) return null;
+    const mods = node.mods || [];
+    if (!mods.length) return d;
+    if (set === undefined ? isSet(node) : set) return null;
+
+    for (const m of mods.slice()
+      .sort((a, b) => (MODS[a.t === 'check' ? 'check' : a.t] || { order: 99 }).order -
+                      (MODS[b.t === 'check' ? 'check' : b.t] || { order: 99 }).order)) {
+      if (m.t === 'adv') continue;                            // handled above
+      if (m.t === 'min' || m.t === 'max') continue;           // no face left to clamp
+      if (m.t === 'map') { d = dPair(d, distOf(m.r, ctx), (x, y) => arith(m.op, x, y, m.opSp)); }
+      else if (m.t === 'check') {
+        if (!CHECKS[m.check].castable) return null;
+        let p = 0;
+        for (const [v, q] of d) {
+          const h = cpConst(m.cp, v);
+          if (h === null) return null;
+          if (h) p += q;
+        }
+        d = new Map([[0, 1 - p], [1, p]]);
+      } else return null;
+      if (!d) return null;
+    }
+    return d;
+  }
+
+  /** the moments and quantiles of a distribution, read straight off it */
+  function summarise(pmf) {
+    const vals = Array.from(pmf.keys()).sort((a, b) => a - b);
+    let mean = 0, mass = 0;
+    for (const v of vals) { mean += v * pmf.get(v); mass += pmf.get(v); }
+    if (!(mass > 0.999 && mass < 1.001)) return null;         // it does not add up
+    let varsum = 0;
+    for (const v of vals) varsum += pmf.get(v) * (v - mean) * (v - mean);
+    const at = (q) => {
+      let acc = 0;
+      for (const v of vals) { acc += pmf.get(v); if (acc >= q) return v; }
+      return vals[vals.length - 1];
+    };
+    return {
+      min: vals[0], max: vals[vals.length - 1], mean, stdev: Math.sqrt(varsum),
+      median: at(0.5), p10: at(0.10), p25: at(0.25), p75: at(0.75), p90: at(0.90)
+    };
+  }
+
+  /* The words a choice can land on, and how often — exact whenever the thing
+     it is choosing about has a distribution of its own and is one value rather
+     than a set, since then each arm is simply a slice of that distribution. */
+  function armWords(node) {
+    if (node.t === 'band') {
+      const arms = node.arms.map((a) => ({ cp: a.cp, then: a.then }));
+      arms.push({ cp: null, then: node.otherwise });
+      return { subject: node.subject, arms, lead: null };
+    }
+    /* A plain two-way choice is the same shape with one arm, once the check
+       that made the condition a condition is lifted back off it. */
+    if (node.t === 'ternary') {
+      const mods = node.cond.mods || [];
+      const lead = mods.filter((m) => m.t === 'check').pop();
+      if (!lead || !CHECKS[lead.check].castable) return null;
+      return {
+        subject: Object.assign({}, node.cond, { mods: mods.filter((m) => m !== lead) }),
+        arms: [{ cp: lead.cp, then: node.yes }, { cp: null, then: node.no }],
+        lead: lead
+      };
+    }
+    return null;
+  }
+
+  function wordOdds(node, ctx) {
+    const spec = armWords(node);
+    if (!spec || isSet(spec.subject)) return null;
+    // any check left on the subject would be counted twice
+    if ((spec.subject.mods || []).some((m) => m.t === 'check')) return null;
+    const d = distOf(spec.subject, ctx);
+    if (!d) return null;
+
+    const out = new Map();
+    const left = new Map(d);
+    for (const arm of spec.arms) {
+      // a bare word is only a word while no variable of that name is set
+      if (arm.then.t === 'word' && (arm.then.forced ||
+          (ctx.fixed && ctx.fixed[arm.then.name]) ||
+          varSrc(arm.then.name, ctx) !== undefined)) return null;
+      if ((arm.then.mods || []).length) return null;
+      if (arm.then.t !== 'str' && arm.then.t !== 'word') return null;
+      const word = arm.then.t === 'str' ? arm.then.v : arm.then.name;
+      let p = 0;
+      for (const [v, q] of Array.from(left)) {
+        const hit = arm.cp === null ? true : cpConst(arm.cp, v);
+        if (hit === null) return null;
+        if (hit) { p += q; left.delete(v); }
+      }
+      out.set(word, (out.get(word) || 0) + p);
+    }
+    return out;
+  }
+
+  /** the exact distribution of a whole expression, or null */
+  function distribution(input) {
+    const p = parse(input);
+    if (p.parts.some((x) => x.assign && x.once)) return null;
+    const ctx = { vars: p.vars, fixed: null, depth: 0 };
+
+    // a band over one value is words, not numbers, and has its own answer
+    if (p.rolls.length === 1 && p.repeat === 1) {
+      const w = wordOdds(p.rolls[0].ast, ctx);
+      if (w) return { words: w, exact: true };
+    }
+
+    let acc = dOne(0);
+    for (const part of p.rolls) {
+      acc = dPair(acc, distOf(part.ast, ctx), (x, y) => x + y);
+      if (!acc) return null;
+    }
+    acc = dPower(acc, p.repeat);
+    if (!acc) return null;
+    const stats = summarise(acc);
+    return stats && Object.assign({ pmf: acc, exact: true }, stats);
   }
 
   global.DiceEngine = {
     parse, inspect, evaluate, roll, analyse, preview, setVars, fmt, esc, shapeFor,
-    splitLabel, outcomes, DiceError, LIMIT, FUNCS, CHECKS, MARK_ORDER
+    splitLabel, outcomes, distribution, study, DiceError, LIMIT, FUNCS, CHECKS, MARK_ORDER
   };
 }(window));

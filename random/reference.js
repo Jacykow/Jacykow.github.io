@@ -80,9 +80,10 @@
       ['2d6~+2', 'add', 'suffix'],
       ['2d6~-2', 'subtract', 'suffix'],
       ['2d6~*2', 'multiply — the set is summed first', 'suffix', 'A set is summed before multiplying, never multiplied out member by member.'],
-      ['2d6~/2', 'divide', 'suffix'],
-      ['2d6~%2', 'remainder', 'suffix'],
+      ['2d6~/2', 'divide, keeping the whole part', 'suffix', 'Whole numbers only — the fraction is thrown away, toward zero, so 7/2 is 3. With % this reads the digits of a roll: d100/10 is the tens, d100%10 the units.'],
+      ['2d6~%2', 'the remainder after dividing', 'suffix', 'What is left over from whole-number division. d100%10 is the units digit of a percentile roll.'],
       ['2d6~^2', 'raise to a power', 'suffix'],
+      ['2d6~@*2', 'do it to each member, not to the sum', 'suffix', 'Arithmetic sums a set before touching it; @ is the way round that. One operator and one operand at a time, so 2d6@*2+3 doubles each die and then adds 3 once — write @*2@+3 to do both to each. The right side is worked out afresh per member, so 2d6@*d4 rolls a d4 for each die.'],
       ['~max(~d20,10~)', 'the largest value', 'wrap', 'One of the two functions left. Each argument is reduced to a value first.'],
       ['~min(~d20,10~)', 'the smallest value', 'wrap']
     ]],
@@ -95,6 +96,7 @@
     ['Variables', [
       ['~roll:=d6~,roll,roll', 'a fresh roll at every mention', 'atom', 'A variable holds text, not a result, so every mention rolls again — this throws two dice. It has to stand as its own top-level item, and it shadows a variable of the same name in the panel.'],
       ['~roll::=d6~,roll,roll', 'rolled once, however often it is named', 'atom', 'The opposite of :=. One die, and both mentions are that same result, which is what lets a chain of comparisons ask about one roll several times. It stands for what the roll came to, so it is a value and never a set.'],
+      ['~h::=4d6=6,~h>=2?"crit":"no"', 'ask about a count of hits', 'atom', 'A checked pool counts as its hits, so binding it with ::= and comparing the name asks how many there were rather than what the dice showed.'],
       ['~atk:=d20+5,~2atk', 'set one for this expression only', 'prefix', 'Has to stand as its own top-level item. It shadows a variable of the same name in the panel, and is worked out afresh at every mention.'],
       ['~2~atk', 'used twice means rolled twice', 'atom', 'A variable holds text, not a result, so every mention is a fresh roll.']
     ]],

@@ -38,11 +38,13 @@
   const DENSITY = { dense: 18, denser: 60, plain: 240 };
   const LOG_MAX = 60;
 
-  const DEFAULT_EXPR = '4d6dl1 # ability score';
+  const DEFAULT_EXPR = '2d6';
   const LS_SAVED = 're.saved.v1';
   const LS_LAST = 're.last.v1';
   const LS_DRAWER = 're.drawer.v1';
   const LS_VARS = 're.vars.v1';
+  const LS_CATS = 're.cats.v1';
+  const LS_SHUT = 're.cats.shut.v1';
 
   let state = {
     inspect: null,     // last successful DiceEngine.inspect()
@@ -120,10 +122,17 @@
     } catch (err) { /* file:// refuses replaceState */ }
   }
 
+  /* A category is written once in a list of its own and referred to by number,
+     which keeps a long link from repeating a name on every row. Zero means
+     none. `n` is what tells the two shapes apart: without it a row is a plain
+     pair, and an older link goes on reading the way it always did. */
   function setupLink() {
+    const cats = loadCats();
+    const at = (x) => cats.indexOf(x.cat || '') + 1;
     return here() + '#' + SETUP_TAG + b64.enc(JSON.stringify({
-      v: loadVars().filter((v) => nameOf(v.expr)).map((v) => [v.expr, v.mark ? 1 : 0]),
-      s: loadSaved().filter((x) => titleOf(x.expr)).map((x) => [x.expr, x.mark ? 1 : 0])
+      n: 2, c: cats,
+      v: loadVars().filter((v) => nameOf(v.expr)).map((v) => [v.expr, v.mark ? 1 : 0, at(v)]),
+      s: loadSaved().filter((x) => titleOf(x.expr)).map((x) => [x.expr, x.mark ? 1 : 0, at(x)])
     }));
   }
 
@@ -134,12 +143,17 @@
     if (at < 0) return null;
     try {
       const d = JSON.parse(b64.dec(raw.slice(at + SETUP_TAG.length).replace(/[#?].*$/, '')));
+      const cats = catsOf(Array.isArray(d.c) ? d.c : []);
+      const row2 = (row) => normalise({
+        expr: String(row[0]), mark: !!row[1], cat: cats[(row[2] || 0) - 1] || ''
+      });
+      const row1 = (row) => normalise(row.length > 2
+        ? { name: String(row[0]), expr: String(row[1]), mark: !!row[2] }
+        : { expr: String(row[0]), mark: !!row[1] });
       const pairs = (a) => (Array.isArray(a) ? a.filter(Array.isArray) : [])
-        .map((row) => normalise(row.length > 2
-          ? { name: String(row[0]), expr: String(row[1]), mark: !!row[2] }
-          : { expr: String(row[0]), mark: !!row[1] }))
+        .map(d.n >= 2 ? row2 : row1)
         .filter((x) => titleOf(x.expr));
-      return { vars: pairs(d.v), saved: pairs(d.s) };
+      return { cats, vars: pairs(d.v), saved: pairs(d.s) };
     } catch (e) { return null; }
   }
 
@@ -157,7 +171,14 @@
      down, so undoing it is the same act with the ticks the other way round. */
   function addSetup(pick) {
     const vars = loadVars(), saved = loadSaved();
-    const added = { v: [], s: [] };
+    const added = { v: [], s: [], c: [] };
+    // only the headings the picked items actually sit under come along
+    const cats = loadCats();
+    for (const x of pick.vars.concat(pick.saved)) {
+      const c = x.cat || '';
+      if (c && cats.indexOf(c) < 0) { cats.push(c); added.c.push(c); }
+    }
+    saveCats(cats);
     for (const v of pick.vars) {
       const at = vars.findIndex((x) => nameOf(x.expr) === nameOf(v.expr));
       if (at >= 0 && vars[at].expr === v.expr) continue;      // already exactly this
@@ -178,7 +199,8 @@
   }
 
   function replaceSetup(st) {
-    store.write(LS_UNDO, { was: { v: loadVars(), s: loadSaved() } });
+    store.write(LS_UNDO, { was: { v: loadVars(), s: loadSaved(), c: loadCats() } });
+    saveCats(st.cats || []);
     pushVars(st.vars.slice());
     store.write(LS_SAVED, st.saved.slice());
     renderVars(); renderSaved(); renderShortcuts();
@@ -189,6 +211,11 @@
     const gone = new Set(pick.vars.concat(pick.saved).map((x) => x.expr));
     pushVars(loadVars().filter((v) => !gone.has(v.expr)));
     store.write(LS_SAVED, loadSaved().filter((x) => !gone.has(x.expr)));
+    // a heading the same import brought in goes back out with the last of it
+    const back = store.read(LS_UNDO, null);
+    const held = loadVars().concat(loadSaved());
+    saveCats(loadCats().filter((c) =>
+      ((back && back.c) || []).indexOf(c) < 0 || held.some((x) => x.cat === c)));
     store.write(LS_UNDO, null);
     renderVars(); renderSaved(); renderShortcuts();
     return gone.size;
@@ -233,12 +260,10 @@
      shortcuts reads at a glance. */
   const dieChip = (n) => {
     const shape = E.shapeFor(n);
-    const face = 'D' + n;
-    const size = face.length >= 4 ? ' v4' : (face.length === 3 ? ' v3' : ' v2');
     return '<span class="die inline ghost s-' + shape + '">' +
       '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true" focusable="false">' +
       '<use href="#sh-' + shape + '"/></svg>' +
-      '<span class="dieval' + size + '">' + face + '</span></span>';
+      '<span class="dieval">D' + n + '</span></span>';
   };
   /** one place turns `<dN>` into a die, wherever a name or a label is shown */
   const dieText = (s) =>
@@ -251,25 +276,106 @@
     return name ? body + ' # ' + name : body;
   }
 
+  /** the headings in order, with blanks and repeats dropped */
+  const catsOf = (list) => {
+    const seen = [];
+    for (const c of list) {
+      const n = String(c || '').trim();
+      if (n && seen.indexOf(n) < 0) seen.push(n);
+    }
+    return seen;
+  };
+
   /** an older entry kept its name beside the expression; the label holds it now */
   const normalise = (x) => {
     const expr = String((x && x.expr) || '');
     const named = (x && x.name && !E.splitLabel(expr).label) ? expr + ' # ' + x.name : expr;
-    return { expr: named, mark: !!(x && x.mark) };
+    return { expr: named, mark: !!(x && x.mark), cat: String((x && x.cat) || '').trim() };
   };
   /* A first visit gets the three rolls almost everyone starts from, rather than
      an empty bar that says nothing about what the bar is for. */
+  /* In a preset an item is its expression, or that and the heading it sits
+     under. The headings themselves are listed separately so an empty one still
+     has somewhere to drop things into. */
+  const presetItem = (x) => Array.isArray(x)
+    ? { expr: String(x[0]), mark: true, cat: String(x[1] || '').trim() }
+    : { expr: String(x), mark: true, cat: '' };
   const PRESETS = (window.RandomEnginePresets || []).map((x) => ({
     name: x.name,
     note: x.note,
-    vars: (x.vars || []).map((expr) => ({ expr, mark: true })),
-    saved: (x.saved || []).map((expr) => ({ expr, mark: true }))
+    cats: catsOf(x.cats || []),
+    vars: (x.vars || []).map(presetItem),
+    saved: (x.saved || []).map(presetItem)
   }));
-  const FIRST_ROLLS = PRESETS.length ? PRESETS[0].saved.map((x) => ({ expr: x.expr, mark: true })) : [];
+  const FIRST = PRESETS.length ? PRESETS[0] : { cats: [], vars: [], saved: [] };
+  const FIRST_CATS = FIRST.cats;
   const loadSaved = () => {
     const v = store.read(LS_SAVED, null);
-    return Array.isArray(v) ? v.map(normalise) : FIRST_ROLLS.slice();
+    return Array.isArray(v) ? v.map(normalise) : FIRST.saved.map(normalise);
   };
+
+  /* =========================================================== categories
+     A category is a heading, not a namespace: it says where something is
+     shown and nothing about what it means, so a variable in one is written
+     the same way from anywhere. The list of them is shared — adding one in
+     Variables adds it to Saved as well — and each item names the one it sits
+     under, or names none and falls to the loose group at the end.
+
+     A category can be folded away under the expression, where the room is,
+     and never in the drawer, where the point is to see everything at once. */
+  const loadCats = () => {
+    const v = store.read(LS_CATS, null);
+    return Array.isArray(v) ? catsOf(v) : FIRST_CATS.slice();
+  };
+  const saveCats = (list) => store.write(LS_CATS, catsOf(list));
+
+  /** the groups a pane or the bar is drawn in: every category, then the loose */
+  const groupsOf = (cats) => cats.concat(['']);
+
+  const loadShut = () => {
+    const v = store.read(LS_SHUT, null);
+    return Array.isArray(v) ? v.map(String) : [];
+  };
+  const isShut = (cat) => loadShut().indexOf(cat) >= 0;
+  function toggleShut(cat) {
+    const shut = loadShut(), at = shut.indexOf(cat);
+    if (at >= 0) shut.splice(at, 1); else shut.push(cat);
+    store.write(LS_SHUT, shut);
+  }
+
+  /** a name nothing else already has */
+  function freshCat(cats) {
+    for (let n = 1; ; n++) {
+      const name = 'Category' + (n > 1 ? ' ' + n : '');
+      if (cats.indexOf(name) < 0) return name;
+    }
+  }
+
+  /* Renaming has to reach both lists at once, since the name on an item is
+     the only thing tying it to its heading. */
+  function renameCat(from, to) {
+    const cats = loadCats();
+    const at = cats.indexOf(from);
+    const name = String(to || '').trim();
+    if (at < 0 || !name || name === from) return false;
+    if (cats.indexOf(name) >= 0) return false;              // one heading per name
+    cats[at] = name;
+    saveCats(cats);
+    const move = (list) => list.map((x) => x.cat === from ? Object.assign({}, x, { cat: name }) : x);
+    pushVars(move(loadVars()));
+    store.write(LS_SAVED, move(loadSaved()));
+    const shut = loadShut();
+    if (shut.indexOf(from) >= 0) store.write(LS_SHUT, shut.map((c) => c === from ? name : c));
+    return true;
+  }
+
+  /** dropping a heading leaves what was under it loose, never deletes it */
+  function dropCat(name) {
+    saveCats(loadCats().filter((c) => c !== name));
+    const loosen = (list) => list.map((x) => x.cat === name ? Object.assign({}, x, { cat: '' }) : x);
+    pushVars(loosen(loadVars()));
+    store.write(LS_SAVED, loosen(loadSaved()));
+  }
 
   /* ------------------------------------------------------------- editing
      Everything that writes into the field types it the way a person would, so
@@ -340,23 +446,38 @@
           a: act.selectionStart, b: act.selectionEnd }
       : null;
 
-    const rolls = loadSaved().filter((x) => x.mark && titleOf(x.expr));
+    const rolls = loadSaved().map((x, i) => [x, i]).filter((r) => r[0].mark && titleOf(r[0].expr));
     const vars = loadVars().filter((v) => v.mark && nameOf(v.expr));
     if (!rolls.length && !vars.length) { el.shortcuts.innerHTML = ''; return; }
 
-    el.shortcuts.innerHTML =
-      rolls.map((r, i) =>
-        '<button class="sc roll" data-roll="' + i + '" title="' + esc(r.expr) + '">' +
-          titleHTML(r.expr) + '</button>').join('') +
-      vars.map((v) => {
-        const body = bodyOf(v.expr);
-        return '<span class="sc var' + (isInt(body) ? '' : ' plain') +
-          '" data-var="' + esc(nameOf(v.expr)) + '">' +
-          '<i>' + titleHTML(v.expr) + '</i>' + stepBtn('vdec') +
-          '<input class="vval" value="' + esc(body) + '" spellcheck="false" ' +
-                 'size="' + sizeOf(body) + '">' + stepBtn('vinc') +
-        '</span>';
-      }).join('');
+    /* A chip names the item it stands for by where it is kept, so the bar can
+       be cut into groups without the wiring having to count anything. */
+    const rollChip = (r, i) =>
+      '<button class="sc roll" data-roll="' + i + '" title="' + esc(r.expr) + '">' +
+        titleHTML(r.expr) + '</button>';
+    const varChip = (v) => {
+      const body = bodyOf(v.expr);
+      return '<span class="sc var' + (isInt(body) ? '' : ' plain') +
+        '" data-var="' + esc(nameOf(v.expr)) + '">' +
+        '<i>' + titleHTML(v.expr) + '</i>' + stepBtn('vdec') +
+        '<input class="vval" value="' + esc(body) + '" spellcheck="false" ' +
+               'size="' + sizeOf(body) + '">' + stepBtn('vinc') +
+      '</span>';
+    };
+
+    /* This is the one place a category can be folded away: the bar is where
+       room runs out, and the drawer is where you go to see everything. */
+    el.shortcuts.innerHTML = groupsOf(loadCats()).map((cat) => {
+      const chips = rolls.filter((r) => (r[0].cat || '') === cat).map((r) => rollChip(r[0], r[1]))
+        .concat(vars.filter((v) => (v.cat || '') === cat).map(varChip)).join('');
+      if (!chips) return '';
+      if (!cat) return '<span class="scgroup loose">' + chips + '</span>';
+      const shut = isShut(cat);
+      return '<span class="scgroup' + (shut ? ' shut' : '') + '" data-cat="' + esc(cat) + '">' +
+        '<button class="scat" data-fold="' + esc(cat) + '" title="show or hide this category">' +
+          esc(cat) + '<i>' + (shut ? '▸' : '▾') + '</i></button>' +
+        '<span class="scitems">' + chips + '</span></span>';
+    }).join('');
 
     el.shortcuts.querySelectorAll('.vval').forEach((inp) => {
       inp.addEventListener('input', () => writeVar(inp, inp.value));
@@ -399,9 +520,11 @@
     el.shortcuts.addEventListener('click', (ev) => {
       const s = stepDelta(ev);
       if (s) return stepVar(s.b, s.by);
+      const fold = ev.target.closest('[data-fold]');
+      if (fold) { toggleShut(fold.getAttribute('data-fold')); renderShortcuts(); return; }
       const r = ev.target.closest('[data-roll]');
       if (!r) return;
-      const item = loadSaved().filter((x) => x.mark && titleOf(x.expr))[+r.getAttribute('data-roll')];
+      const item = loadSaved()[+r.getAttribute('data-roll')];
       if (!item) return;
       typeInto(item.expr, true);
       commitRoll();              // a bookmark is a roll, not a thing to load
@@ -547,13 +670,20 @@
     const rows = state.inspect ? state.inspect.rows : [];
     if (!rows.length) { el.explain.innerHTML = '<div class="muted">type an expression above</div>'; return; }
 
-    el.explain.innerHTML = rows.map((r) =>
-      '<div class="exrow" data-x="' + r.id + '">' +
-        '<code>' + esc(r.code.trim() || r.code) + '</code>' +
+    /* Every row already knows how deep it sits — a bracket, a custom die, a
+       function's arguments and the arms of a choice all step in — so the list
+       is drawn as the tree it describes rather than as a flat run. */
+    const spans = state.inspect ? state.inspect.spans : [];
+    const clsOf = (id) => { const s = spans.find((x) => x.id === id); return s ? s.cls : ''; };
+    el.explain.innerHTML = rows.map((r) => {
+      const lvl = Math.min(r.depth || 0, 8);
+      return '<div class="exrow" data-x="' + r.id + '"' + (lvl ? ' data-in="1"' : '') +
+        ' style="--lvl:' + lvl + '">' +
+        '<code class="' + clsOf(r.id) + '">' + esc(r.code.trim() || r.code) + '</code>' +
         '<div class="t">' + esc(r.title) + '</div>' +
         '<div class="d">' + esc(r.desc) + '</div>' +
-      '</div>'
-    ).join('');
+      '</div>';
+    }).join('');
 
     state.curRow = null;
     el.explain.querySelectorAll('.exrow').forEach((row) => {
@@ -594,7 +724,9 @@
       '<b class="' + k + '">' + (m[k] || 0) + '</b>').join('<i>-</i>') + '</span>';
   }
 
-  /** the headline: a number, a score, or the word it landed on */
+  /* The headline: a number, a score, or the word it landed on. A number and a
+     word are the same kind of thing, so it is only a verdict that colours it —
+     never how recent the roll was. */
   function totalHTML(roll) {
     const score = scoreHTML(roll);
     const plain = roll.numeric ? E.fmt(roll.total) : (roll.text || '—');
@@ -711,6 +843,7 @@
     if (state.error) { flashError(); return; }
     const entry = makeRoll();
     if (!entry) { flashError(); return; }
+    el.rollBtn.classList.remove('pulse');   // it has been rolled; it can stop asking
     state.log.unshift(entry);
     syncURL();                 // the link in the bar is the roll you just made
     if (state.log.length > LOG_MAX) state.log.length = LOG_MAX;
@@ -724,7 +857,18 @@
     el.wrap.classList.add('bad');
   }
 
-  /* ============================================================== details */
+  /* ============================================================== details
+     What an expression comes to, drawn. Where the shape of the expression
+     allows it the answer is worked out rather than watched for, and the run is
+     laid over the top as a second opinion — a chart that agrees with itself is
+     the point of drawing both.
+
+     The run is filled in bursts: a short stretch of throwing, a redraw, a gap
+     long enough for the page to stay answerable, until there are enough or the
+     budget is spent. Nothing is thrown on the way in, so typing stays cheap. */
+  const SAMPLE = { burst: 50, gap: 150, chunk: 40, cap: 20000, budget: 1000 };
+  const MAXBARS = 64;
+
   function renderDetails() {
     const token = ++state.statsToken;
     if (state.error || !el.ta.value.trim()) {
@@ -732,135 +876,242 @@
         (state.error ? 'fix the expression to see its distribution' : 'type an expression above') + '</div>';
       return;
     }
-    el.details.innerHTML = '<div class="muted">simulating&hellip;</div>';
+    el.details.innerHTML = '<div class="muted">rolling&hellip;</div>';
+    const src = el.ta.value;
 
-    setTimeout(() => {
+    setTimeout(function step(st, started) {
       if (token !== state.statsToken) return;
-      let s;
-      try {
-        // Adaptive sample size: aim for roughly 150ms of work.
-        const t0 = performance.now();
-        E.analyse(el.ta.value, 100);
-        const per = Math.max((performance.now() - t0) / 100, 0.0005);
-        const n = Math.max(400, Math.min(20000, Math.floor(150 / per)));
-        s = E.analyse(el.ta.value, n);
-      } catch (err) {
-        el.details.innerHTML = '<div class="muted">' + esc(err.message) + '</div>';
-        return;
+      if (!st) {
+        try { st = E.study(src); }
+        catch (err) {
+          el.details.innerHTML = '<div class="muted">' + esc(err.message) + '</div>';
+          return;
+        }
+        started = performance.now();
       }
-      if (token !== state.statsToken) return;
-      el.details.innerHTML =
-        s.groups.map((g) => section(g.src + (g.times > 1 ? ' ×' + g.times : ''), g)).join('') +
-        // the sum is only news when the whole thing comes to a number
-        (s.showWhole ? section(s.groups.length ? 'total' : null, s) : '') +
-        '<div class="tailroom"></div>';
+      const t0 = performance.now();
+      do { st.run(SAMPLE.chunk); }
+      while (performance.now() - t0 < SAMPLE.burst && st.count() < SAMPLE.cap);
+
+      drawDetails(st.snapshot());
+      if (st.count() < SAMPLE.cap && performance.now() - started < SAMPLE.budget) {
+        setTimeout(() => step(st, started), SAMPLE.gap);
+      }
     }, 0);
   }
 
-  /* A simulation only shows what turned up, so every chart here says what could
-     have: each word the expression can produce gets a bar even at nought, and a
-     numeric run is bracketed by the smallest and largest it could ever reach —
-     worked out from the expression rather than watched for. */
-  const section = (title, s) => {
-    const body = statsHTML(s);
-    if (!body) return '';
-    return (title ? '<h4 class="stathead">' + esc(title) + '</h4>' : '') + body;
-  };
+  function drawDetails(snap) {
+    // past rolls of this very expression, newest first, so the last one stands out
+    const past = state.log.filter((e) => e.roll.notation === snap.notation && e.roll.numeric)
+      .map((e) => e.roll.total);
+    el.details.innerHTML = snap.sections.map((sec) => {
+      const body = statsHTML(sec, sec.whole ? past : []);
+      if (!body) return '';
+      const head = sec.title
+        ? '<h4 class="stathead">' + esc(sec.title + (sec.times > 1 ? ' ×' + sec.times : '')) + '</h4>'
+        : '';
+      return head + body;
+    }).join('') + '<div class="tailroom"></div>';
+  }
 
-  function statsHTML(s) {
+  /* --------------------------------------------------------------- words */
+  function wordHTML(s) {
+    const exact = s.exact && s.exact.words;
+    const shown = exact
+      ? s.words.filter((w) => exact.has(w)).concat(
+          Array.from(exact.keys()).filter((w) => s.words.indexOf(w) < 0))
+      : s.words;
+    if (!shown.length) return '';
+    const pOf = (w) => exact ? (exact.get(w) || 0) : ((s.tally[w] || 0) / Math.max(1, s.n));
+    const peak = Math.max.apply(null, shown.map(pOf)) || 1;
+    return '<div class="wordhist">' + shown.map((w) => {
+      const p = pOf(w), seen = (s.tally[w] || 0) / Math.max(1, s.n);
+      return '<div class="wrow" title="' + esc(w) + ': ' + (p * 100).toFixed(2) + '%' +
+          (exact ? ' exact, ' + (seen * 100).toFixed(2) + '% over ' + s.n.toLocaleString() + ' rolls' : '') + '">' +
+        '<span class="wname">' + esc(w) + '</span>' +
+        '<span class="wbar"><i style="width:' + ((p / peak) * 100).toFixed(2) + '%"></i>' +
+          (exact ? '<u style="left:' + ((seen / peak) * 100).toFixed(2) + '%"></u>' : '') +
+        '</span>' +
+        '<span class="wpct">' + (p * 100).toFixed(1) + '%</span></div>';
+    }).join('') + '</div>';
+  }
+
+  /* --------------------------------------------------------------- numbers
+     One bar per value while they will fit; past that each bar is a run of
+     whole numbers, inclusive at both ends. Either way the first bar starts at
+     the smallest the expression can reach and the last ends at the largest,
+     so the axis never promises a value that cannot happen. */
+  function binning(lo, hi, whole) {
+    if (!(hi > lo)) return { bins: 1, w: 1, lo, hi };
+    if (whole) {
+      const span = hi - lo + 1;
+      const w = Math.ceil(span / MAXBARS);
+      return { bins: Math.ceil(span / w), w, lo, hi };
+    }
+    return { bins: MAXBARS, w: (hi - lo) / MAXBARS, lo, hi };
+  }
+  const binAt = (b, v) => Math.max(0, Math.min(b.bins - 1, Math.floor((v - b.lo) / b.w)));
+  /* where a value sits across the chart: the middle of its own bar, and the
+     two edges of it, which is what a band between two values spans */
+  const mid = (b, v) => ((binAt(b, v) + 0.5) / b.bins) * 100;
+  const from = (b, v) => (binAt(b, v) / b.bins) * 100;
+  const to = (b, v) => ((binAt(b, v) + 1) / b.bins) * 100;
+
+  function statsHTML(s, past) {
     if (!s.words.length && !s.numeric) return '';
     const parts = [];
 
     if (s.words.length) {
-      const total = s.n;
-      const peak = Math.max.apply(null, s.words.map((w) => s.tally[w] || 0)) || 1;
-      parts.push('<div class="wordhist">' + s.words.map((w) => {
-        const c = s.tally[w] || 0;
-        const pct = (c / total) * 100;
-        return '<div class="wrow" title="' + esc(w) + ': ' + pct.toFixed(2) + '%">' +
-          '<span class="wname">' + esc(w) + '</span>' +
-          '<span class="wbar"><i style="width:' + ((c / peak) * 100).toFixed(2) + '%"></i></span>' +
-          '<span class="wpct">' + pct.toFixed(1) + '%</span></div>';
-      }).join('') + '</div>');
+      parts.push(wordHTML(s));
       if (!s.numeric) {
-        parts.push('<div class="histaxis"><span>' + s.n.toLocaleString() + ' rolls</span>' +
-          '<span>every result the expression can give</span></div>');
+        parts.push(caption(s, 'every result it can give'));
         return parts.join('');
       }
-      parts.push('<div class="histaxis"><span>&nbsp;</span>' +
-        '<span>and ' + s.numeric.toLocaleString() + ' of ' + s.n.toLocaleString() +
+      parts.push('<div class="histaxis"><span>&nbsp;</span><span>and ' +
+        s.numeric.toLocaleString() + ' of ' + s.n.toLocaleString() +
         ' came to a number</span></div>');
     }
 
+    const ex = (s.exact && s.exact.pmf) ? s.exact : null;
     const bounded = s.canMin !== null && s.canMax !== null;
-    const cells = [
-      ['min', E.fmt(s.min)], ['mean', s.mean.toFixed(2)], ['median', E.fmt(s.median)],
-      ['max', E.fmt(s.max)], ['std dev', s.stdev.toFixed(2)],
-      ['10th %', E.fmt(s.p10)], ['90th %', E.fmt(s.p90)],
-      ['samples', s.numeric.toLocaleString()]
-    ];
-    if (bounded) {
-      cells.push(['can be', E.fmt(s.canMin) + ' … ' + E.fmt(s.canMax)]);
-    }
-    parts.push('<div class="statgrid">' + cells.map(([k, v]) =>
-      '<div class="stat' + (k === 'can be' ? ' wide' : '') + '"><b>' + esc(v) +
-      '</b><i>' + esc(k) + '</i></div>').join('') + '</div>');
+    const lo = ex ? ex.min : (bounded ? Math.min(s.canMin, s.min) : s.min);
+    const hi = ex ? ex.max : (bounded ? Math.max(s.canMax, s.max) : s.max);
+    const whole = Number.isInteger(lo) && Number.isInteger(hi) &&
+      (ex ? Array.from(ex.pmf.keys()).every(Number.isInteger)
+          : s.totals.every(Number.isInteger));
+    const b = binning(lo, hi, whole);
 
-    // the chart spans everything possible, not just everything seen
-    const lo = bounded ? Math.min(s.canMin, s.min) : s.min;
-    const hi = bounded ? Math.max(s.canMax, s.max) : s.max;
-    const span = hi - lo;
-    const bins = Math.max(1, Math.min(60, Math.round(span) + 1));
-    const w = span === 0 ? 1 : span / bins;
-    const counts = new Array(bins).fill(0);
-    for (const t of s.totals) {
-      let b = span === 0 ? 0 : Math.floor((t - lo) / w);
-      if (b >= bins) b = bins - 1;
-      if (b < 0) b = 0;
-      counts[b]++;
-    }
-    const peak = Math.max.apply(null, counts) || 1;
-    const bars = counts.map((c, i) => {
-      const a = lo + i * w, b = a + w;
-      const pct = ((c / s.numeric) * 100).toFixed(1);
-      return '<div class="bar' + (c ? '' : ' empty') + '" style="height:' +
-        Math.max(1, (c / peak) * 100) + '%" title="' +
-        E.fmt(Math.round(a * 100) / 100) + (w > 1 ? '–' + E.fmt(Math.round(b * 100) / 100) : '') +
-        ': ' + pct + '%"></div>';
-    }).join('');
+    // what is known, and what merely turned up
+    const want = new Array(b.bins).fill(0);
+    if (ex) for (const [v, p] of ex.pmf) want[binAt(b, v)] += p;
+    const seen = new Array(b.bins).fill(0);
+    for (const t of s.totals) seen[binAt(b, t)]++;
+    const seenP = seen.map((c) => c / Math.max(1, s.numeric));
 
-    parts.push('<div class="hist">' + bars + '</div>' +
+    const bars = ex ? want : seenP;
+    const peak = Math.max.apply(null, bars) || 1;
+    const label = (i) => {
+      const a = b.lo + i * b.w;
+      if (!whole) return E.fmt(Math.round(a * 100) / 100) + '–' +
+        E.fmt(Math.round((a + b.w) * 100) / 100);
+      const z = Math.min(a + b.w - 1, b.hi);
+      return b.w === 1 ? E.fmt(a) : E.fmt(a) + '–' + E.fmt(z);
+    };
+    const barHTML = bars.map((p, i) =>
+      '<div class="bar' + (p ? '' : ' empty') + '" style="height:' +
+      Math.max(p > 0 ? 2 : 1, (p / peak) * 100).toFixed(2) + '%" title="' + label(i) + ': ' +
+      (p * 100).toFixed(2) + '%' +
+      (ex ? ' exact, ' + (seenP[i] * 100).toFixed(2) + '% rolled' : '') + '"></div>').join('');
+
+    // the run, laid over the worked-out answer as a second opinion
+    const overlay = ex && s.numeric ? '<svg class="overlay" viewBox="0 0 ' + b.bins +
+      ' 100" preserveAspectRatio="none"><polyline points="' +
+      seenP.map((p, i) => (i + 0.5).toFixed(2) + ',' + (100 - (p / peak) * 100).toFixed(2))
+        .join(' ') + '"/></svg>' : '';
+
+    const q = ex || s;
+    const band = (a, z, cls) => '<div class="' + cls + '" style="left:' + from(b, a).toFixed(2) +
+      '%; right:' + (100 - to(b, z)).toFixed(2) + '%"></div>';
+    // a label near the right edge would run off it, so it goes the other way
+    const line = (v, cls, txt) => {
+      const x = mid(b, v);
+      return '<div class="' + cls + (x > 66 ? ' flip' : '') + '" style="left:' + x.toFixed(2) +
+        '%"><i>' + esc(txt) + '</i></div>';
+    };
+    const ticks = past.map((t, i) =>
+      '<div class="rolltick' + (i === 0 ? ' last' : '') + '" style="left:' +
+      mid(b, t).toFixed(2) + '%" title="rolled ' + E.fmt(t) + '"></div>').join('');
+
+    parts.push(
+      '<div class="chart">' +
+        band(q.p10, q.p90, 'band wide') + band(q.p25, q.p75, 'band') +
+        '<div class="hist">' + barHTML + '</div>' + overlay +
+        line(q.median, 'mline', 'median ' + E.fmt(q.median)) +
+        line(q.mean, 'aline', 'mean ' + q.mean.toFixed(2)) +
+        ticks +
+      '</div>' +
       '<div class="histaxis"><span>' + E.fmt(lo) + '</span>' +
-      '<span>' + (bounded ? 'everything it can come to' : 'distribution of the total') +
-      '</span><span>' + E.fmt(hi) + '</span></div>');
+        '<span>' + (b.w > 1 ? E.fmt(b.w) + ' per bar' : (whole ? 'one bar each' : '')) + '</span>' +
+        '<span>' + E.fmt(hi) + '</span></div>' +
+      '<div class="statline">' +
+        chip('min', E.fmt(q.min)) + chip('10%', E.fmt(q.p10)) + chip('25%', E.fmt(q.p25)) +
+        chip('median', E.fmt(q.median), 'med') + chip('mean', q.mean.toFixed(2), 'avg') +
+        chip('75%', E.fmt(q.p75)) + chip('90%', E.fmt(q.p90)) + chip('max', E.fmt(q.max)) +
+      '</div>' +
+      caption(s, past.length
+        ? past.length + (past.length === 1 ? ' roll' : ' rolls') + ' of this in the log'
+        : ''));
     return parts.join('');
   }
 
+  const chip = (k, v, cls) =>
+    '<span class="sv' + (cls ? ' ' + cls : '') + '"><i>' + esc(k) + '</i>' + esc(v) + '</span>';
+
+  /** how the chart was arrived at, and anything else worth a line under it */
+  const caption = (s, extra) =>
+    '<div class="histnote">' +
+      (s.exact ? '<b>worked out exactly</b>, checked against ' : '') +
+      s.n.toLocaleString() + (s.n === 1 ? ' roll' : ' rolls') +
+      (extra ? ' &middot; ' + esc(extra) : '') +
+    '</div>';
   /* ============================================================ reference */
   /** the dice gallery: every size that has a solid of its own, drawn */
   function galleryHTML() {
     const dice = DICE_GALLERY.map((n) => {
       const shape = E.shapeFor(n);
-      const face = 'D' + n;
-      const size = face.length >= 4 ? ' v4' : (face.length === 3 ? ' v3' : ' v2');
       return '<div class="refdie" data-ins="d' + n + '" title="click to insert d' + n + '">' +
         '<span class="die ghost s-' + shape + '">' +
           '<svg class="dieshape" viewBox="0 0 64 64" aria-hidden="true"><use href="#sh-' + shape + '"/></svg>' +
-          '<span class="dieval' + size + '">' + face + '</span>' +
+          '<span class="dieval">D' + n + '</span>' +
         '</span></div>';
     }).join('');
     return '<div class="refgroup"><h3>The dice</h3><div class="refdice">' + dice + '</div></div>';
   }
 
-  /* '4d6~kh3' -> grey '4d6', coloured 'kh3'. Odd segments are the coloured
-     part; what gets inserted depends on the form. */
+  /* '4d6~kh3' -> '4d6' faded, 'kh3' at full strength. Odd segments are the
+     part that does the work named in the description; what gets inserted
+     depends on the form.
+
+     The example is painted in the colours the editor would give it, since a
+     colour has to mean one thing everywhere. Emphasis is carried by fading the
+     scaffolding rather than by recolouring the working part, which would tell
+     a second story on top of the first. */
+  function tokenClasses(src) {
+    const cls = new Array(src.length).fill('');
+    try {
+      let pos = 0;
+      for (const s of E.inspect(src).spans) {
+        if (s.a < pos || s.b > src.length) continue;   // nested inside an earlier span
+        for (let i = s.a; i < s.b; i++) cls[i] = s.cls;
+        pos = s.b;
+      }
+    } catch (e) { /* an example that does not parse keeps the plain colour */ }
+    return cls;
+  }
+
   function snippet(code) {
     const seg = code.split('~');
-    const html = seg.map((t, i) =>
-      t ? '<i class="' + (i % 2 ? 'on' : 'off') + '">' + esc(t) + '</i>' : '').join('');
-    const active = seg.filter((t, i) => i % 2).join('');
     const plain = seg.join('');
-    // for a wrapper the grey part is the placeholder: floor( 3d6/2 ) -> floor(_)
+
+    // where the working part sits once the ~ marks are taken out
+    const on = [];
+    let at = 0;
+    seg.forEach((t, i) => { if (i % 2 && t) on.push([at, at + t.length]); at += t.length; });
+    const lit = (i) => on.some((r) => i >= r[0] && i < r[1]);
+
+    const cls = tokenClasses(plain);
+    let html = '', i = 0;
+    while (i < plain.length) {
+      const c = cls[i], a = lit(i);
+      let j = i;
+      while (j < plain.length && cls[j] === c && lit(j) === a) j++;
+      html += '<i class="' + (c || 't-op') + (a ? '' : ' off') + '">' +
+        esc(plain.slice(i, j)) + '</i>';
+      i = j;
+    }
+
+    const active = seg.filter((t, i) => i % 2).join('');
+    // for a wrapper the faded part is the placeholder: max( d20,10 ) -> max(_)
     const template = seg.map((t, i) => (i % 2 ? t : (t ? '_' : ''))).join('');
     return { html, active, plain, template };
   }
@@ -1119,6 +1370,12 @@
      A variable and a saved roll are the same thing — an expression named by
      its own label — so one pair of functions draws and wires both. All that
      differs is where they are kept and what clicking the name does. */
+  /* Categories belong to neither list, so the same sentence explains them in
+     both. */
+  const CAT_HINT = ' Categories are shared with the other list. They group the ' +
+    'shortcuts under the expression, where a category can be folded away; drag ' +
+    'something by its name to put it under another.';
+
   const LISTS = {
     var: {
       pane: 'vars', add: '+ add a variable',
@@ -1126,7 +1383,7 @@
         'It is named by the <code>#&nbsp;name</code> at its end, and its name can only use ' +
         'letters and _. Inside an expression, <code>atk:=d20+5</code> as its own item sets ' +
         'one for that roll alone, and <code>atk::=d20+5</code> rolls it once however often ' +
-        'it is mentioned.',
+        'it is mentioned.' + CAT_HINT,
       placeholder: 'd20+5 # name',
       nameHint: 'put this name into the expression',
       load: loadVars,
@@ -1135,10 +1392,10 @@
       error: varError
     },
     saved: {
-      pane: 'saved', add: '+ add a saved roll',
-      hint: 'A saved roll is an expression named by the <code>#&nbsp;name</code> at its end. ' +
+      pane: 'saved', add: '+ add a roll',
+      hint: 'A roll is an expression named by the <code>#&nbsp;name</code> at its end. ' +
         'Save the one you are editing with the Save button, or ' +
-        '<kbd>Ctrl</kbd>+<kbd>S</kbd>.',
+        '<kbd>Ctrl</kbd>+<kbd>S</kbd>.' + CAT_HINT,
       placeholder: '4d6dl1 # name',
       nameHint: 'put this roll into the expression',
       load: loadSaved,
@@ -1148,80 +1405,190 @@
     }
   };
 
+  /* Rows are drawn grouped under their headings, so where a thing is kept and
+     where it is shown are two different orders. Every row carries the index it
+     came from, and everything that reads the rows back reads that rather than
+     counting them off the page. */
+  function rowHTML(kind, it, i) {
+    const L = LISTS[kind], err = L.error(it.expr);
+    return '<div class="lrow" data-kind="' + kind + '" data-i="' + i + '">' +
+      '<div class="lmain">' +
+        '<button class="del" title="remove" tabindex="-1">&times;</button>' +
+        '<button class="pin' + (it.mark ? ' on' : '') + '" tabindex="-1" ' +
+          'title="show as a shortcut under the expression">&#9733;</button>' +
+        '<button class="lname" draggable="true" title="' + esc(L.nameHint) +
+          ' &mdash; drag to reorder or to move it under another category">' +
+          (titleOf(it.expr) ? titleHTML(it.expr) : '&mdash;') + '</button>' +
+        '<input class="lexpr" value="' + esc(it.expr) + '" spellcheck="false" ' +
+          'placeholder="' + esc(L.placeholder) + '">' +
+        '<span class="step' + (isInt(bodyOf(it.expr)) ? '' : ' off') + '">' +
+          stepBtn('vdec') + stepBtn('vinc') + '</span>' +
+      '</div>' +
+      '<div class="lerr' + (err ? ' on' : '') + '">' + esc(err || '') + '</div>' +
+    '</div>';
+  }
+
+  /** the heading a group is drawn under; the loose ones get a plain rule */
+  function catHTML(cat) {
+    if (!cat) {
+      return '<div class="crow none" data-cat="">' +
+        '<span class="clabel">no category</span></div>';
+    }
+    return '<div class="crow" data-cat="' + esc(cat) + '">' +
+      '<button class="del" title="remove the category — what is in it stays" ' +
+        'tabindex="-1">&times;</button>' +
+      '<span class="grip" draggable="true" ' +
+        'title="drag to reorder — what is in it comes too">&#10303;</span>' +
+      '<input class="cname" value="' + esc(cat) + '" spellcheck="false" ' +
+        'title="rename this category in both lists">' +
+    '</div>';
+  }
+
   function renderList(kind) {
-    const L = LISTS[kind], host = el[L.pane], list = L.load();
+    const L = LISTS[kind], host = el[L.pane], list = L.load(), cats = loadCats();
+    const body = groupsOf(cats).map((cat) => {
+      const rows = list.map((it, i) => [it, i]).filter((r) => (r[0].cat || '') === cat);
+      /* An empty heading still shows: it is where the first thing is dropped
+         in, and the loose one at the end is how something is dragged back out
+         of a category. Only when there are no categories at all does it go. */
+      if (!cat && !rows.length && !cats.length) return '';
+      return '<div class="lgroup" data-cat="' + esc(cat) + '">' +
+        (cats.length ? catHTML(cat) : '') +
+        rows.map((r) => rowHTML(kind, r[0], r[1])).join('') + '</div>';
+    }).join('');
+
     host.innerHTML =
-      '<div class="varhint">' + L.hint + '</div>' +
-      list.map((it, i) => {
-        const err = L.error(it.expr);
-        return '<div class="lrow" data-kind="' + kind + '" data-i="' + i + '" draggable="true">' +
-          '<div class="lmain">' +
-            '<button class="del" title="remove" tabindex="-1">&times;</button>' +
-            '<button class="pin' + (it.mark ? ' on' : '') + '" tabindex="-1" ' +
-              'title="show as a shortcut under the expression">★</button>' +
-            '<button class="lname" title="' + esc(L.nameHint) + ' — drag to reorder">' +
-              (titleOf(it.expr) ? titleHTML(it.expr) : '—') + '</button>' +
-            '<input class="lexpr" value="' + esc(it.expr) + '" spellcheck="false" ' +
-              'placeholder="' + esc(L.placeholder) + '">' +
-            '<span class="step' + (isInt(bodyOf(it.expr)) ? '' : ' off') + '">' +
-              stepBtn('vdec') + stepBtn('vinc') + '</span>' +
-          '</div>' +
-          '<div class="lerr' + (err ? ' on' : '') + '">' + esc(err || '') + '</div>' +
-        '</div>';
-      }).join('') +
-      '<button class="varadd" data-kind="' + kind + '">' + esc(L.add) + '</button>';
+      '<div class="varhint">' + L.hint + '</div>' + body +
+      '<div class="listend">' +
+        '<button class="varadd" data-add="1">' + esc(L.add) + '</button>' +
+        '<button class="varadd" data-addcat="1">+ add a category</button>' +
+      '</div>';
 
     host.querySelectorAll('.lexpr').forEach((inp) => {
       inp.addEventListener('input', () => commitList(kind));
       inp.addEventListener('change', () => commitList(kind));
       inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') inp.blur(); });
     });
-    wireDrag(kind, host);
+    host.querySelectorAll('.cname').forEach((inp) => {
+      const was = inp.value;
+      inp.addEventListener('change', () => {
+        if (inp.value.trim() === was) { inp.value = was; return; }
+        if (renameCat(was, inp.value)) { renderVars(); renderSaved(); renderShortcuts(); }
+        else { inp.value = was; toast('a category needs a name of its own'); }
+      });
+      inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') inp.blur(); });
+    });
   }
 
-  /* Rows are dragged by their name — the one part that is not a field, and the
-     part you are looking at when you decide where something belongs. */
-  function wireDrag(kind, host) {
-    let from = -1;
-    host.querySelectorAll('.lrow').forEach((row) => {
-      row.addEventListener('dragstart', (ev) => {
-        if (!ev.target.closest('.lname')) { ev.preventDefault(); return; }
-        from = +row.getAttribute('data-i');
-        row.classList.add('lifted');
-        ev.dataTransfer.effectAllowed = 'move';
-        try { ev.dataTransfer.setData('text/plain', String(from)); } catch (e) { /* ok */ }
-      });
-      row.addEventListener('dragend', () => {
-        from = -1;
-        host.querySelectorAll('.lrow').forEach((r) => r.classList.remove('lifted', 'over'));
-      });
-      row.addEventListener('dragover', (ev) => {
-        if (from < 0) return;
-        ev.preventDefault();
-        host.querySelectorAll('.lrow').forEach((r) => r.classList.remove('over'));
-        row.classList.add('over');
-      });
-      row.addEventListener('drop', (ev) => {
-        if (from < 0) return;
-        ev.preventDefault();
-        const to = +row.getAttribute('data-i');
-        if (to === from) return;
-        const list = readList(kind);
-        list.splice(to, 0, list.splice(from, 1)[0]);
-        LISTS[kind].keep(list);
-        from = -1;
-        renderList(kind); renderShortcuts();
-      });
+  /* A row is dragged by its name and a heading by its grip — the parts that are
+     not fields, and the part you are looking at when you decide where something
+     belongs. The handle is what carries `draggable`, not the row around it: a
+     dragstart names the draggable element itself, so a row that carried it
+     could never say which part of itself the drag began on.
+
+     Where something lands says two things at once. Dropped on a row it takes
+     that row's place and its category with it; dropped on a heading it joins
+     the end of that group. A heading dropped on a group reorders the groups,
+     and what is in them follows without being touched.
+
+     The listeners hang off the pane rather than the rows, so redrawing the
+     rows — which every drop does — never loses them. */
+  let drag = null;
+
+  function wireDrag(kind) {
+    const host = el[LISTS[kind].pane];
+    const lit = (row) => {
+      host.querySelectorAll('.over').forEach((r) => r.classList.remove('over'));
+      if (row) row.classList.add('over');
+    };
+
+    host.addEventListener('dragstart', (ev) => {
+      const grip = ev.target.closest('.grip');
+      const name = grip ? null : ev.target.closest('.lname');
+      if (grip) drag = { kind, cat: grip.closest('.crow').getAttribute('data-cat') };
+      else if (name) drag = { kind, i: +name.closest('.lrow').getAttribute('data-i') };
+      else return;
+      const row = (grip || name).closest('.crow, .lrow');
+      ev.dataTransfer.effectAllowed = 'move';
+      try { ev.dataTransfer.setData('text/plain', 'row'); } catch (e) { /* ok */ }
+      try { ev.dataTransfer.setDragImage(row, 12, 12); } catch (e) { /* ok */ }
+      row.classList.add('lifted');
     });
+
+    host.addEventListener('dragend', () => {
+      drag = null;
+      host.querySelectorAll('.lifted, .over').forEach((r) =>
+        r.classList.remove('lifted', 'over'));
+    });
+
+    host.addEventListener('dragover', (ev) => {
+      if (!drag || drag.kind !== kind) return;
+      const row = ev.target.closest('.lrow, .crow');
+      if (!row) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'move';
+      lit(row);
+    });
+
+    host.addEventListener('drop', (ev) => {
+      if (!drag || drag.kind !== kind) return;
+      const row = ev.target.closest('.lrow, .crow');
+      if (!row) return;
+      ev.preventDefault();
+      const held = drag;
+      drag = null;
+      lit(null);
+      if (held.cat !== undefined) moveCat(held.cat, row);
+      else moveItem(kind, held.i, row);
+    });
+  }
+
+  /** which group a row belongs to, whether it is a heading or an item */
+  const groupAt = (row) => {
+    const g = row.closest('.lgroup');
+    return g ? g.getAttribute('data-cat') : '';
+  };
+
+  /** a heading dropped somewhere: only the order of the groups changes */
+  function moveCat(from, row) {
+    const cats = loadCats();
+    const a = cats.indexOf(from), b = cats.indexOf(groupAt(row));
+    if (a < 0 || b < 0 || a === b) return;
+    cats.splice(b, 0, cats.splice(a, 1)[0]);
+    saveCats(cats);
+    renderVars(); renderSaved(); renderShortcuts();
+  }
+
+  /** an item dropped somewhere: it takes that place, and that category */
+  function moveItem(kind, from, row) {
+    const list = readList(kind);
+    if (!list[from]) return;
+    const onRow = row.classList.contains('lrow');
+    const to = onRow ? +row.getAttribute('data-i') : -1;
+    if (onRow && to === from) return;
+    const cat = onRow ? (list[to].cat || '') : groupAt(row);
+    const moved = list.splice(from, 1)[0];
+    moved.cat = cat;
+    if (onRow) list.splice(to > from ? to - 1 : to, 0, moved);
+    else {
+      // dropped on the heading itself: it joins the end of that group
+      let at = list.length;
+      for (let i = list.length - 1; i >= 0; i--) {
+        if ((list[i].cat || '') === cat) { at = i + 1; break; }
+      }
+      list.splice(at, 0, moved);
+    }
+    LISTS[kind].keep(list);
+    renderList(kind); renderShortcuts();
   }
 
   /** what the rows currently say, which may be ahead of what is stored */
   function readList(kind) {
-    const stored = LISTS[kind].load();
-    const out = [];
-    el[LISTS[kind].pane].querySelectorAll('.lrow').forEach((row, i) => {
-      out.push({ expr: row.querySelector('.lexpr').value,
-                 mark: !!(stored[i] && stored[i].mark) });
+    const out = LISTS[kind].load().map((x) =>
+      ({ expr: x.expr, mark: !!x.mark, cat: x.cat || '' }));
+    el[LISTS[kind].pane].querySelectorAll('.lrow').forEach((row) => {
+      const i = +row.getAttribute('data-i');
+      if (out[i]) out[i].expr = row.querySelector('.lexpr').value;
     });
     return out;
   }
@@ -1231,8 +1598,8 @@
   function commitList(kind) {
     const L = LISTS[kind], list = readList(kind);
     L.keep(list);
-    el[L.pane].querySelectorAll('.lrow').forEach((row, i) => {
-      const it = list[i] || { expr: '' };
+    el[L.pane].querySelectorAll('.lrow').forEach((row) => {
+      const it = list[+row.getAttribute('data-i')] || { expr: '' };
       const err = L.error(it.expr);
       const box = row.querySelector('.lerr');
       box.textContent = err || '';
@@ -1247,14 +1614,32 @@
   /** one delegated listener per pane, so redrawing the rows never loses it */
   function wireList(kind) {
     const L = LISTS[kind];
+    wireDrag(kind);
     el[L.pane].addEventListener('click', (ev) => {
-      if (ev.target.closest('.varadd')) {
+      if (ev.target.closest('[data-add]')) {
+        // a new one belongs to nothing until it is dragged somewhere
         const list = readList(kind);
-        list.push({ expr: '' });
+        list.push({ expr: '', cat: '' });
         L.keep(list);
         renderList(kind);
-        const box = el[L.pane].querySelector('.lrow:last-of-type .lexpr');
+        const box = el[L.pane].querySelector('.lrow[data-i="' + (list.length - 1) + '"] .lexpr');
         if (box) box.focus();
+        return;
+      }
+      // a category belongs to both lists, so adding one here draws both again
+      if (ev.target.closest('[data-addcat]')) {
+        const cats = loadCats();
+        const name = freshCat(cats);
+        saveCats(cats.concat([name]));
+        renderVars(); renderSaved(); renderShortcuts();
+        const box = el[L.pane].querySelector('.crow[data-cat="' + name + '"] .cname');
+        if (box) { box.focus(); box.select(); }
+        return;
+      }
+      const crow = ev.target.closest('.crow');
+      if (crow && ev.target.closest('.del')) {
+        dropCat(crow.getAttribute('data-cat'));
+        renderVars(); renderSaved(); renderShortcuts();
         return;
       }
       const row = ev.target.closest('.lrow');
@@ -1327,8 +1712,7 @@
      is only ever loaded into the field. */
   function loadVars() {
     const v = store.read(LS_VARS, null);
-    if (Array.isArray(v)) return v.map(normalise);
-    return PRESETS.length ? PRESETS[0].vars.map((x) => ({ expr: x.expr, mark: true })) : [];
+    return Array.isArray(v) ? v.map(normalise) : FIRST.vars.map(normalise);
   }
 
   function pushVars(list) {
@@ -1403,6 +1787,7 @@
     });
     if (back) $('setBack').addEventListener('click', () => {
       if (!back.whole) { pickDialog('remove', back); return; }
+      saveCats(back.whole.c || []);
       pushVars(back.whole.v || []);
       store.write(LS_SAVED, back.whole.s || []);
       store.write(LS_UNDO, null);
@@ -1433,6 +1818,7 @@
           ' data-kind="' + kind + '" data-i="' + i + '">' +
         '<b>' + (titleOf(x.expr) ? titleHTML(x.expr) : '—') + '</b>' +
         '<code>' + esc(bodyOf(x.expr)) + '</code>' +
+        (x.cat ? '<em class="pcat">' + esc(x.cat) + '</em>' : '') +
         (adding ? '<em class="tag">' + how + '</em>' : '') + '</label>';
     }).join('');
 
@@ -1585,6 +1971,8 @@
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's') { ev.preventDefault(); saveCurrent(); }
     });
 
+    // it is not obvious that nothing rolls by itself, so the button says so
+    el.rollBtn.classList.add('pulse');
     el.rollBtn.addEventListener('click', () => { commitRoll(); el.ta.focus(); });
 
     el.wrap.addEventListener('mousemove', (ev) =>

@@ -5,16 +5,17 @@ A lightweight, dependency-free web console for advanced dice notation — with t
 broken down token-by-token in an **Explain** panel that stays linked to your caret, and
 previewed as the dice it would throw.
 
-No build step, no dependencies, no network calls. Four files and a 25-line dev server.
+No build step, no dependencies, no network calls. Six files of source and nothing else.
 Designed for phones as much as desktop.
 
 **Live: <https://www.gulij.com/random>**
 
 ```bash
-node serve.js
+node ../serve.js
 ```
 
-Then open <http://localhost:5173>. (Opening `index.html` directly via `file://` also works.)
+Then open <http://localhost:5173/random/>. (Opening `index.html` directly via `file://`
+also works.) The server sits a directory up because this is one part of a larger site.
 
 ---
 
@@ -61,13 +62,14 @@ it narrows the set of allowed values rather than repeating a roll.
 | 5 | `u`, `u3` | force unique results (`u3` gives up after 3 attempts) |
 | 6 | `kh3`, `kl1` | keep the highest / lowest N |
 | 7 | `dl1`, `dh1` | drop the lowest / highest N |
-| 9 | `a`, `a3` | advantage: roll it all again and keep the best total |
-| 9 | `da`, `da3` | disadvantage: keep the worst |
-| 8 | `>=8` | a plain yes/no: each die reads success or failure |
-| 8 | `s>=8` | mark the hits and say nothing about the rest |
-| 8 | `f1`, `f<=1` | mark each qualifying die a failure |
+| 8 | `@*2`, `@^2`, `@-1` | do it to each member rather than to the sum |
+| 9 | `>=8` | a plain yes/no: each die reads success or failure |
+| 9 | `s>=8` | mark the hits and say nothing about the rest |
+| 9 | `f1`, `f<=1` | mark each qualifying die a failure |
 | 9 | `cs>=19` | flag critical successes |
-| 10 | `cf<=2` | flag critical failures |
+| 9 | `cf<=2` | flag critical failures |
+| 10 | `a`, `a3` | advantage: roll it all again and keep the best total |
+| 10 | `da`, `da3` | disadvantage: keep the worst |
 
 Writing the `s` says what counts as a hit and nothing at all about the rest —
 the alternative to a success need not be a failure — so `3d6s5` marks its hits
@@ -131,6 +133,40 @@ several values down to one. The scalar helpers (`floor`, `sqrt`, `abs`, …) are
 (1d6+2)*3        max(d20,10)        min(2d6,7)
 ```
 
+Division is **whole-number**, truncated toward zero, because dice are: `7/2` is 3 and
+`-7/2` is −3. With `%` that reads the digits off a roll, and `(a/b)*b + a%b` still comes
+back to `a`.
+
+```
+d100/10          the tens digit of a percentile roll (0–10)
+d100%10          the units digit (0–9)
+roll::=d100, roll/10, roll%10      both, off one die
+```
+
+#### Doing it to each member
+
+Arithmetic reduces a set to a value first: `2d6*2` doubles the **total**. `@` is the way
+round that — it applies one operator to **each member on its own** and hands back a set
+of the same size.
+
+```
+2d6@*2           each die doubled, then summed: 2..24
+2d6*2            the sum doubled: 4..24
+(3d6,2d8)@^2     every member squared
+4d6kh2@*10       the two kept dice, each ×10
+```
+
+One operator and one operand at a time, so the reading is never in doubt: `2d6@*2+3`
+doubles each die and then adds 3 **once**. Chain another `@` to do both to each.
+
+```
+2d6@*2@+3        each die doubled and then given +3
+2d6@*d4          a fresh d4 for every die, as a comparison would roll one
+```
+
+It runs after keep and drop and before a check, so `2d6@*2>=8` compares the doubled
+values, and a member already thrown away is left alone.
+
 ### Words and choices
 
 Alongside numbers there are **words**. A check produces one — `d6>4` reads as `success`
@@ -182,7 +218,7 @@ a shape behind a word only hides it.
 ### Variables
 
 A variable holds an expression and is worked out **afresh at every occurrence**, so `2atk`
-really is two separate rolls. Set them in the **Vars** panel. A bare word becomes a
+really is two separate rolls. Set them in the **Variables** panel. A bare word becomes a
 variable when one of that name exists, and stays a word otherwise; `{name}` insists on the
 variable and errors when it is missing.
 
@@ -202,7 +238,7 @@ label answers the second when they differ, and is not shown:
 two dice wherever that label is shown.
 
 ```
-d20+5 # atk             a variable, set in the Vars panel
+d20+5 # atk             a variable, set in the Variables panel
 2atk>13                 the same as atk>13, atk>13
 {atk}                   never mistaken for the word "atk"
 ```
@@ -230,6 +266,28 @@ roll::=2d6+3, roll>=10 ? good : >=7 ? mixed : bad
 
 A `::=` binding stands for what its roll came to, so it is a value and never a set.
 
+What a checked pool **counts as** is its hits, so binding one and then comparing the name
+asks how many there were rather than what the dice showed. That is how a roll gets read
+twice, or read and then counted:
+
+```
+h::=4d6=6, h>=2?"crit":"no"                     two or more sixes
+h::=8d6>=5, g::=8d6=1, (g*2)>8?"glitch":h>0?"hit":"miss"
+n::=d20, (n=20)?"crit":(n+mod)>=dc?"hit":"miss"  the natural face beside the total
+```
+
+Written without the binding, `(4d6=6)>=2` means something else: brackets only group, so
+that is still a set and the comparison distributes over it, four dice compared against 2.
+
+A binding is in scope for everything else in the expression, variables included, so a
+variable can read one like an argument:
+
+```
+tens := roll/10                 set in the Variables panel
+units := roll%10
+roll::=d100, tens, units        the variables read the roll bound here
+```
+
 A variable that refers back to itself is caught at a fixed depth rather than hanging.
 
 ### Whole-roll extras
@@ -239,6 +297,17 @@ A variable that refers back to itself is caught at a fixed depth rather than han
 2d6, 3d8, d20           comma: separate rolls, reported as one entry
 2d20kh1+5 # attack      everything after # is a label, ignored by the maths
 ```
+
+### Categories
+
+Saved rolls and variables are grouped under headings shared by both lists. A heading says
+where something is shown and nothing about what it means: a variable under one is still
+written the same way from anywhere, and a name is a name everywhere.
+
+Drag a row by its name to reorder it or to put it under another heading; drag a heading by
+its grip to move the whole group. A new item starts under no heading, in the loose group at
+the end. Under the expression the groups can be folded away one at a time — that is the
+one place they fold, since the drawer is where you go to see all of them at once.
 
 ## Interface
 
@@ -308,20 +377,35 @@ A variable that refers back to itself is caught at a fixed depth rather than han
   Dice shrink as the count grows — 34px, then 26px past 18 dice, then 19px past 60 — and
   past 240 dice they fall back to plain text chips so typing never stalls. Those
   thresholds live in `DENSITY` at the top of `app.js`.
-* **Explain** — one row per token. Click a row to select that token in the field; moving
+* **Explain** — one row per token, indented to the depth it sits at, so a bracket's
+  contents read as its contents. Click a row to select that token in the field; moving
   the caret highlights the matching row. Hovering any piece — a die, an operator, either
   half of a bracket pair, or a subtotal — lights up its counterparts everywhere. Node ids
   only mean something within one expression, so hovering is scoped: identical expressions
   share a scope and link to each other, while unrelated history entries stay put. What a
   variable rolls is deliberately left untagged — those dice have no place in the expression
   being edited — so hovering one lights the variable as a whole instead.
-* **Details** — what the expression can come to, run against a Monte-Carlo sample whose
-  size adapts to stay responsive. A roll that makes several kinds of value is broken into
-  the smallest repeated piece and each is summarised in turn, then the total: `3d10`
-  reports the d10 and then the sum. It only splits where the pieces are independent —
-  keep, drop and advantage couple them. Words get a bar each, including the ones that
-  never turned up; numbers get the usual figures plus the smallest and largest the
-  expression could ever reach, worked out from the expression rather than watched for.
+* **Details** — what the expression can come to. Where the shape of the expression allows
+  it the answer is **worked out exactly** rather than watched for, and the run is drawn
+  over the top as a second opinion; where it does not, the run is all there is. The line
+  under the chart says which you are looking at.
+
+  A roll that makes several kinds of value is broken into the smallest repeated piece and
+  each is charted in turn, then the total: `3d10` reports the d10 and then the sum. It
+  only splits where the pieces are independent — keep, drop and advantage couple them.
+  Words get a bar each, including the ones that never turned up.
+
+  Numbers get one bar per value while they will fit, and past that one bar per run of
+  whole numbers, inclusive at both ends. The first bar starts at the smallest the
+  expression can reach and the last ends at the largest, so the axis never offers a value
+  that cannot happen. Everything else is on the chart itself: the middle half and the
+  tenth-to-ninetieth as bands behind the bars, the median and the mean as lines across
+  them, and every roll of this expression still in the log as a tick along the bottom with
+  the most recent picked out.
+
+  The run fills in bursts — a short stretch of throwing, a redraw, a gap long enough for
+  the page to stay answerable — until there are twenty thousand or a second has gone.
+  Nothing is thrown while you type.
 * **Reference** — a gallery of every die that has a solid of its own, plus the full cheat
   sheet. From 1000px up it sits in a permanent rail on the left; below that it folds back
   into the drawer as a tab. That breakpoint is the single `wide` media query in `app.js`.
@@ -339,14 +423,23 @@ A variable that refers back to itself is caught at a fixed depth rather than han
   expression, so a session's handful of things stays in reach without opening the drawer.
   A roll shortcut loads the expression; a variable shortcut edits the value and never the
   name, since the name is what expressions refer to. A whole number gets a −/+ pair,
-  which move by one, or by ten with shift or the right mouse button.
-* **Variables** and **Saved** — the same list twice over, since a variable and a saved
+  which move by one, or by ten with shift or the right mouse button. The bar is cut into
+  the categories the items sit under, and each category folds away by its heading — this
+  is the one place they fold, since the drawer is where you go to see them all at once.
+* **Variables** and **Rolls** — the same list twice over, since a variable and a saved
   roll are the same thing: an expression named by its own `# name`. Each row is remove,
   bookmark, the name it is called by, what it says, and a −/+ pair when that is a whole
-  number. Drag a row by its name to reorder the list. Clicking the name puts a variable
+  number. Clicking the name puts a variable
   into the expression, or replaces the expression with a saved roll — and <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back, as it does for anything
   else that writes into the field. <kbd>Ctrl</kbd>+<kbd>S</kbd> saves what you are
   editing, under its `# name`.
+
+  Both lists are grouped under the same categories, so adding one in either adds it to
+  both, and renaming one renames it in both. A row is dragged by its name to reorder it or
+  to move it under another heading; a heading is dragged by its grip, and what is in it
+  comes along. A new item starts under no heading, in the loose group at the end, which is
+  also where something is dragged back out to. Removing a heading leaves what was under it
+  loose rather than deleting it.
 * **undo / redo** sit under the expression, for a screen with no keyboard to reach them
   from.
 * **Preset** — your saved rolls and variables together. They live in this browser's
@@ -358,6 +451,35 @@ A variable that refers back to itself is caught at a fixed depth rather than han
   presets for a dozen games sit at the bottom — the first of them is what a browser with
   nothing stored starts from.
 
+### What a colour means
+
+A colour means one thing, wherever it appears: the editor, the preview, a result, the
+reference and the Explain list all draw the same token the same way.
+
+| | | |
+|---|---|---|
+| **value** | white | a number or a word, a die face, a total |
+| **name** | amber | a variable, a die, a `# label`, a binding, `max` and `min` |
+| **modifier** | blue | `kh3`, `e`, `>=5`, `@*2`, `6x` — and a die a modifier reached |
+| **joinery** | grey | brackets, commas, operators, `?` and `:` |
+| **inert** | fainter grey | times, hints, and scaffolding shown for context |
+| **success** | green | only ever a verdict |
+| **failure** | red | only ever a verdict |
+
+A number and a word are the same kind of thing — a value — so they take the same colour;
+what tells them apart is that only one of them can be added up. A die is a name in the
+same sense a variable is: it stands for a value rather than being one, which is why `d20`
+and `mod` read alike.
+
+Green and red are spent entirely on verdicts, and a verdict always beats the role colour
+of whatever carries it, so the same `"Miss"` is white where it is only a word and red
+where a check made it one. A bare word is drawn as a name exactly when a variable of that
+name is set, and as a value when it is not — the colour answers the question the word
+itself leaves open.
+
+In the reference the emphasis is carried by **fading the scaffolding**, not by recolouring
+the working part — recolouring would tell a second story on top of the first.
+
 ### Two kinds of link
 
 They are for two different things:
@@ -365,8 +487,9 @@ They are for two different things:
 * **An expression link** is what the address bar holds — just the roll, plainly readable
   (`#2d20kh1+5`), updated when you roll. Copy it out of the browser and send it to
   someone. **Copy link** in the top bar puts it on the clipboard.
-* **A setup link** carries every saved roll and variable. Opening one takes on that setup
-  whole; pasting one into the Setup tab lists what it holds and waits to be told. The
+* **A setup link** carries every saved roll and variable, and the categories they sit
+  under. Opening one takes on that setup
+  whole; pasting one into the Preset tab lists what it holds and waits to be told. The
   setup it replaced is kept, and one button puts it back.
 
 Neither reaches the server — a fragment never leaves the browser — so length is only a
@@ -389,7 +512,7 @@ don't clip it.
 | `index.html`, `style.css` | markup and theme |
 | `tools/gen-dice.js` | builds the dice art (see below) |
 | `tools/splice.js` | regenerates and writes it into `index.html` + `style.css` |
-| `serve.js` | minimal static dev server |
+| `tools/check.js` | the engine's checks: `node tools/check.js` |
 
 ### The dice art
 
