@@ -93,9 +93,16 @@
     return { int(min, max) { return min + Math.floor(next() * (max - min + 1)); } };
   }());
 
-  /* the only two functions left: both reduce a collection to one value */
-  const FUNCS = { max: Math.max, min: Math.min };
-  const FUNC_DESC = { max: 'the largest value', min: 'the smallest value' };
+  /* Three functions, all of them the same shape: several values in, one out.
+     sum() is the one that says out loud what everything else does quietly. */
+  const FUNCS = {
+    max: Math.max,
+    min: Math.min,
+    sum: function () { let t = 0; for (let i = 0; i < arguments.length; i++) t += arguments[i]; return t; }
+  };
+  const FUNC_DESC = {
+    max: 'the largest value', min: 'the smallest value', sum: 'everything added up'
+  };
 
   /* which structural type each modifier needs, and the order they run in */
   const MODS = {
@@ -347,7 +354,7 @@
       if (fn) {
         const name = fn[1].toLowerCase();
         if (!Object.prototype.hasOwnProperty.call(FUNCS, name)) {
-          this.fail('unknown function "' + name + '" — only max and min remain');
+          this.fail('unknown function "' + name + '" — there are only max, min and sum');
         }
         const nameSp = [a, a + fn[1].length];
         this.i += fn[0].length;
@@ -355,7 +362,9 @@
         const { items } = this.list();
         const cA = this.mark();
         if (!this.lit(')')) this.fail('expected ")" to close ' + name + '()');
-        return { t: 'func', name, args: items, nameSp, brk: [openSp, [cA, this.i]], sp: [a, this.i] };
+        const mods = this.modifiers();
+        return { t: 'func', name, args: items, mods, nameSp,
+                 brk: [openSp, [cA, this.i]], core: [a, cA + 1], sp: [a, this.i] };
       }
 
       if (this.peek() === '(') return this.bracket(a, null);
@@ -482,11 +491,22 @@
         const save = this.i;
         const name = op === '<>' ? '!=' : op;
         this.i += op.length;
+        const at = this.mark();
         const v = this.signedInt();
-        if (v !== null) return { op: name, v };
+        /* A plain integer is taken where there is one, so 3d6>=5+1 is (3d6>=5)+1
+           rather than a surprise. A number that turns out to be a dice count is
+           not that number, though: in d6=2d6 the 2 belongs to the dice after it,
+           and reading it as the whole side leaves a stray dl6 behind.
+
+           The span is kept because what is compared against is a value in its
+           own right, and is drawn as one rather than as part of the comparison. */
+        if (v !== null && !this.atDice()) return { op: name, v, sp: [at, this.i] };
+        if (v !== null) this.i = at;
         // not a plain number, so the other side is an expression of its own
-        try { return { op: name, node: this.primary() }; }
-        catch (e) { this.i = save; return null; }
+        try {
+          const node = this.primary();
+          return { op: name, node, sp: [at, this.i] };
+        } catch (e) { this.i = save; return null; }
       }
       return null;
     }
@@ -495,8 +515,9 @@
     cpDir(dir) {
       const cp = this.comparePoint();
       if (cp) return cp;
+      const at = this.mark();
       const n = this.digits();
-      return n === null ? null : { op: dir, v: n };
+      return n === null ? null : { op: dir, v: n, sp: [at, this.i] };
     }
 
     modifiers() {
@@ -1545,7 +1566,7 @@
           parts.push(p);
         });
         parts.push('<span class="r-brk">)</span>');
-        return Expr(v, parts);
+        return applyMods(Expr(v, parts), node.mods || [], null, ctx);
       }
 
       case 'dice': return rollDice(node, ctx);
@@ -1613,7 +1634,7 @@
       }
       case 'neg': return '-' + plain(node.v);
       case 'bin': return plain(node.l) + node.op + plain(node.r);
-      case 'func': return node.name + '(' + node.args.map(plain).join(',') + ')';
+      case 'func': return node.name + '(' + node.args.map(plain).join(',') + ')' + mods;
       case 'dice': {
         const q = node.qty === null ? '' : plain(node.qty);
         const s = node.sides.t === 'num' ? plain(node.sides) : '(' + plain(node.sides) + ')';
@@ -1716,7 +1737,13 @@
     const mods = (node, depth) => {
       for (const m of node.mods || []) {
         const [title, desc] = modExplain(m);
-        push(m.sp, 't-mod', { title, desc, depth: depth + 1 });
+        const operand = (m.cp && m.cp.sp) || (m.t === 'map' && m.r && m.r.sp) || null;
+        push([m.sp[0], operand ? operand[0] : m.sp[1]], 't-mod',
+          { title, desc, depth: depth + 1 });
+        if (!operand) continue;
+        if (m.cp && m.cp.node) walk(m.cp.node, depth + 1);
+        else if (m.t === 'map') walk(m.r, depth + 1);
+        else push(operand, 't-num', null);
       }
     };
 
@@ -1770,13 +1797,15 @@
           const bid = 'b' + node.uid;
           walk(node.subject, depth + 1);
           node.arms.forEach((a, i) => {
-            push(a.sp, 't-mod', {
+            const val = a.cp && a.cp.sp;
+            push([a.sp[0], val ? val[0] : a.sp[1]], 't-mod', {
               title: i ? 'Or when' : 'When',
               desc: 'If what came before is ' + cpPhrase(a.cp) + ', the answer is what ' +
                 'follows the ?. The comparisons are tried in the order written, on the ' +
                 'one result — nothing is rolled again.',
               depth
             }, bid);
+            if (val) { if (a.cp.node) walk(a.cp.node, depth + 1); else push(val, 't-num', null); }
             push(a.qSp, 't-op', null, bid);
             walk(a.then, depth + 1);
             push(a.cSp, 't-op', null, bid);
@@ -1815,12 +1844,17 @@
           push(node.brk[0], 't-brk');
           node.args.forEach((a) => walk(a, depth + 1));
           push(node.brk[1], 't-brk');
+          mods(node, depth);
           break;
         case 'dice': {
           const many = node.qty !== null;
           const q = many ? plain(node.qty) : '1';
           const sides = node.sides.t === 'num' ? plain(node.sides) : '(' + plain(node.sides) + ')';
-          push(node.core, 't-dice', {
+          if (many) {
+            if (node.qty.t === 'num') push(node.qty.sp, 't-num', null);
+            else walk(node.qty, depth + 1);
+          }
+          push([many ? node.qty.sp[1] : node.core[0], node.core[1]], 't-dice', {
             title: many ? 'Dice — a set' : 'One die — a value',
             desc: many
               ? 'Roll ' + q + ' ' + sides + '-sided dice. That is a set of ' + q +
@@ -1829,7 +1863,6 @@
                 'set modifiers like kh will not attach to it.',
             depth
           }, 'd' + node.uid);
-          if (node.qty && node.qty.t !== 'num') walk(node.qty, depth + 1);
           if (node.sides.t !== 'num') walk(node.sides, depth + 1);
           mods(node, depth);
           break;
@@ -1860,7 +1893,7 @@
         }
         case 'rep': {
           const rid = 's' + node.uid;
-          push(node.count.sp, 't-rep', {
+          push(node.count.sp, 't-num', {
             title: 'Repeat into a set',
             desc: 'Evaluate the bracket ' + plain(node.count) +
               ' separate times and collect the results as a set.',
@@ -1992,7 +2025,8 @@
           '<span class="r-op"' + (node.uid ? X('o') : '') + '>' + esc(node.op) + '</span>' + kid(node.r);
       case 'func':
         return '<span class="r-fn">' + node.name + '</span><span class="r-brk">(</span>' +
-          node.args.map(kid).join('<span class="r-op">,</span>') + '<span class="r-brk">)</span>';
+          node.args.map(kid).join('<span class="r-op">,</span>') +
+          '<span class="r-brk">)</span>' + cmp;
       case 'paren': case 'set': case 'rep': {
         const tag = X('s');
         const items = (node.t === 'paren' ? [node.v] : node.items).map(kid)
@@ -2389,11 +2423,11 @@
       case 'func': {
         const parts = node.args.map((a) => boundsOf(a, ctx));
         if (parts.some((x) => !x)) return null;
-        b = node.name === 'max'
-          ? { min: Math.max.apply(null, parts.map((x) => x.min)),
-              max: Math.max.apply(null, parts.map((x) => x.max)) }
-          : { min: Math.min.apply(null, parts.map((x) => x.min)),
-              max: Math.min.apply(null, parts.map((x) => x.max)) };
+        const pick = (f) => ({ min: f.apply(null, parts.map((x) => x.min)),
+                               max: f.apply(null, parts.map((x) => x.max)) });
+        b = node.name === 'sum'
+          ? { min: parts.reduce((t, x) => t + x.min, 0), max: parts.reduce((t, x) => t + x.max, 0) }
+          : pick(node.name === 'max' ? Math.max : Math.min);
         break;
       }
       case 'set': case 'rep': {
@@ -2953,7 +2987,7 @@
         for (let i = 1; i < node.args.length; i++) {
           acc = dPair(acc, distOf(node.args[i], ctx), (x, y) => f(x, y));
         }
-        return acc;
+        return withMods(acc, node, ctx);
       }
       case 'dice': return diceDist(node, ctx);
       case 'custom': {

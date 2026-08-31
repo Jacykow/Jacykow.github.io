@@ -25,7 +25,7 @@ node random/tools/splice.js  # regenerate the dice art into index.html + style.c
 | `index.html`, `style.css` | markup and theme. Both contain a **generated** dice-art block. |
 | `tools/gen-dice.js`, `tools/splice.js` | the generator behind that block. |
 | `tools/check.js` | everything worth checking before committing an engine change. |
-| `presets.js` | ready-made rolls per game, pure data. `PRESETS[0]` is what a fresh browser gets. |
+| `presets.js` | ready-made rolls per game, pure data. `PRESETS[0]` is what a fresh browser gets, and the one preset with no link button — there is nobody to send it to. |
 | `reference.js` | the reference panel, pure data: example, description, form, hover note. |
 | `SYSTEMS.md` | what each game's dice ask for, and which of them the notation cannot yet say. Read it before adding a preset. |
 
@@ -145,6 +145,16 @@ sampler per section that can be filled in as slowly as the screen needs, so the
 chart arrives in bursts instead of one stretch long enough to be felt. Nothing
 is thrown while it is being built.
 
+**A heading is part of what an item says.** Two items count as the same only when the
+expression *and* the category match (`sameItem`). Comparing expressions alone
+makes a preset that files a roll you already have under a name of its own look
+like a duplicate, and half of what the preset is for never arrives.
+
+**A preset's `id` is a promise.** It is what `#preset=<id>` names, so it is
+written out in `presets.js` rather than derived from the name: renaming a preset
+must not break a link somebody is already holding. Add one when you add a
+preset; never change one that has shipped.
+
 ## Things that are easy to break
 
 - **Node ids are the wiring.** Every piece of the editor, Explain, preview and
@@ -172,6 +182,15 @@ is thrown while it is being built.
   reference and the Explain chips paint themselves with the editor's own `t-*`
   classes rather than a colour of their own; emphasis there is carried by
   fading, never by recolouring.
+- **The chart is padded, so every overlay lives in `.layer`**, inset by exactly
+  that padding. A band measured against the outer box lands a few pixels wide of
+  the bars it describes — close enough to look like a rounding bug and waste an
+  afternoon. `pctOf` puts a value in the middle of its own cell, which is why a
+  mean of 3.5 lands on the line between 3 and 4 rather than inside one of them.
+- **A phone raises its keyboard whenever the field takes focus**, so nothing
+  refocuses it after a roll. On a narrow screen the expression pane's own title
+  goes too, or the label of what is about to be rolled gets squeezed to nothing
+  by the buttons beside it.
 - **Every die value is one size**, however long. A D8 and a D10 side by side
   have to read as the same kind of thing, and a long one spilling over its shape
   beats one too small to read.

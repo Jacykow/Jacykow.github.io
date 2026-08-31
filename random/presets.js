@@ -184,13 +184,14 @@
       id: 'huberts-dream',
       note: 'Two d6 and a modifier, banded four ways.',
       cats: ['Kości', 'Rzuty'],
-      vars: [['0 # Modyfikatory {mod}', 'Rzuty']],
+      vars: [['0 # Modyfikator {mod}', 'Rzuty']],
       saved: [
         ['d4 # <d4>', 'Kości'], ['d6 # <d6>', 'Kości'], ['d8 # <d8>', 'Kości'],
         ['d10 # <d10>', 'Kości'], ['d12 # <d12>', 'Kości'], ['d20 # <d20>', 'Kości'],
         ['(2d6a+mod)>=13?"Sukces krytyczny":>=10?"Pełny sukces":>=7?"Sukces z konsekwencją":"Porażka i konsekwencja" # Rzut z ułatwieniem', 'Rzuty'],
-        ['(2d6+mod)>=13?"Sukces krytyczny":>=10?"Pełny sukces":>=7?"Sukces z konsekwencją":"Porażka i konsekwencja" # Rzut zwykły', 'Rzuty'],
-        ['(2d6da+mod)>=13?"Sukces krytyczny":>=10?"Pełny sukces":>=7?"Sukces z konsekwencją":"Porażka i konsekwencja" # Rzut z utrudnieniem', 'Rzuty']
+        ['(2d6+mod)>=13?"Sukces krytyczny":>=10?"Pełny sukces":>=7?"Sukces z konsekwencją":"Porażka i konsekwencja" # Rzut', 'Rzuty'],
+        ['(2d6da+mod)>=13?"Sukces krytyczny":>=10?"Pełny sukces":>=7?"Sukces z konsekwencją":"Porażka i konsekwencja" # Rzut z utrudnieniem', 'Rzuty'],
+        ['2d6 # 2x <d6>', 'Rzuty']
       ]
     },
 

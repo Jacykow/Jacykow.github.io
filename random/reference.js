@@ -84,7 +84,8 @@
       ['2d6~%2', 'the remainder after dividing', 'suffix', 'What is left over from whole-number division. d100%10 is the units digit of a percentile roll.'],
       ['2d6~^2', 'raise to a power', 'suffix'],
       ['2d6~@*2', 'do it to each member, not to the sum', 'suffix', 'Arithmetic sums a set before touching it; @ is the way round that. One operator and one operand at a time, so 2d6@*2+3 doubles each die and then adds 3 once — write @*2@+3 to do both to each. The right side is worked out afresh per member, so 2d6@*d4 rolls a d4 for each die.'],
-      ['~max(~d20,10~)', 'the largest value', 'wrap', 'One of the two functions left. Each argument is reduced to a value first.'],
+      ['~sum(~2d6~)', 'a set as a single value', 'wrap', 'Everything added up. A set is summed wherever a value is needed, so this is rarely necessary — except on the right of a comparison, which refuses a set rather than guessing. sum(2d6) is the total; 2d6 on its own is still two dice.'],
+      ['~max(~d20,10~)', 'the largest value', 'wrap', 'Each argument is reduced to a value first, so max(2d6,7) compares the total of 2d6 against 7.'],
       ['~min(~d20,10~)', 'the smallest value', 'wrap']
     ]],
     ['Words & choices', [

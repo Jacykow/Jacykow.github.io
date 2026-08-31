@@ -54,6 +54,7 @@
     activeTab: window.matchMedia('(min-width: 1000px)').matches ? 'explain' : 'reference',
     statsToken: 0,
     curRow: null,      // Explain row the caret last sat on
+    setOpen: null,     // which of the Preset tab's two boxes is open, if any
     hot: null, hotScope: null   // token currently hovered, and in which expression
   };
 
@@ -200,6 +201,12 @@
     try { return decodeURIComponent(raw); } catch (e) { return raw; }
   }
 
+  /* Two items are the same when they say the same thing in the same place. The
+     heading counts: a preset that files a roll you already have under a name of
+     its own is telling you something, and skipping it as a duplicate would drop
+     half of what the preset is for. */
+  const sameItem = (a, b) => a.expr === b.expr && (a.cat || '') === (b.cat || '');
+
   /* An import adds to what you already have rather than taking its place, and
      nothing is added without being picked out first — opening a link is the same
      act with everything picked. What it added is written down, so undoing it is
@@ -217,13 +224,13 @@
     saveCats(cats);
     for (const v of pick.vars) {
       const at = vars.findIndex((x) => nameOf(x.expr) === nameOf(v.expr));
-      if (at >= 0 && vars[at].expr === v.expr) continue;      // already exactly this
+      if (at >= 0 && sameItem(vars[at], v)) continue;         // already exactly this
       if (at >= 0) vars[at] = v; else vars.push(v);
       added.v.push(v.expr);
     }
     for (const x of pick.saved) {
       const at = saved.findIndex((y) => titleOf(y.expr) === titleOf(x.expr));
-      if (at >= 0 && saved[at].expr === x.expr) continue;
+      if (at >= 0 && sameItem(saved[at], x)) continue;
       if (at >= 0) saved[at] = x; else saved.push(x);
       added.s.push(x.expr);
     }
@@ -881,6 +888,9 @@
     const entry = makeRoll();
     if (!entry) { flashError(); return; }
     el.rollBtn.classList.remove('pulse');   // it has been rolled; it can stop asking
+    setTimeout(noteRoll, 0);                // and it belongs on the chart at once
+    // on a phone the field keeping focus means the keyboard covering the result
+    if (!wide.matches) el.ta.blur();
     state.log.unshift(entry);
     syncURL();                 // the link in the bar is the roll you just made
     if (state.log.length > LOG_MAX) state.log.length = LOG_MAX;
@@ -937,7 +947,12 @@
     }, 0);
   }
 
+  /* The last chart drawn, kept so a roll can put itself on it without setting
+     the whole run going again — the numbers have not changed, only the log. */
+  let lastSnap = null;
+
   function drawDetails(snap) {
+    lastSnap = snap;
     // past rolls of this very expression, newest first, so the last one stands out
     const past = state.log.filter((e) => e.roll.notation === snap.notation && e.roll.numeric)
       .map((e) => e.roll.total);
@@ -947,8 +962,69 @@
       const head = sec.title
         ? '<h4 class="stathead">' + esc(sec.title + (sec.times > 1 ? ' ×' + sec.times : '')) + '</h4>'
         : '';
-      return head + body;
+      return '<div class="dsec">' + head + body + '</div>';
     }).join('') + '<div class="tailroom"></div>';
+  }
+
+  /** a roll of what is being charted belongs on the chart at once */
+  function noteRoll() {
+    if (state.activeTab === 'details' && lastSnap) drawDetails(lastSnap);
+  }
+
+  /* ------------------------------------------------- reading a chart by hand
+     Hovering a bar answers the three questions worth asking about a value at
+     once — how often it, how often less, how often more — and lights the bars
+     each answer is counted from. Hovering one of the figures underneath lights
+     the bars that figure is about. */
+  function clearMarks(host) {
+    (host || el.details).querySelectorAll('.bar').forEach((x) =>
+      x.classList.remove('at', 'lo', 'hi'));
+    (host || el.details).querySelectorAll('.readout').forEach((x) => { x.textContent = ''; });
+  }
+
+  function markBars(sec, from, to, cls) {
+    sec.querySelectorAll('.bar').forEach((x) => {
+      const i = +x.getAttribute('data-i');
+      if (i >= from && i <= to) x.classList.add(cls);
+    });
+  }
+
+  function hoverBar(bar) {
+    const sec = bar.closest('.dsec');
+    clearMarks(sec);
+    const i = +bar.getAttribute('data-i');
+    const last = sec.querySelectorAll('.bar').length - 1;
+    if (i > 0) markBars(sec, 0, i - 1, 'lo');
+    if (i < last) markBars(sec, i + 1, last, 'hi');
+    bar.classList.add('at');
+    const pc = (a) => bar.getAttribute(a) + '%';
+    sec.querySelector('.readout').innerHTML =
+      '<b>' + esc(bar.getAttribute('data-of')) + '</b>' +
+      '<span class="at">' + pc('data-at') + ' exactly</span>' +
+      '<span class="lo">' + pc('data-lt') + ' below</span>' +
+      '<span class="hi">' + pc('data-gt') + ' above</span>';
+  }
+
+  function hoverStat(sv) {
+    const sec = sv.closest('.dsec');
+    clearMarks(sec);
+    const [from, to] = sv.getAttribute('data-marks').split('..').map(Number);
+    markBars(sec, from, to, 'at');
+    sec.querySelector('.readout').innerHTML =
+      '<b>' + esc(sv.querySelector('i').textContent + ' ' +
+        sv.textContent.slice(sv.querySelector('i').textContent.length)) + '</b>' +
+      '<span>' + esc(sv.getAttribute('data-say') || '') + '</span>';
+  }
+
+  function wireDetails() {
+    el.details.addEventListener('mouseover', (ev) => {
+      const bar = ev.target.closest('.bar');
+      if (bar) return hoverBar(bar);
+      const sv = ev.target.closest('.sv[data-marks]');
+      if (sv) return hoverStat(sv);
+      clearMarks();
+    });
+    el.details.addEventListener('mouseleave', () => clearMarks());
   }
 
   /* --------------------------------------------------------------- words */
@@ -976,8 +1052,12 @@
   /* --------------------------------------------------------------- numbers
      One bar per value while they will fit; past that each bar is a run of
      whole numbers, inclusive at both ends. Either way the first bar starts at
-     the smallest the expression can reach and the last ends at the largest,
-     so the axis never promises a value that cannot happen. */
+     the smallest the expression can reach and the last ends at the largest, so
+     the axis never promises a value that cannot happen.
+
+     Every overlay is measured in the same box as the bars, which is what the
+     inner layer is for: the chart is padded, and a band positioned against the
+     padded box would sit a few pixels wide of the bars it is describing. */
   function binning(lo, hi, whole) {
     if (!(hi > lo)) return { bins: 1, w: 1, lo, hi };
     if (whole) {
@@ -987,12 +1067,44 @@
     }
     return { bins: MAXBARS, w: (hi - lo) / MAXBARS, lo, hi };
   }
-  const binAt = (b, v) => Math.max(0, Math.min(b.bins - 1, Math.floor((v - b.lo) / b.w)));
-  /* where a value sits across the chart: the middle of its own bar, and the
-     two edges of it, which is what a band between two values spans */
-  const mid = (b, v) => ((binAt(b, v) + 0.5) / b.bins) * 100;
-  const from = (b, v) => (binAt(b, v) / b.bins) * 100;
-  const to = (b, v) => ((binAt(b, v) + 1) / b.bins) * 100;
+  const barOf = (b, v) => Math.max(0, Math.min(b.bins - 1, Math.floor((v - b.lo) / b.w)));
+  /* Where a value sits across the chart. A whole number sits in the middle of
+     its own cell, so a mean of 3.5 lands on the line between 3 and 4 rather
+     than inside one of them. The two edges are the bar's, since a band between
+     two values has to end where a bar does. */
+  const pctOf = (b, v) =>
+    Math.max(0, Math.min(100, ((v - b.lo + 0.5) / (b.w * b.bins)) * 100));
+  const barFrom = (b, v) => (barOf(b, v) / b.bins) * 100;
+  const barTo = (b, v) => ((barOf(b, v) + 1) / b.bins) * 100;
+
+  /** what one bar stands for: a value, or an inclusive run of them */
+  function barLabel(b, i, whole) {
+    const a = b.lo + i * b.w;
+    if (!whole) return E.fmt(Math.round(a * 100) / 100) + '–' +
+      E.fmt(Math.round((a + b.w) * 100) / 100);
+    const z = Math.min(a + b.w - 1, b.hi);
+    return b.w === 1 ? E.fmt(a) : E.fmt(a) + '–' + E.fmt(z);
+  }
+
+  /* The axis names as many bars as it can without the labels touching. The
+     first and the last are always named, since between them they say what the
+     expression can reach at all. */
+  function axisHTML(b, whole) {
+    const most = Math.max(2, Math.min(b.bins, 10));
+    const step = Math.max(1, Math.ceil(b.bins / most));
+    const at = new Set([0, b.bins - 1]);
+    for (let i = step; i < b.bins - 1; i += step) at.add(i);
+    // a label crowding the last one reads worse than one label fewer
+    if (b.bins > 2 && at.has(b.bins - 1 - (b.bins - 1) % step) &&
+        (b.bins - 1) % step && (b.bins - 1) % step < step / 2) {
+      at.delete(b.bins - 1 - (b.bins - 1) % step);
+    }
+    let out = '';
+    for (let i = 0; i < b.bins; i++) {
+      out += '<span' + (at.has(i) ? '>' + esc(barLabel(b, i, whole)) : ' class="blank">') + '</span>';
+    }
+    return '<div class="histticks">' + out + '</div>';
+  }
 
   function statsHTML(s, past) {
     if (!s.words.length && !s.numeric) return '';
@@ -1001,12 +1113,11 @@
     if (s.words.length) {
       parts.push(wordHTML(s));
       if (!s.numeric) {
-        parts.push(caption(s, 'every result it can give'));
+        parts.push(legend(s, [], s.exact || null));
         return parts.join('');
       }
-      parts.push('<div class="histaxis"><span>&nbsp;</span><span>and ' +
-        s.numeric.toLocaleString() + ' of ' + s.n.toLocaleString() +
-        ' came to a number</span></div>');
+      parts.push('<div class="histaxis"><span>' + s.numeric.toLocaleString() +
+        ' of ' + s.n.toLocaleString() + ' came to a number</span></div>');
     }
 
     const ex = (s.exact && s.exact.pmf) ? s.exact : null;
@@ -1020,25 +1131,25 @@
 
     // what is known, and what merely turned up
     const want = new Array(b.bins).fill(0);
-    if (ex) for (const [v, p] of ex.pmf) want[binAt(b, v)] += p;
+    if (ex) for (const [v, p] of ex.pmf) want[barOf(b, v)] += p;
     const seen = new Array(b.bins).fill(0);
-    for (const t of s.totals) seen[binAt(b, t)]++;
+    for (const t of s.totals) seen[barOf(b, t)]++;
     const seenP = seen.map((c) => c / Math.max(1, s.numeric));
 
     const bars = ex ? want : seenP;
     const peak = Math.max.apply(null, bars) || 1;
-    const label = (i) => {
-      const a = b.lo + i * b.w;
-      if (!whole) return E.fmt(Math.round(a * 100) / 100) + '–' +
-        E.fmt(Math.round((a + b.w) * 100) / 100);
-      const z = Math.min(a + b.w - 1, b.hi);
-      return b.w === 1 ? E.fmt(a) : E.fmt(a) + '–' + E.fmt(z);
-    };
-    const barHTML = bars.map((p, i) =>
-      '<div class="bar' + (p ? '' : ' empty') + '" style="height:' +
-      Math.max(p > 0 ? 2 : 1, (p / peak) * 100).toFixed(2) + '%" title="' + label(i) + ': ' +
-      (p * 100).toFixed(2) + '%' +
-      (ex ? ' exact, ' + (seenP[i] * 100).toFixed(2) + '% rolled' : '') + '"></div>').join('');
+    /* Each bar carries what it is worth and what lies either side of it, so
+       hovering one can answer all three without going back to the numbers. */
+    let below = 0;
+    const barHTML = bars.map((p, i) => {
+      const under = below;
+      below += p;
+      return '<div class="bar' + (p ? '' : ' empty') + '" data-i="' + i +
+        '" data-at="' + (p * 100).toFixed(2) + '" data-lt="' + (under * 100).toFixed(2) +
+        '" data-gt="' + (Math.max(0, 1 - under - p) * 100).toFixed(2) +
+        '" data-of="' + esc(barLabel(b, i, whole)) + '" style="height:' +
+        Math.max(p > 0 ? 2 : 1, (p / peak) * 100).toFixed(2) + '%"></div>';
+    }).join('');
 
     // the run, laid over the worked-out answer as a second opinion
     const overlay = ex && s.numeric ? '<svg class="overlay" viewBox="0 0 ' + b.bins +
@@ -1047,50 +1158,75 @@
         .join(' ') + '"/></svg>' : '';
 
     const q = ex || s;
-    const band = (a, z, cls) => '<div class="' + cls + '" style="left:' + from(b, a).toFixed(2) +
-      '%; right:' + (100 - to(b, z)).toFixed(2) + '%"></div>';
-    // a label near the right edge would run off it, so it goes the other way
-    const line = (v, cls, txt) => {
-      const x = mid(b, v);
-      return '<div class="' + cls + (x > 66 ? ' flip' : '') + '" style="left:' + x.toFixed(2) +
-        '%"><i>' + esc(txt) + '</i></div>';
-    };
+    const band = (a, z, cls) => '<div class="' + cls + '" style="left:' + barFrom(b, a).toFixed(2) +
+      '%; right:' + (100 - barTo(b, z)).toFixed(2) + '%"></div>';
+    const line = (v, cls) =>
+      '<div class="' + cls + '" style="left:' + pctOf(b, v).toFixed(2) + '%"></div>';
     const ticks = past.map((t, i) =>
       '<div class="rolltick' + (i === 0 ? ' last' : '') + '" style="left:' +
-      mid(b, t).toFixed(2) + '%" title="rolled ' + E.fmt(t) + '"></div>').join('');
+      pctOf(b, t).toFixed(2) + '%" title="rolled ' + E.fmt(t) + '"></div>').join('');
+
+    /* A statistic and the bars it is about: the extremes and the middle are one
+       bar each, and a percentile is the slice it cuts off. */
+    const span = (a, z) => a + '..' + z;
+    const marks = {
+      min: span(0, 0), max: span(b.bins - 1, b.bins - 1),
+      median: span(barOf(b, q.median), barOf(b, q.median)),
+      mean: span(barOf(b, q.mean), barOf(b, q.mean)),
+      p10: span(0, barOf(b, q.p10)), p25: span(0, barOf(b, q.p25)),
+      p75: span(barOf(b, q.p75), b.bins - 1), p90: span(barOf(b, q.p90), b.bins - 1)
+    };
 
     parts.push(
       '<div class="chart">' +
-        band(q.p10, q.p90, 'band wide') + band(q.p25, q.p75, 'band') +
-        '<div class="hist">' + barHTML + '</div>' + overlay +
-        line(q.median, 'mline', 'median ' + E.fmt(q.median)) +
-        line(q.mean, 'aline', 'mean ' + q.mean.toFixed(2)) +
-        ticks +
+        '<div class="hist">' + barHTML + '</div>' +
+        '<div class="layer">' +
+          band(q.p10, q.p90, 'band wide') + band(q.p25, q.p75, 'band') +
+          overlay + line(q.median, 'mline') + line(q.mean, 'aline') + ticks +
+        '</div>' +
       '</div>' +
-      '<div class="histaxis"><span>' + E.fmt(lo) + '</span>' +
-        '<span>' + (b.w > 1 ? E.fmt(b.w) + ' per bar' : (whole ? 'one bar each' : '')) + '</span>' +
-        '<span>' + E.fmt(hi) + '</span></div>' +
+      axisHTML(b, whole) +
+      '<div class="readout"></div>' +
       '<div class="statline">' +
-        chip('min', E.fmt(q.min)) + chip('10%', E.fmt(q.p10)) + chip('25%', E.fmt(q.p25)) +
-        chip('median', E.fmt(q.median), 'med') + chip('mean', q.mean.toFixed(2), 'avg') +
-        chip('75%', E.fmt(q.p75)) + chip('90%', E.fmt(q.p90)) + chip('max', E.fmt(q.max)) +
+        chip('min', E.fmt(q.min), '', marks.min) + chip('10%', E.fmt(q.p10), '', marks.p10) +
+        chip('25%', E.fmt(q.p25), '', marks.p25) +
+        chip('median', E.fmt(q.median), 'med', marks.median) +
+        chip('mean', q.mean.toFixed(2), 'avg', marks.mean) +
+        chip('75%', E.fmt(q.p75), '', marks.p75) + chip('90%', E.fmt(q.p90), '', marks.p90) +
+        chip('max', E.fmt(q.max), '', marks.max) +
       '</div>' +
-      caption(s, past.length
-        ? past.length + (past.length === 1 ? ' roll' : ' rolls') + ' of this in the log'
-        : ''));
+      legend(s, past, ex));
     return parts.join('');
   }
 
-  const chip = (k, v, cls) =>
-    '<span class="sv' + (cls ? ' ' + cls : '') + '"><i>' + esc(k) + '</i>' + esc(v) + '</span>';
+  /* Each figure says what it means when it is hovered, since the shorthand
+     over it is only a name. */
+  const SAYS = {
+    min: 'the least it can come to',
+    max: 'the most it can come to',
+    median: 'half of all rolls land here or below',
+    mean: 'the average of every roll',
+    '10%': 'one roll in ten lands here or below',
+    '25%': 'one roll in four lands here or below',
+    '75%': 'one roll in four lands here or above',
+    '90%': 'one roll in ten lands here or above'
+  };
 
-  /** how the chart was arrived at, and anything else worth a line under it */
-  const caption = (s, extra) =>
-    '<div class="histnote">' +
-      (s.exact ? '<b>worked out exactly</b>, checked against ' : '') +
-      s.n.toLocaleString() + (s.n === 1 ? ' roll' : ' rolls') +
-      (extra ? ' &middot; ' + esc(extra) : '') +
-    '</div>';
+  const chip = (k, v, cls, marks) =>
+    '<span class="sv' + (cls ? ' ' + cls : '') + '"' + (marks ? ' data-marks="' + marks + '"' : '') +
+    ' data-say="' + esc(SAYS[k] || '') + '"><i>' + esc(k) + '</i>' + esc(v) + '</span>';
+
+  /* What each thing on the chart is, in the colour it is drawn in — named for
+     what it shows rather than for how it was arrived at. */
+  function legend(s, past, ex) {
+    const keys = [
+      ['bars', ex ? 'exact distribution' : 'sampled distribution'],
+      ex ? ['run', s.n.toLocaleString() + (s.n === 1 ? ' roll' : ' rolls')] : null,
+      past.length ? ['log', past.length + ' in your log'] : null
+    ].filter(Boolean);
+    return '<div class="histnote">' + keys.map(([cls, text]) =>
+      '<span class="key ' + cls + '">' + esc(text) + '</span>').join('') + '</div>';
+  }
   /* ============================================================ reference */
   /** the dice gallery: every size that has a solid of its own, drawn */
   function galleryHTML() {
@@ -1175,8 +1311,9 @@
         return '<div class="refrow" title="' + esc(tip) + '"><code' + tag + '>' + s.html +
           '</code><span>' + esc(desc) + '</span></div>';
       }).join('') + '</div>').join('') +
-      '<div class="refgroup"><a class="refdoc" href="README.md" target="_blank" ' +
-        'rel="noopener">Full rules in the README &rarr;</a>' +
+      '<div class="refgroup"><a class="refdoc" target="_blank" rel="noopener" ' +
+        'href="https://github.com/Jacykow/Jacykow.github.io/blob/main/random/README.md">' +
+        'Full rules in the README &rarr;</a>' +
         '<div class="refrow"><span>Every rule set out at length: the type model, ' +
         'what each modifier needs, and how to build a whole setup.</span></div></div></div>';
 
@@ -1465,6 +1602,17 @@
     '</div>';
   }
 
+  const plural = (n, one) => n + ' ' + one + (n === 1 ? '' : 's');
+
+  /** what a heading holds, counted across both lists, since it belongs to both */
+  function catCount(cat) {
+    const r = loadSaved().filter((x) => (x.cat || '') === cat).length;
+    const v = loadVars().filter((x) => (x.cat || '') === cat).length;
+    if (!r && !v) return 'empty';
+    return [r ? plural(r, 'roll') : '', v ? plural(v, 'variable') : '']
+      .filter(Boolean).join(', ');
+  }
+
   /** the heading a group is drawn under; the loose ones get a plain rule */
   function catHTML(cat) {
     if (!cat) {
@@ -1478,6 +1626,7 @@
         'title="drag to reorder — what is in it comes too">&#10303;</span>' +
       '<input class="cname" value="' + esc(cat) + '" spellcheck="false" ' +
         'title="rename this category in both lists">' +
+      '<span class="ccount">' + esc(catCount(cat)) + '</span>' +
     '</div>';
   }
 
@@ -1799,13 +1948,21 @@
       'its own, since both ends already have it — take one with its name, or copy that ' +
       'link with the button beside it. The expression link in the top bar is a ' +
       'different thing — it holds only the roll you last made.</div>' +
+      /* The two boxes are big and wanted rarely, so they stay shut until asked
+         for. Which one is open outlives a redraw, or opening one would close it
+         again the moment the lists were drawn afresh. */
       '<div class="setrowb"><label>Yours</label>' +
-        '<textarea class="setbox" id="setOut" readonly rows="2">' + esc(link) + '</textarea>' +
-        '<button class="varadd" id="setCopy">export</button></div>' +
-      '<div class="setrowb"><label>Paste one</label>' +
-        '<textarea class="setbox" id="setIn" rows="2" spellcheck="false" ' +
-          'placeholder="paste a link here"></textarea>' +
-        '<button class="varadd" id="setLoad">import</button></div>' +
+        '<button class="varadd" id="setExport">export</button>' +
+        '<button class="varadd" id="setImport">import</button></div>' +
+      (state.setOpen === 'out'
+        ? '<div class="setrowb"><label>Link</label>' +
+          '<textarea class="setbox" id="setOut" readonly rows="2">' + esc(link) + '</textarea>' +
+          '<button class="varadd" id="setCopy">copy</button></div>' : '') +
+      (state.setOpen === 'in'
+        ? '<div class="setrowb"><label>Paste one</label>' +
+          '<textarea class="setbox" id="setIn" rows="2" spellcheck="false" ' +
+            'placeholder="paste a link here"></textarea>' +
+          '<button class="varadd" id="setLoad">load</button></div>' : '') +
       '<div class="setrowb"><label>Or take one</label>' +
         '<div class="presets">' + PRESETS.map((x, i) => {
           const take = '<button class="varadd" data-preset="' + i + '" title="' +
@@ -1822,8 +1979,18 @@
         '</button>' : '') +
       '<div class="tailroom"></div>';
 
-    $('setCopy').addEventListener('click', () => copy(link, 'link copied', 'could not copy'));
-    $('setLoad').addEventListener('click', () => {
+    const open = (which) => {
+      state.setOpen = state.setOpen === which ? null : which;
+      renderSetup();
+      const box = $(which === 'out' ? 'setOut' : 'setIn');
+      if (box) { box.focus(); if (which === 'out') box.select(); }
+    };
+    $('setExport').addEventListener('click', () => open('out'));
+    $('setImport').addEventListener('click', () => open('in'));
+    if ($('setCopy')) {
+      $('setCopy').addEventListener('click', () => copy(link, 'link copied', 'could not copy'));
+    }
+    if ($('setLoad')) $('setLoad').addEventListener('click', () => {
       const st = readSetup($('setIn').value);
       if (!st || (!st.vars.length && !st.saved.length)) { toast('that is not a preset link'); return; }
       pickDialog('add', st);
@@ -1853,7 +2020,7 @@
     const key = (x) => kind === 'v' ? nameOf(x.expr) : titleOf(x.expr);
     const match = mine.find((x) => key(x) === key(item));
     if (!match) return 'new';
-    return match.expr === item.expr ? 'same' : 'update';
+    return sameItem(match, item) ? 'same' : 'update';
   }
 
   /* One dialog for both directions: adding what a link holds, and taking back
@@ -1892,7 +2059,7 @@
     const shut = () => host.remove();
     const done = (n, verb) => {
       shut();
-      if ($('setIn')) $('setIn').value = '';
+      state.setOpen = null;
       renderSetup();
       onInput();
       toast(n ? n + ' ' + verb : 'nothing ' + verb);
@@ -2002,6 +2169,7 @@
     pushVars(loadVars());
     renderVars();
     wireLists();
+    wireDetails();
     renderShortcuts();
     wireShortcuts();
     renderSetup();
@@ -2025,7 +2193,10 @@
 
     // it is not obvious that nothing rolls by itself, so the button says so
     el.rollBtn.classList.add('pulse');
-    el.rollBtn.addEventListener('click', () => { commitRoll(); el.ta.focus(); });
+    el.rollBtn.addEventListener('click', () => {
+      commitRoll();
+      if (wide.matches) el.ta.focus();
+    });
 
     el.wrap.addEventListener('mousemove', (ev) =>
       setHot(spanAtPoint(ev.clientX, ev.clientY), el.wrap.getAttribute('data-scope')));
@@ -2101,7 +2272,8 @@
     });
 
     onInput();
-    el.ta.focus();
+    // a phone opening on a keyboard would hide most of what there is to see
+    if (wide.matches) el.ta.focus();
     el.ta.setSelectionRange(el.ta.value.length, el.ta.value.length);
     if (fromLink && (fromLink.vars.length || fromLink.saved.length)) {
       const n = addSetup(fromLink);

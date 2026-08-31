@@ -216,9 +216,12 @@ kbd{
   font-family:var(--mono); font-size:12.5px; white-space:nowrap; overflow:hidden;
 }
 .line:hover{background:var(--pane); border-color:var(--border)}
-.line .lt{color:var(--text); font-weight:700; flex:none; min-width:46px; text-align:right}
-.line .lx{color:var(--dim); flex:none; max-width:34%; overflow:hidden; text-overflow:ellipsis}
-.line .ll{color:var(--accent); flex:none; max-width:34%; overflow:hidden; text-overflow:ellipsis}
+.line .lt{
+  color:var(--text); font-weight:700; flex:0 1 auto; min-width:46px; max-width:42%;
+  text-align:right; overflow:hidden; text-overflow:ellipsis;
+}
+.line .lx{color:var(--dim); flex:0 1 auto; max-width:34%; overflow:hidden; text-overflow:ellipsis}
+.line .ll{color:var(--accent); flex:0 1 auto; max-width:34%; overflow:hidden; text-overflow:ellipsis}
 .line .ldice{
   --dsz:17px; flex:1 1 auto; min-width:0; overflow:hidden; white-space:nowrap;
   line-height:1; opacity:.9;
@@ -403,60 +406,88 @@ kbd{
    tenth-to-ninetieth as bands behind the bars, the median and the mean as
    lines across them, and every roll of this expression still in the log as a
    tick along the bottom, the last one picked out. The run is drawn over the
-   worked-out answer as a thin line, so the two can be seen to agree. */
+   worked-out answer as a thin line, so the two can be seen to agree.
+
+   The chart is padded, so every overlay lives in .layer, which is inset by
+   exactly that padding. Measuring a band against the outer box instead would
+   put it a few pixels wide of the bars it is describing. */
 .chart{
   position:relative; height:104px; background:var(--pane);
   border:1px solid var(--border); border-radius:7px; padding:8px; overflow:hidden;
 }
+.chart .layer{position:absolute; inset:8px; pointer-events:none; z-index:2}
 .hist{display:flex; align-items:flex-end; gap:1px; height:100%; position:relative; z-index:1}
 .hist .bar{
   flex:1; background:linear-gradient(180deg,var(--blue),#1d5570);
-  min-height:1px; border-radius:2px 2px 0 0;
+  min-height:1px; border-radius:2px 2px 0 0; cursor:crosshair;
 }
 .hist .bar.empty{background:#232936}
-.hist .bar:hover{background:var(--accent)}
+/* what a hovered value is worth, and what lies either side of it */
+.hist .bar.at{background:var(--accent)}
+.hist .bar.lo{background:linear-gradient(180deg,#7fd4a2,#2d6b46)}
+.hist .bar.hi{background:linear-gradient(180deg,#a98cf0,#4a3a7a)}
 
 .chart .band{position:absolute; top:0; bottom:0; background:rgba(76,194,241,.07)}
 .chart .band.wide{background:rgba(76,194,241,.04)}
 
-.chart .mline, .chart .aline{position:absolute; top:0; bottom:0; width:0; z-index:2}
+.chart .mline, .chart .aline{position:absolute; top:0; bottom:0; width:0}
 .chart .mline{border-left:1px solid var(--accent)}
 .chart .aline{border-left:1px dashed var(--purple)}
-.chart .mline i, .chart .aline i{
-  position:absolute; top:1px; left:3px; font-style:normal; font-size:9.5px;
-  font-family:var(--mono); white-space:nowrap; pointer-events:none;
-}
-.chart .mline.flip i, .chart .aline.flip i{left:auto; right:3px}
-.chart .mline i{color:var(--accent)}
-.chart .aline i{color:var(--purple); top:13px}
 
 /* every roll of this expression that is still in the log */
 .chart .rolltick{
-  position:absolute; bottom:0; width:5px; height:5px; margin-left:-2px; z-index:3;
+  position:absolute; bottom:0; width:5px; height:5px; margin-left:-2px;
   background:var(--dim); border-radius:50%; opacity:.55;
 }
 .chart .rolltick.last{background:var(--accent); opacity:1; width:7px; height:7px; margin-left:-3px}
 
 /* the run, over the worked-out answer */
-.chart .overlay{
-  position:absolute; inset:8px; width:calc(100% - 16px); height:calc(100% - 16px); z-index:2;
-}
+.chart .overlay{position:absolute; inset:0; width:100%; height:100%}
 .chart .overlay polyline{fill:none; stroke:var(--accent); stroke-width:1.2; vector-effect:non-scaling-stroke; opacity:.75}
 
+/* one cell per bar, so a label sits under the middle of the bar it names */
+.histticks{
+  display:flex; gap:1px; margin-top:3px; font-family:var(--mono);
+  font-size:10px; color:var(--dimmer);
+}
+.histticks span{flex:1; text-align:center; white-space:nowrap; overflow:visible; min-width:0}
+.histticks span.blank{visibility:hidden}
+
 .histaxis{display:flex; justify-content:space-between; font-family:var(--mono); font-size:10.5px; color:var(--dimmer); margin-top:4px}
-.statline{display:flex; flex-wrap:wrap; gap:4px 6px; margin-top:6px}
+
+/* what the chart says about whatever is being pointed at */
+.readout{
+  min-height:17px; margin-top:5px; font-family:var(--mono); font-size:11px;
+  color:var(--dimmer); display:flex; flex-wrap:wrap; gap:2px 10px; align-items:baseline;
+}
+.readout b{color:var(--text); font-weight:700}
+.readout .at{color:var(--accent)}
+.readout .lo{color:#7fd4a2}
+.readout .hi{color:#a98cf0}
+
+.statline{display:flex; flex-wrap:wrap; gap:4px 6px; margin-top:2px}
 .sv{
-  font-family:var(--mono); font-size:11.5px; color:var(--text);
+  font-family:var(--mono); font-size:11.5px; color:var(--text); cursor:default;
   background:var(--pane); border:1px solid var(--border); border-radius:5px; padding:2px 7px;
 }
+.sv:hover{border-color:var(--accent)}
 .sv i{
   font-style:normal; font-size:9.5px; color:var(--dimmer); margin-right:5px;
   text-transform:uppercase; letter-spacing:.06em;
 }
 .sv.med{border-color:rgba(240,180,41,.45)} .sv.med i{color:var(--accent)}
 .sv.avg{border-color:rgba(179,148,247,.45)} .sv.avg i{color:var(--purple)}
-.histnote{font-size:11px; color:var(--dimmer); margin-top:6px}
-.histnote b{color:var(--dim); font-weight:600}
+
+/* what each thing on the chart is, in the colour it is drawn in */
+.histnote{
+  font-size:11px; color:var(--dim); margin-top:7px;
+  display:flex; flex-wrap:wrap; gap:3px 14px;
+}
+.key{display:inline-flex; align-items:center; gap:6px}
+.key::before{content:''; width:11px; height:9px; border-radius:2px; flex:none}
+.key.bars::before{background:linear-gradient(180deg,var(--blue),#1d5570)}
+.key.run::before{height:0; border-top:2px solid var(--accent); opacity:.85; border-radius:0}
+.key.log::before{width:7px; height:7px; border-radius:50%; background:var(--accent)}
 
 /* reference */
 .refgrid{columns:2; column-gap:22px}
@@ -542,6 +573,7 @@ kbd{
   .exrow{margin-left:calc(var(--lvl, 0) * 10px)}
   .refrow{padding:4px 0}
   /* the two lists give up the name column when there is no room for it */
+  #paneExpr .panehead .ttl{display:none}
   .lmain{gap:6px}
   .lname{width:auto; max-width:34%}
   .setrowb{flex-wrap:wrap}
@@ -703,6 +735,8 @@ kbd{
 }
 .cname:hover{border-color:var(--border)}
 .cname:focus{outline:none; border-color:var(--accent); color:var(--text)}
+/* how full a heading is, so an empty one is obviously empty */
+.ccount{font-size:10.5px; color:var(--dimmer); flex:none; white-space:nowrap}
 /* the loose group is named but not touchable: there is nothing to rename */
 .crow.none{gap:0}
 .clabel{
