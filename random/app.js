@@ -957,11 +957,19 @@
         }
         started = performance.now();
       }
-      const t0 = performance.now();
-      do { st.run(SAMPLE.chunk); }
-      while (performance.now() - t0 < SAMPLE.burst && st.count() < SAMPLE.cap);
-
-      drawDetails(st.snapshot());
+      /* Parsing says an expression is well formed; only throwing it says it can
+         be thrown. Anything that gets this far and still fails belongs on the
+         screen — left uncaught it kills the timer and the chart says "rolling"
+         for ever, which is the most misleading thing it could say. */
+      try {
+        const t0 = performance.now();
+        do { st.run(SAMPLE.chunk); }
+        while (performance.now() - t0 < SAMPLE.burst && st.count() < SAMPLE.cap);
+        drawDetails(st.snapshot());
+      } catch (err) {
+        el.details.innerHTML = '<div class="muted">' + esc(err.message) + '</div>';
+        return;
+      }
       if (st.count() < SAMPLE.cap && performance.now() - started < SAMPLE.budget) {
         setTimeout(() => step(st, started), SAMPLE.gap);
       }

@@ -657,6 +657,30 @@
   /* ==========================================================================
      STATIC CHECKS — everything that can be rejected before rolling
      ========================================================================== */
+  /* The bindings of the expression being checked, so a word can be told from a
+     name that stands for something. Both kinds count: := holds source text and
+     ::= holds a rolled value, and either makes a word no longer only a word.
+     Set for the length of one parse and cleared after it. */
+  let checkVars = null, checkFixed = null;
+
+  function wordOnly(node) {
+    if (!node || typeof node !== 'object') return false;
+    // a comparison turns whatever it touches into a verdict, which is not a word
+    if ((node.mods || []).some((m) => m.t === 'check')) return false;
+    switch (node.t) {
+      case 'str': return true;
+      case 'word': return !node.forced && !(checkFixed && checkFixed[node.name]) &&
+        varSrc(node.name, { vars: checkVars }) === undefined;
+      case 'paren': return wordOnly(node.v);
+      case 'custom': return node.items.length > 0 && node.items.every(wordOnly);
+      case 'set': case 'rep': return node.items.length > 0 && node.items.every(wordOnly);
+      case 'ternary': return wordOnly(node.yes) && wordOnly(node.no);
+      case 'band':
+        return node.arms.every((a) => wordOnly(a.then)) && wordOnly(node.otherwise);
+    }
+    return false;
+  }
+
   function isSet(node) {
     switch (node.t) {
       case 'dice': return node.qty !== null;
@@ -688,6 +712,22 @@
 
   function typeCheck(node, arith) {
     const mods = node.mods || [];
+
+    /* Every modifier but a comparison wants a number out of what it follows,
+       and there is no number here to want. */
+    if (mods.length && wordOnly(node)) {
+      const m = mods.find((x) => x.t !== 'check');
+      if (m) {
+        // named without its modifiers, since those are not the part at fault
+        const bare = plain(Object.assign({}, node, { mods: [] }));
+        throw new DiceError('"' + modText(m) + '" needs a number, and ' + bare +
+          ' can only ever be a word', m.sp && m.sp[0]);
+      }
+    }
+    if (arith && wordOnly(node)) {
+      throw new DiceError(plain(node) + ' can only ever be a word, so it cannot be ' +
+        'used in a calculation', node.sp && node.sp[0]);
+    }
 
     for (const m of mods) {
       const spec = MODS[m.t === 'check' ? 'check' : m.t];
@@ -1326,16 +1366,17 @@
         const next = [];
         for (const r of out) {
           next.push(r);
-          let last = r.v, n = 0;
-          while (cpTest(cp, last, ctx) && n < LIMIT.explode) {
+          // the face is tested before any penetrating penalty is taken off it
+          let face = r.v, cur = r, n = 0;
+          while (cpTest(cp, face, ctx) && n < LIMIT.explode) {
             n++;
             if (++ctx.dice > LIMIT.totalDice) throw new DiceError('too many dice in one expression');
-            const raw = makeDie(sides);
-            last = raw;
-            next.push({ v: m.pen ? raw - 1 : raw, tags: ['exploded'], from: null });
+            tag(cur, 'exploded');            // this is the one that set off a throw
+            face = makeDie(sides);
+            cur = { v: m.pen ? face - 1 : face, tags: [], from: null };
+            next.push(cur);
             if (!m.inf) break;
           }
-          if (n > 0) tag(r, 'exploded');
         }
         out = next;
       } else if (m.t === 'reroll') {
@@ -1485,8 +1526,11 @@
 
     const uid = uidOf(node, ctx);
     const dice = rolls.map((r) => Die(r, sides, uid));
-    // a bare d6 is one value; 4d6 is a set of four
-    const value = single ? dice[0] : SetVal(dice, { uid });
+    /* A bare d6 is one value and 4d6 is a set of four — but a lone die that
+       exploded is several dice that have to be added up, so it stops being the
+       one die it started as. Taking the first of them would throw the rest of
+       the explosion away. */
+    const value = (single && dice.length === 1) ? dice[0] : SetVal(dice, { uid });
     return applyMods(value, node.mods, sides, ctx);
   }
 
@@ -1519,6 +1563,18 @@
     return { op: '=', v: m.t === 'explode' ? b.max : b.min };
   }
 
+  /** every die under a value, marked for whatever it took part in */
+  function tagDice(v, t) {
+    if (!v) return;
+    if (v.die && v.roll) {
+      if (v.roll.tags.indexOf(t) < 0) v.roll.tags.push(t);
+      return;
+    }
+    if (v.set) { for (const x of v.members) tagDice(x, t); return; }
+    if (v.inner) { tagDice(v.inner, t); return; }
+    if (v.parts) { for (const p of v.parts) if (typeof p !== 'string') tagDice(p, t); }
+  }
+
   function rollTerm(node, m, ctx) {
     const once = Object.assign({}, node, { mods: node.mods.filter((x) => x !== m) });
     const cp = termCp(once, m, ctx);
@@ -1531,6 +1587,7 @@
       n++;
       // a re-roll replaces what came before; an explosion is added to it
       if (m.t === 'reroll') tries[tries.length - 1].dropped = true;
+      else tagDice(tries[tries.length - 1], 'exploded');
       let next = evalNode(once, ctx);
       if (m.t === 'explode' && m.pen) next = Expr(safeTotal(next) - 1, [next, PLUS, Val(-1)]);
       tries.push(next);
@@ -2383,11 +2440,13 @@
       let ast;
       try {
         ast = p.parse();
+        checkVars = vars; checkFixed = fixed;
         typeCheck(ast, false);
       } catch (e) {
         if (e instanceof DiceError && e.pos != null) e.pos += base;
         throw e;
       }
+      checkVars = checkFixed = null;
       uid = p.uid;
       if (asg) {
         if (fx) fixed[asg[1]] = ast; else vars[asg[1]] = body;
