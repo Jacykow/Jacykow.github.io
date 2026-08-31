@@ -264,7 +264,7 @@
             'like d6>4?yes:>2?maybe:no');
       }
       const subject = Object.assign({}, cond, { mods: mods.filter((m) => m !== lead) });
-      const arms = [{ cp: lead.cp, check: lead.check, bare: !!lead.bare,
+      const arms = [{ cp: lead.cp, check: lead.check, bare: !!lead.bare, each: !!lead.each,
                       then: first, sp: lead.sp, qSp: [q, q + 1], cSp: [cA, cA + 1] }];
       for (;;) {
         const a = this.mark();
@@ -275,7 +275,8 @@
         const then = this.expr();
         const cc = this.mark();
         if (!this.lit(':')) this.fail('expected ":" to finish the choice');
-        arms.push({ cp, check: 's', bare: true, then, sp: [a, qq],
+        // every arm is about the same subject, so they are all about it the same way
+        arms.push({ cp, check: 's', bare: true, each: !!lead.each, then, sp: [a, qq],
                     qSp: [qq, qq + 1], cSp: [cc, cc + 1] });
         if (this.atComparison()) continue;
         return {
@@ -547,17 +548,27 @@
       const start = this.mark();
       const back = () => { this.i = start; return null; };
 
-      /* `@` takes what follows and applies it to each member on its own rather
-         than to the sum. One operator and one operand at a time, so `2d6@*2+3`
-         doubles each die and then adds 3 once; write `@*2@+3` to do both to
-         each. Keeping it short is what keeps the reading unambiguous. */
+      /* `@` says "to each member". Everything else is about the term's own
+         value, which for a set is its total — so `2d6e` explodes on a total of
+         12 and `2d6@e` explodes each die on 6.
+
+         Followed by an operator it is arithmetic, one operator and one operand
+         at a time: `2d6@*2+3` doubles each die and then adds 3 once, and
+         `@*2@+3` does both to each. Followed by a name it is that modifier,
+         applied a member at a time. */
       if (this.lit('@')) {
         const oA = this.mark();
         const op = MAP_OPS.find((x) => this.lit(x));
-        if (!op) this.fail('expected an operator after "@", like 2d6@*2');
-        return this.fin(start, {
-          t: 'map', op: op === '**' ? '^' : op, opSp: [oA, this.i], r: this.unary()
-        });
+        if (op) {
+          return this.fin(start, {
+            t: 'map', op: op === '**' ? '^' : op, opSp: [oA, this.i], r: this.unary()
+          });
+        }
+        const inner = this.modifier();
+        if (!inner) this.fail('expected an operator or a modifier after "@", like 2d6@*2 or 2d6@e');
+        if (inner.t === 'map') this.fail('"@" is already about each member; one is enough');
+        inner.each = true;
+        return this.fin(start, inner);
       }
 
       if (this.lit('min')) {
@@ -663,9 +674,9 @@
         throw new DiceError('"' + modText(m) + '" needs a set of values — give it a count ' +
           'like 4d6, or list them like (d6,d8)', m.sp && m.sp[0]);
       }
-      if ((spec.kind === 'die' || spec.dice) && node.t !== 'dice') {
-        throw new DiceError('"' + modText(m) + '" has to attach to dice — there is nothing to re-roll',
-          m.sp && m.sp[0]);
+      if ((spec.kind === 'die' || spec.dice) && m.each && node.t !== 'dice') {
+        throw new DiceError('"' + modText(m) + '" marked with "@" is about each die, ' +
+          'so it has to attach to dice', m.sp && m.sp[0]);
       }
       // advantage sums each attempt before comparing, so it needs a number
       if (m.t === 'adv') {
@@ -674,6 +685,19 @@
           throw new DiceError('advantage compares sums, and a ' + CHECKS[c].label.toLowerCase() +
             ' carries no number', m.sp && m.sp[0]);
         }
+      }
+      /* Only what acts on a member one at a time can be marked. Keeping or
+         dropping is a choice made between members, and advantage rolls the whole
+         term again — neither is something a single member can be asked about. */
+      if (m.each && spec && (spec.kind === 'set' || spec.kind === 'repeat')) {
+        throw new DiceError('"' + modText(m) + '" is about the set as a whole, ' +
+          'so it cannot be marked with "@"', m.sp && m.sp[0]);
+      }
+      /* A name can hold either, and what it holds is not known until it is
+         rolled, so only a term that says outright what it is can be refused. */
+      if (m.each && node.t !== 'word' && !isSet(node)) {
+        throw new DiceError('"@" is about the members of a set, and there is only ' +
+          'one value here', m.sp && m.sp[0]);
       }
       if (m.t === 'map') {
         if (isSet(m.r)) {
@@ -1239,10 +1263,11 @@
     return v;
   }
 
-  function applyDieMods(rolls, sides, mods, ctx) {
+  function applyDieMods(rolls, sides, mods, ctx, single) {
     const tag = (r, t) => { if (r.tags.indexOf(t) < 0) r.tags.push(t); };
     let out = rolls;
-    const die = mods.filter((x) => MODS[x.t] && MODS[x.t].kind === 'die')
+    // a lone die is its own total, so there it makes no difference either way
+    const die = mods.filter((x) => MODS[x.t] && MODS[x.t].kind === 'die' && (x.each || single))
       .sort((a, b) => MODS[a.t].order - MODS[b.t].order);
     for (const m of die) {
       if (m.t === 'explode') {
@@ -1324,6 +1349,18 @@
     return value;
   }
 
+  /* A modifier with no @ is about the term's own value. A check simply lands on
+     it — a set that carries one counts as its verdict rather than as its
+     members. A clamp has to hand back a different number, unless the value is a
+     lone die, where moving the face is what a clamp has always meant. */
+  function applyWhole(value, m, ctx) {
+    if (m.t === 'check' || value.roll) { applyElement(value, m, ctx); return value; }
+    if (m.t !== 'min' && m.t !== 'max') return value;
+    const t = safeTotal(value);
+    const v = m.t === 'min' ? Math.max(t, m.n) : Math.min(t, m.n);
+    return v === t ? value : Expr(v, [value]);
+  }
+
   function applySet(value, m, sides, ctx) {
     if (!value.set) throw new DiceError('"' + modText(m) + '" needs a set of values');
     const members = value.members;
@@ -1369,8 +1406,9 @@
       const kind = MODS[m.t === 'check' ? 'check' : m.t].kind;
       // a map hands back a different value, so it is the one that is assigned
       if (kind === 'map') value = applyMap(value, m, ctx);
-      else if (kind === 'element') eachMember(value, (item) => applyElement(item, m, ctx));
-      else applySet(value, m, sides, ctx);
+      else if (kind !== 'element') applySet(value, m, sides, ctx);
+      else if (m.each) eachMember(value, (item) => applyElement(item, m, ctx));
+      else value = applyWhole(value, m, ctx);
     }
     if (mods && mods.length) value.mods = mods;   // the subtotal bracket names them
     return value;
@@ -1390,7 +1428,7 @@
 
     let rolls = [];
     for (let i = 0; i < qty; i++) rolls.push({ v: makeDie(sides), tags: [], from: null });
-    rolls = applyDieMods(rolls, sides, node.mods, ctx);
+    rolls = applyDieMods(rolls, sides, node.mods, ctx, single);
 
     const uid = uidOf(node, ctx);
     const dice = rolls.map((r) => Die(r, sides, uid));
@@ -1409,6 +1447,47 @@
     return out;
   }
 
+  /** is this modifier about the term's total rather than about its dice? */
+  const aboutTerm = (node, m) =>
+    (m.t === 'explode' || m.t === 'reroll') && !m.each &&
+    !(node.t === 'dice' && node.qty === null);
+
+  /* What counts as "the highest" or "the lowest" when it is a total being
+     watched rather than a face. Written out, it is whatever you wrote; left
+     out, it is the most or least the term could ever come to. */
+  function termCp(node, m, ctx) {
+    if (m.cp) return m.cp;
+    const b = boundsOf(node, { vars: ctx.vars, fixed: ctx.fixed, seen: new Set() });
+    if (!b) {
+      throw new DiceError('"' + modText(m) + '" here is about the total, and there is no ' +
+        'saying what its ' + (m.t === 'explode' ? 'highest' : 'lowest') + ' total is — ' +
+        'write the comparison out, like (2d6)' + modText(m) + '>=11', m.sp && m.sp[0]);
+    }
+    return { op: '=', v: m.t === 'explode' ? b.max : b.min };
+  }
+
+  function rollTerm(node, m, ctx) {
+    const once = Object.assign({}, node, { mods: node.mods.filter((x) => x !== m) });
+    const cp = termCp(once, m, ctx);
+    const uid = uidOf(node, ctx);
+    const cap = m.t === 'explode' ? LIMIT.explode : LIMIT.reroll;
+    const tries = [evalNode(once, ctx)];
+    let n = 0;
+
+    while (cpTest(cp, safeTotal(tries[tries.length - 1]), ctx) && n < cap) {
+      n++;
+      // a re-roll replaces what came before; an explosion is added to it
+      if (m.t === 'reroll') tries[tries.length - 1].dropped = true;
+      let next = evalNode(once, ctx);
+      if (m.t === 'explode' && m.pen) next = Expr(safeTotal(next) - 1, [next, PLUS, Val(-1)]);
+      tries.push(next);
+      if (!m.inf) break;
+    }
+    const out = SetVal(tries, { uid, brackets: tries.length > 1 });
+    out.mods = [m];
+    return out;
+  }
+
   /* Advantage rolls the term again rather than reshaping one roll, so it wraps
      evaluation instead of joining the modifier chain. Each attempt keeps its
      own shape but is compared by its sum — that is what makes `2d6a` the better
@@ -1424,8 +1503,34 @@
   }
 
   /* A `::=` binding is thrown once and then referred to, which is what lets a
-     chain of comparisons ask about the same roll several times. It is a value,
-     never a set: it stands for what the roll came to. */
+     chain of comparisons ask about the same roll several times. It holds
+     whatever was thrown — a set stays a set, exactly as it would under `:=`.
+     The two differ in when the dice are thrown and in nothing else.
+
+     Every mention gets its own wrapper around the same underlying values, so
+     two mentions can ask two different questions without one overwriting the
+     other's answer. The dice are counted once, at the first mention. */
+  /* One member of a set being named again: it shows the face that was thrown,
+     and carries any verdict of its own rather than the one the last mention
+     left on the die. */
+  function mirror(inner) {
+    return value({
+      word: inner.word,
+      raw() { return inner.raw(); },
+      html(o) {
+        return '<span class="r-ref' + stateCls(o, this) + '"><i></i>' +
+          esc(fmt(inner.raw())) + '</span>';
+      }
+    });
+  }
+
+  function refSet(inner, name, uid) {
+    const out = SetVal(inner.members.map(mirror),
+      { uid, brackets: true, note: name, tag: 'w' });
+    out.ref = true;
+    return out;
+  }
+
   function fixedValue(node, slot, ctx) {
     if (!slot.v) {
       if (slot.busy) throw new DiceError('"' + node.name + '" is defined in terms of itself');
@@ -1434,9 +1539,14 @@
       slot.busy = false;
     }
     const uid = uidOf(node, ctx);
-    const wrapped = slot.used
-      ? Ref(slot.v, node.name, uid)
-      : Group(slot.v, uid, { note: node.name, tag: 'w', bare: !!slot.v.atom });
+    let wrapped;
+    if (slot.v.set) {
+      wrapped = slot.used ? refSet(slot.v, node.name, uid)
+        : SetVal(slot.v.members, { uid, brackets: true, note: node.name, tag: 'w' });
+    } else {
+      wrapped = slot.used ? Ref(slot.v, node.name, uid)
+        : Group(slot.v, uid, { note: node.name, tag: 'w', bare: !!slot.v.atom });
+    }
     slot.used = true;
     return applyMods(wrapped, node.mods || [], null, ctx);
   }
@@ -1444,6 +1554,8 @@
   function evalNode(node, ctx) {
     const adv = (node.mods || []).find((x) => x.t === 'adv');
     if (adv) return rollAdv(node, adv, ctx);
+    const whole = (node.mods || []).find((x) => aboutTerm(node, x));
+    if (whole) return rollTerm(node, whole, ctx);
 
     switch (node.t) {
       case 'num': return Val(node.v);
@@ -1492,6 +1604,9 @@
       /* The choice distributes the same way a comparison does: one condition
          per member, one answer per member. `4d20>5?hit:miss` is four choices,
          not one taken on the sum. */
+      /* The choice goes the way its condition went. A comparison marked with @
+         left one verdict per member, so there is one answer per member; one
+         about the whole term leaves one verdict, and one answer. */
       case 'ternary': {
         const c = evalNode(node.cond, ctx);
         const uid = uidOf(node, ctx);
@@ -1504,7 +1619,7 @@
           // or the dice it rolled go missing from the count that sizes them
           return Group(v, uid, { prefix: pre, bare: true, condVal: cv });
         };
-        if (!c.set) return answer(c);
+        if (!c.set || c.check) return answer(c);
         // a member thrown away before the choice keeps its place, struck out
         return SetVal(c.members.map((m) => m.dropped ? m : answer(m)),
           { uid, brackets: c.members.length > 1 });
@@ -1535,7 +1650,7 @@
             '<span class="r-kw"' + tag + '>so</span></span>';
           return Group(out, uid, { prefix: pre, bare: true, condVal: cv });
         };
-        if (!v.set) return answer(v);
+        if (!v.set || !node.arms[0].each) return answer(v);
         return SetVal(v.members.map((m) => m.dropped ? m : answer(m)),
           { uid, brackets: v.members.length > 1 });
       }
@@ -1559,7 +1674,12 @@
 
       case 'func': {
         const args = node.args.map((a) => evalNode(a, ctx));
-        const v = FUNCS[node.name].apply(null, args.map((p) => p.total()));
+        const nums = [];
+        for (const p of args) {
+          if (p.set) { for (const m of p.members) if (!m.dropped) nums.push(m.total()); }
+          else nums.push(p.total());
+        }
+        const v = FUNCS[node.name].apply(null, nums);
         const parts = ['<span class="r-fn">' + node.name + '</span><span class="r-brk">(</span>'];
         args.forEach((p, i) => {
           if (i) parts.push('<span class="r-op">,</span>');
@@ -1602,6 +1722,10 @@
 
   /* ------------------------------------------- notation reconstruction */
   function modText(m) {
+    return (m.each ? '@' : '') + modBody(m);
+  }
+
+  function modBody(m) {
     switch (m.t) {
       case 'min': return 'min' + m.n;
       case 'max': return 'max' + m.n;
@@ -1628,7 +1752,8 @@
       case 'band': {
         let s = plain(node.subject);
         node.arms.forEach((a, i) => {
-          s += (i ? ':' : '') + (a.bare ? '' : a.check) + cpText(a.cp) + '?' + plain(a.then);
+          s += (i ? ':' : '') + (i || !a.each ? '' : '@') +
+            (a.bare ? '' : a.check) + cpText(a.cp) + '?' + plain(a.then);
         });
         return s + ':' + plain(node.otherwise);
       }
@@ -2238,6 +2363,7 @@
 
   function countDice(v) {
     if (!v) return 0;
+    if (v.ref) return 0;              // the same dice, named again
     if (v.die) return 1;
     if (v.set) { let n = 0; for (const m of v.members) n += countDice(m); return n; }
     if (v.inner) return countDice(v.inner) + countDice(v.condVal);
@@ -2801,7 +2927,7 @@
      been applied. A re-roll is exact both ways round: once over, the old face
      hands its weight to a fresh throw; repeated, the qualifying faces simply
      cannot be where it stops, so what is left is renormalised. */
-  function faceDist(node, ctx) {
+  function faceDist(node, ctx, single) {
     const sides = constVal(node.sides, ctx);
     if (sides === null || !(sides >= 1) || sides > 4096) return null;
     const n = Math.floor(sides);
@@ -2814,6 +2940,8 @@
 
     for (const m of mods) {
       if (m.t === 'explode' || m.t === 'unique') return null;   // no ceiling, or coupled
+      // a lone die is its own total, so there the two readings agree
+      if (!m.each && !single && (m.t === 'min' || m.t === 'max' || m.t === 'reroll')) return null;
       if (m.t === 'min' || m.t === 'max') {
         const out = new Map();
         for (const [f, p] of faces) {
@@ -2912,7 +3040,8 @@
     const qty = node.qty === null ? 1 : constVal(node.qty, ctx);
     if (qty === null || !(qty >= 0) || qty > DLIM.dice) return null;
     const n = Math.floor(qty);
-    const faces = faceDist(node, ctx);
+    const single = node.qty === null;
+    const faces = faceDist(node, ctx, single);
     if (!faces) return null;
 
     const mods = node.mods || [];
@@ -2921,7 +3050,9 @@
     if (mods.filter((m) => m.t === 'keep' || m.t === 'drop').length > 1) return null;
 
     if (chk) {
-      // a check counts hits, and hits are independent, so this is binomial
+      // a check counts hits, and hits are independent, so this is binomial —
+      // but only when it is the dice being counted rather than their total
+      if (!chk.each && !single) return null;
       if (!CHECKS[chk.check].castable) return null;
       if (keepMod) return null;                    // keeping first changes what is counted
       let p = 0;
@@ -3042,8 +3173,12 @@
       .sort((a, b) => (MODS[a.t === 'check' ? 'check' : a.t] || { order: 99 }).order -
                       (MODS[b.t === 'check' ? 'check' : b.t] || { order: 99 }).order)) {
       if (m.t === 'adv') continue;                            // handled above
-      if (m.t === 'min' || m.t === 'max') continue;           // no face left to clamp
-      if (m.t === 'map') { d = dPair(d, distOf(m.r, ctx), (x, y) => arith(m.op, x, y, m.opSp)); }
+      if (m.each) return null;                                // members this cannot see
+      if (m.t === 'min' || m.t === 'max') {
+        // this is one value, so a clamp is simply the larger or smaller of two
+        d = dPair(d, dOne(m.n), m.t === 'min' ? Math.max : Math.min);
+      }
+      else if (m.t === 'map') { d = dPair(d, distOf(m.r, ctx), (x, y) => arith(m.op, x, y, m.opSp)); }
       else if (m.t === 'check') {
         if (!CHECKS[m.check].castable) return null;
         let p = 0;
@@ -3104,7 +3239,10 @@
 
   function wordOdds(node, ctx) {
     const spec = armWords(node);
-    if (!spec || isSet(spec.subject)) return null;
+    if (!spec) return null;
+    // one answer per member is a different question from one answer
+    if (spec.arms.some((a) => a.each) || (spec.lead && spec.lead.each)) return null;
+    if (isSet(spec.subject) && spec.arms.some((a) => a.each)) return null;
     // any check left on the subject would be counted twice
     if ((spec.subject.mods || []).some((m) => m.t === 'check')) return null;
     const d = distOf(spec.subject, ctx);
@@ -3129,6 +3267,45 @@
       out.set(word, (out.get(word) || 0) + p);
     }
     return out;
+  }
+
+  /* ------------------------------------------------------------- migration
+     An expression written before `@` existed meant every element modifier a
+     member at a time, because that was the only reading there was. Marking
+     each of those keeps it saying exactly what it always said. It is a
+     mechanical rewrite, so it preserves meaning rather than taste: `4d6kh1@>=5`
+     is a comparison over one member, which is the same as one over the total,
+     and is left alone rather than tidied. */
+  function markEach(node) {
+    if (!node || typeof node !== 'object') return;
+    if (isSet(node)) {
+      for (const m of node.mods || []) {
+        const spec = MODS[m.t === 'check' ? 'check' : m.t];
+        if (spec && (spec.kind === 'element' || spec.kind === 'die')) m.each = true;
+      }
+    }
+    if (node.t === 'band') {
+      const each = isSet(node.subject);
+      for (const a of node.arms) { if (each) a.each = true; markEach(a.then); }
+      markEach(node.subject);
+      markEach(node.otherwise);
+      return;
+    }
+    for (const k of ['l', 'r', 'v', 'qty', 'sides', 'cond', 'yes', 'no', 'count']) markEach(node[k]);
+    for (const a of node.args || []) markEach(a);
+    for (const i of node.items || []) markEach(i);
+    for (const m of node.mods || []) { if (m.cp && m.cp.node) markEach(m.cp.node); if (m.r) markEach(m.r); }
+  }
+
+  /** an expression from before `@`, rewritten to go on meaning what it meant */
+  function migrate(input) {
+    const raw = String(input == null ? '' : input);
+    let p;
+    try { p = parse(raw); } catch (e) { return raw; }        // leave what will not parse
+    for (const part of p.parts) markEach(part.ast);
+    const body = (p.repeat > 1 ? p.repeat + 'x ' : '') + p.parts.map((x) =>
+      (x.assign ? x.assign + (x.once ? '::=' : ':=') : '') + plain(x.ast)).join(', ');
+    return p.label ? body + ' # ' + p.label : body;
   }
 
   /** the exact distribution of a whole expression, or null */
@@ -3156,6 +3333,7 @@
 
   global.DiceEngine = {
     parse, inspect, evaluate, roll, analyse, preview, setVars, fmt, esc, shapeFor,
-    splitLabel, outcomes, distribution, study, DiceError, LIMIT, FUNCS, CHECKS, MARK_ORDER
+    splitLabel, outcomes, distribution, study, migrate,
+    DiceError, LIMIT, FUNCS, CHECKS, MARK_ORDER
   };
 }(window));

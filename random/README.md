@@ -42,8 +42,12 @@ into the `e`/`ei`, `r`/`ri` pairs described below.
 ### Modifiers
 
 Modifiers chain onto a dice term in any written order — they are always **applied** in the
-fixed order below, so `4d6kh3e` and `4d6ekh3` mean the same thing. A term may only carry
+fixed order below, so `4d6kh3@e` and `4d6@ekh3` mean the same thing. A term may only carry
 one explode modifier.
+
+Each of them is about the term's **total** unless it is written with `@` in front, which
+makes it about each member: `4d6>=5` asks one question about the sum, `4d6@>=5` asks four.
+See [Values and sets](#values-and-sets).
 
 Anything that can repeat follows one rule: **the plain letter does it once, a trailing
 `i` does it for as long as it keeps qualifying** — `e` / `ei`, `r` / `ri`. `u` is exempt:
@@ -62,7 +66,7 @@ it narrows the set of allowed values rather than repeating a roll.
 | 5 | `u`, `u3` | force unique results (`u3` gives up after 3 attempts) |
 | 6 | `kh3`, `kl1` | keep the highest / lowest N |
 | 7 | `dl1`, `dh1` | drop the lowest / highest N |
-| 8 | `@*2`, `@^2`, `@-1` | do it to each member rather than to the sum |
+| 8 | `@*2`, `@^2`, `@-1` | arithmetic, to each member rather than to the total |
 | 9 | `>=8` | a plain yes/no: each die reads success or failure |
 | 9 | `s>=8` | mark the hits and say nothing about the rest |
 | 9 | `f1`, `f<=1` | mark each qualifying die a failure |
@@ -133,113 +137,73 @@ Keep, drop and target success/failure are the modifiers that make sense here.
 
 There are two structural types, and one rule ties them together:
 
-> **A set becomes a value by being summed.** That is the only implicit reduction there
-> is, and it happens wherever a value is needed.
+> **A term's value is its total.** A modifier is about that value unless it is marked
+> `@`, which is about each member instead.
 
-A set is built by a count (`4d6`), a list (`(d6,d8)`) or a repeat (`3(d6+1)`). Brackets
-do not build one: `(2d6)` is still two dice. `(2d6+3)` is one value — not because of the
-brackets, but because `+` needed a value and summing is how it got one.
-
-**Where a set is summed without being asked** — every place a single value is required:
+A set is built by a count (`4d6`), a list (`(d6,d8)`) or a repeat (`3(d6+1)`). Brackets do
+not build one: `(2d6)` is still two dice.
 
 ```
-2d6*2            fourteen doubled, never each die doubled
-max(2d6,7)       the total of 2d6 against 7
-sum(2d6)         the total, said out loud
-(2d6)d10         two-to-twelve d10s
-2d6a             the better of two totals
+2d6>=5           is the total 5 or more? one yes or no
+2d6@>=5          is each die 5 or more? two verdicts, 0 to 2 successes
+
+2d6e             roll 2d6 again and add, when the total is 12
+2d6@e            roll a die again and add, for each die that shows 6
+
+2d6min3          the total, floored at 3
+2d6@min3         each die, floored at 3
 ```
 
-**Where a set stays a set** — everything that acts on members, one at a time:
+The `@` goes in front of whichever modifier it is about, and only in front of the ones a
+single member can answer for. Keeping, dropping and making unique are choices made
+*between* members, and advantage throws the whole term again, so none of them takes one:
 
 ```
-4d6>=5           four comparisons, not one on the sum
-4d20>10?hit:miss four answers, since the choice distributes with the comparison
-2d6@*2           each die doubled — @ is the one operator that does not sum first
-4d6kh3           keep and drop need a set to have anything to work on
+4d6dl1           drop the lowest of the four — about the set, so no @
+4d6@kh1          refused: kh is about the set as a whole
+2d6a             the better of two totals — about the term, so no @
 ```
 
-That is what `@` is for, and all it is for: arithmetic sums a set before touching it, and
-`@` is the way round that.
+A lone die is its own total, so the two readings agree and `d6e` needs no mark.
 
-**And one place a set is refused rather than summed**: the right-hand side of a
-comparison. `d6 = 2d6` is an error. A set there could mean *against the total* or
-*against each of them*, and guessing would quietly change what `4d6>d4` says. Write
-`sum()` to say which you meant.
-
-Taking `d6`, the **total** of `2d6`, and `2d6` as a **set**, there are six ways to compare
-them — three on the left, two on the right, since the set cannot go on the right:
-
-| | vs `d6` | vs `sum(2d6)` |
-|---|---|---|
-| `d6` | `d6=d6` | `d6=sum(2d6)` |
-| `sum(2d6)` | `sum(2d6)=d6` | `sum(2d6)=sum(2d6)` |
-| `2d6` *(a set)* | `2d6=d6` | `2d6=sum(2d6)` |
-
-The top four each ask one question and give one answer. The bottom two ask **two**: the
-set on the left distributes, so each die is compared separately — and because the other
-side is worked out afresh for every comparison, `2d6=sum(2d6)` rolls two dice on the left
-and two *more* for each of them on the right. Six dice, two answers.
-
-#### Every place it is decided
-
-Taking `2d6` as the example throughout. Variants of one modifier are collapsed: `e`
-covers `ei` and `ep`, `kh` covers `kl`/`dh`/`dl`, and so on.
-
-**Summed to one number** — everywhere a single value is required:
-
-| Where | Written | Comes to |
-|---|---|---|
-| either side of `+ - * / % ^` | `2d6+1` | 7 + 1 |
-| an argument to `sum`, `max`, `min` | `max(2d6,7)` | the total against 7 |
-| how many dice to roll | `(2d6)d10` | seven d10s |
-| how many sides a die has | `d(2d6)` | one d7 |
-| a `::=` binding, everywhere it is named | `x::=2d6, x+1` | x is one number |
-| each attempt of `a` / `da` | `2d6a` | the better **total**, not the better die |
-| a face of a custom die | `[2d6,99]` | that face is worth 7 |
-| a bracket used as **one item of a list** | `((2d6),(3d8))kh1` | keeps the better group, by total |
-
-**Left as two rolls** — everywhere something acts on members, one at a time:
-
-| Where | Written | Comes to |
-|---|---|---|
-| die modifiers `e`, `r`, `u` | `2d6e` | each die explodes on its own |
-| `min` and `max` | `2d6min3` | each face clamped |
-| checks `s`, `f`, `cs`, `cf`, and a bare comparison | `2d6>=5` | two comparisons, 0 to 2 successes |
-| `@` | `2d6@*2` | each die doubled |
-| `kh`, `kl`, `dh`, `dl` | `2d6kh1` | needs the members to choose between |
-| `?:` and a chain of them | `2d6>=5?hit:miss` | two answers |
-| a minus in front | `-2d6` | each member flipped |
-| a comma inside brackets | `(2d6,d8)` | three members, flattened |
-| a repeat | `2(2d6)` | four dice, flat |
-| a `:=` variable, wherever it is named | `x:=2d6, 2x>=5` | four dice, four comparisons |
-
-Brackets do neither on their own: `(2d6)` is two dice, `(2d6)kh1` keeps one of them, and
-`(2d6>=5)?hit:miss` still gives two answers. They matter in exactly one place — as an
-item of a list, where a bracket makes what it holds a **single member**:
+**Where the total is still what is meant**, because nothing else would make sense:
 
 ```
-(2d6,3d8)kh1        five dice; keep the best one
-((2d6),(3d8))kh1    two groups; keep the better total
+2d6+1            arithmetic reduces each side to a value
+(2d6)d10         how many dice to roll
+d(2d6)           how many sides a die has
+2d6a             each attempt of advantage, compared by total
+[2d6,99]         a face of a custom die is worth one number
 ```
 
-That is how you compare groups rather than dice, and it is the only thing a bracket
-changes about a set.
+**Where the members are what is meant:**
 
-**Refused rather than guessed at** — the right-hand side of a comparison. `d6=2d6` is an
-error; write `sum(2d6)` for the total, or put the set on the left to compare each die.
+```
+sum(2d6)         everything added up
+max(2d6)         the largest member — min() the smallest
+2d6@*2           each die doubled
+4d6kh3           keep and drop choose between members
+((2d6),(3d8))kh1 a bracket, as an item of a list, is one member
+```
 
-**And in the result:**
+`sum`, `max` and `min` take the members of everything handed to them, flattened together,
+so `max(2d6,7)` is the largest of three numbers.
 
-| What you see | Which it is |
-|---|---|
-| the big number at the top | the **sum** — of every set, across every top-level comma and every `Nx` repeat |
-| a score like `2-0` | a **count of members**, never a sum |
-| the words, when a roll lands on one | one word per member |
-| a subtotal bracket | the sum of what it spans |
-| **Details**, per-unit section | one member: `2d6` charts `d6 ×2` |
-| **Details**, total section | the sum: 2 to 12 |
-| *can be* / min and max | the sum |
+**And one place a set is refused rather than reduced**: the right-hand side of a
+comparison. `d6 = 2d6` is an error — write `sum(2d6)` for the total, or put the set on the
+left to compare each die.
+
+#### The two bindings differ in one thing only
+
+`:=` is worked out afresh at every mention; `::=` is thrown once and then referred to.
+Both hold whatever they were given, set or value, and behave identically in every other
+respect:
+
+```
+x:=2d6, x@>=5, x@>=5      four dice, two pairs of verdicts
+x::=2d6, x@>=5, x@>=5     two dice, asked about twice
+x::=2d6, x>=7             one verdict, about the total
+```
 
 ### Maths
 

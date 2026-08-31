@@ -59,22 +59,22 @@
       ['d6~epi', 'penetrating, repeated', 'suffix']
     ]],
     ['Re-rolling', [
-      ['4d6~r', 're-roll a 1, once', 'suffix', 'The new value stands. The die shows what it was before, struck out.'],
-      ['4d6~ri', 're-roll 1s until they stop', 'suffix', 'Repeats while it keeps qualifying.'],
-      ['4d6~r2', 're-roll 2 and below, once', 'suffix'],
+      ['4d6~@r', 're-roll a 1, once', 'suffix', 'The new value stands. The die shows what it was before, struck out.'],
+      ['4d6~@ri', 're-roll 1s until they stop', 'suffix', 'Repeats while it keeps qualifying.'],
+      ['4d6~@r2', 're-roll 2 and below, once', 'suffix'],
       ['4d10~u', 'force every die to a different value', 'suffix', 'Duplicates are re-rolled. Needs dice, and a set of them.'],
       ['4d10~u3', 'give up after three attempts', 'suffix']
     ]],
     ['Results', [
-      ['3d6~s5', 'mark each 5+ a success — counts as 1', 'suffix', 'Writing the s says what a hit is and nothing about the rest, so a miss stays blank. A hit counts as 1, so this can still be used in a calculation.'],
-      ['3d6~>=5', 'the same, with s left out', 'suffix', 'A bare comparison is a plain yes or no, so it names both sides: success or failure.'],
-      ['3d6~f2', 'mark each 2 or less a failure', 'suffix', 'A failure check carries no number, so using it in a calculation is refused before the roll.'],
-      ['2d20~cs19', 'mark 19+ a critical success', 'suffix', 'A result type with no number of its own. If criticals are possible at all, the tally shows a nought when none turn up.'],
-      ['2d20~cf2', 'mark 2 or less a critical failure', 'suffix']
+      ['3d6~@s5', 'mark each 5+ a success — counts as 1', 'suffix', 'Writing the s says what a hit is and nothing about the rest, so a miss stays blank. A hit counts as 1, so this can still be used in a calculation.'],
+      ['3d6~@>=5', 'the same, with s left out', 'suffix', 'A bare comparison is a plain yes or no, so it names both sides: success or failure.'],
+      ['3d6~@f2', 'mark each 2 or less a failure', 'suffix', 'A failure check carries no number, so using it in a calculation is refused before the roll.'],
+      ['2d20~@cs19', 'mark 19+ a critical success', 'suffix', 'A result type with no number of its own. If criticals are possible at all, the tally shows a nought when none turn up.'],
+      ['2d20~@cf2', 'mark 2 or less a critical failure', 'suffix']
     ]],
     ['Clamp', [
-      ['4d6~min2', 'treat any face below 2 as 2', 'suffix', 'Clamps a face rather than re-rolling it; the die shows what it was.'],
-      ['4d6~max5', 'treat any face above 5 as 5', 'suffix']
+      ['4d6~@min2', 'treat any face below 2 as 2', 'suffix', 'Clamps a face rather than re-rolling it; the die shows what it was.'],
+      ['4d6~@max5', 'treat any face above 5 as 5', 'suffix']
     ]],
     ['Maths', [
       ['2d6~+2', 'add', 'suffix'],
@@ -97,13 +97,13 @@
     ['Variables', [
       ['~roll:=d6~,roll,roll', 'a fresh roll at every mention', 'atom', 'A variable holds text, not a result, so every mention rolls again — this throws two dice. It has to stand as its own top-level item, and it shadows a variable of the same name in the panel.'],
       ['~roll::=d6~,roll,roll', 'rolled once, however often it is named', 'atom', 'The opposite of :=. One die, and both mentions are that same result, which is what lets a chain of comparisons ask about one roll several times. It stands for what the roll came to, so it is a value and never a set.'],
-      ['~h::=4d6=6,~h>=2?"crit":"no"', 'ask about a count of hits', 'atom', 'A checked pool counts as its hits, so binding it with ::= and comparing the name asks how many there were rather than what the dice showed.'],
+      ['~h::=4d6@=6,~h>=2?"crit":"no"', 'ask about a count of hits', 'atom', 'A checked pool counts as its hits, so binding it with ::= and comparing the name asks how many there were rather than what the dice showed.'],
       ['~atk:=d20+5,~2atk', 'set one for this expression only', 'prefix', 'Has to stand as its own top-level item. It shadows a variable of the same name in the panel, and is worked out afresh at every mention.'],
       ['~2~atk', 'used twice means rolled twice', 'atom', 'A variable holds text, not a result, so every mention is a fresh roll.']
     ]],
     ['Chained choices', [
       ['d6>4?yes~:>2?maybe:no~', 'more comparisons on the same roll', 'atom', 'An else that opens with a comparison carries on about the same subject. The subject is worked out once and each comparison tried in the order written.'],
-      ['(2d6)>=10?good~:>=7?mixed:bad~', 'bracket what the chain is about', 'atom', 'A comparison binds to a term, not a sum, so 2d6+3>=10 would compare the 3. Bracket what the chain is about.']
+      ['(2d6)@>=10?good~:>=7?mixed:bad~', 'bracket what the chain is about', 'atom', 'A comparison binds to a term, not a sum, so 2d6+3>=10 would compare the 3. Bracket what the chain is about.']
     ]],
     ['Custom dice', [
       ['~[1,1,1,1,1,6]', 'six faces, mostly ones', 'atom', 'A die whose faces you write out. It is drawn with the shape matching the face count.'],
@@ -119,9 +119,9 @@
     ['Comparisons', [
       ['d6e~=6', 'exactly', 'suffix'],
       ['d6e~>=5', 'at least', 'suffix'],
-      ['4d6r~<=2', 'at most', 'suffix'],
-      ['4d6r~!=3', 'anything but', 'suffix'],
-      ['4d6~>d4', 'against a fresh roll each time', 'suffix', 'The other side of an explicit comparison can be any expression that works out to one value, rolled again for every comparison it takes part in.'],
+      ['4d6@r~<=2', 'at most', 'suffix'],
+      ['4d6@r~!=3', 'anything but', 'suffix'],
+      ['4d6~@>d4', 'against a fresh roll each time', 'suffix', 'The other side of an explicit comparison can be any expression that works out to one value, rolled again for every comparison it takes part in.'],
       ['loot~=gem', 'against a word', 'suffix', 'Words compare by being the same word.']
     ]]
   ];

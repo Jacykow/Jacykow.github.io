@@ -44,6 +44,7 @@
   const LS_DRAWER = 're.drawer.v1';
   const LS_VARS = 're.vars.v1';
   const LS_CATS = 're.cats.v1';
+  const LS_LANG = 're.lang.v2';
   const LS_SHUT = 're.cats.shut.v1';
 
   let state = {
@@ -189,7 +190,7 @@
       const pairs = (a) => (Array.isArray(a) ? a.filter(Array.isArray) : [])
         .map(d.n >= 2 ? row2 : row1)
         .filter((x) => titleOf(x.expr));
-      return { cats, vars: pairs(d.v), saved: pairs(d.s) };
+      return { cats, vars: pairs(d.v).map(reword), saved: pairs(d.s).map(reword) };
     } catch (e) { return null; }
   }
 
@@ -419,6 +420,26 @@
     const loosen = (list) => list.map((x) => x.cat === name ? Object.assign({}, x, { cat: '' }) : x);
     pushVars(loosen(loadVars()));
     store.write(LS_SAVED, loosen(loadSaved()));
+  }
+
+  /* An expression written before `@` existed meant every element modifier a
+     member at a time, because that was the only reading there was. Rewriting it
+     once keeps it saying what it always said — `4d6>=5` counted four dice, and
+     goes on counting four dice as `4d6@>=5`.
+
+     Stored rolls are rewritten once and marked; anything arriving from outside
+     is rewritten as it arrives, since a link carries no idea of its age. The
+     rewrite is idempotent, so doing it twice costs nothing but time. */
+  const reword = (x) => Object.assign({}, x, { expr: E.migrate(x.expr) });
+
+  function migrateStored() {
+    if (store.read(LS_LANG, false)) return;
+    const v = store.read(LS_VARS, null), s = store.read(LS_SAVED, null);
+    if (Array.isArray(v)) store.write(LS_VARS, v.map(normalise).map(reword));
+    if (Array.isArray(s)) store.write(LS_SAVED, s.map(normalise).map(reword));
+    const last = store.read(LS_LAST, '');
+    if (last) store.write(LS_LAST, E.migrate(last));
+    store.write(LS_LANG, true);
   }
 
   /* ------------------------------------------------------------- editing
@@ -2164,6 +2185,7 @@
 
   /* ================================================================ wiring */
   function init() {
+    migrateStored();
     renderReference();
     renderSaved();
     pushVars(loadVars());
