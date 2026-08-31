@@ -515,15 +515,15 @@
     /* A modifier's count: a plain number, or a bracket worked out at roll time.
        Returns null when there is neither, so a caller can fall back. */
     countArg(signed) {
-      this.ws();
+      const at = this.mark();
       if (this.peek() === '(') {
         this.lit('(');
         const node = this.expr();
         if (!this.lit(')')) this.fail('expected ")" after a count');
-        return { nNode: node };
+        return { nNode: node, nSp: [at, this.i] };
       }
       const n = signed ? this.signedInt() : this.digits();
-      return n === null ? null : { n };
+      return n === null ? null : { n, nSp: [at, this.i] };
     }
 
     /** the same, with what to fall back to when nothing is written */
@@ -536,9 +536,9 @@
     cpDir(dir) {
       const cp = this.comparePoint();
       if (cp) return cp;
-      const at = this.mark();
-      const n = this.digits();
-      return n === null ? null : { op: dir, v: n, sp: [at, this.i] };
+      const c = this.countArg(false);
+      if (!c) return null;
+      return c.nNode ? { op: dir, node: c.nNode, sp: c.nSp } : { op: dir, v: c.n, sp: c.nSp };
     }
 
     modifiers() {
@@ -612,7 +612,8 @@
         const cp = this.comparePoint();
         const c = cp ? null : this.countArg(false);
         return this.fin(start, Object.assign({ t: 'unique', tries: 0, cp },
-          c ? (c.nNode ? { triesNode: c.nNode } : { tries: c.n }) : {}));
+          c ? (c.nNode ? { triesNode: c.nNode, triesSp: c.nSp }
+                       : { tries: c.n, triesSp: c.nSp }) : {}));
       }
 
       /* `da` has to be tried before the `d` that starts dh/dl/drop, which would
@@ -1913,12 +1914,16 @@
     const mods = (node, depth) => {
       for (const m of node.mods || []) {
         const [title, desc] = modExplain(m);
-        const operand = (m.cp && m.cp.sp) || (m.t === 'map' && m.r && m.r.sp) || null;
+        /* Whatever number the modifier is written against — a count, a
+           comparison point, the right of a map — is an operand in its own
+           right, so the modifier's own span stops where that operand starts. */
+        const operand = (m.cp && m.cp.sp) || (m.t === 'map' && m.r && m.r.sp) ||
+          m.nSp || m.triesSp || null;
         push([m.sp[0], operand ? operand[0] : m.sp[1]], 't-mod',
           { title, desc, depth: depth + 1 });
         if (!operand) continue;
-        if (m.cp && m.cp.node) walk(m.cp.node, depth + 1);
-        else if (m.t === 'map') walk(m.r, depth + 1);
+        const sub = (m.cp && m.cp.node) || (m.t === 'map' && m.r) || m.nNode || m.triesNode;
+        if (sub) walk(sub, depth + 1);
         else push(operand, 't-num', null);
       }
     };
@@ -2316,7 +2321,7 @@
       src = src.slice(0, hash);
     }
 
-    let repeat = 1, repeatNode = null, repeatSp = null, offset = 0;
+    let repeat = 1, repeatNode = null, repeatSp = null, repCountSp = null, offset = 0;
     const rep = repeatPrefix(src);
     if (rep) {
       if (rep.src !== undefined) {
@@ -2326,6 +2331,7 @@
         repeat = Math.max(1, Math.min(rep.n, LIMIT.repeat));
       }
       repeatSp = [0, rep.end];
+      repCountSp = [0, rep.src !== undefined ? rep.src.length + 2 : String(rep.n).length];
       offset = rep.len;
       src = src.slice(offset);
     }
@@ -2374,7 +2380,7 @@
     // the prefix belongs to the notation, or a repeated roll loses its repeat
     const shown = repeatNode ? '(' + plain(repeatNode) + ')x ' : (repeat > 1 ? repeat + 'x ' : '');
     return {
-      parts, rolls, vars, fixed, ast: rolls[0].ast, repeat, repeatNode, repeatSp,
+      parts, rolls, vars, fixed, ast: rolls[0].ast, repeat, repeatNode, repeatSp, repCountSp,
       label, labelSp, offset, src, trimmed: raw.trim(),
       notation: shown + parts.map((p) =>
         (p.assign ? p.assign + (p.once ? '::=' : ':=') : '') + plain(p.ast)).join(', ')
@@ -2416,7 +2422,10 @@
     spans.sort((x, y) => x.a - y.a || x.b - y.b);
 
     if (p.repeatSp) {
-      spans.unshift({ a: p.repeatSp[0], b: p.repeatSp[1], cls: 't-rep', id: 'xrep' });
+      // the count is a value; only the x that follows it belongs to the repeat
+      const c = p.repCountSp || p.repeatSp;
+      spans.unshift({ a: c[1], b: p.repeatSp[1], cls: 't-rep', id: 'xrep' });
+      spans.unshift({ a: c[0], b: c[1], cls: 't-num', id: 'xrep' });
       rows.unshift({
         id: 'xrep', code: p.trimmed.slice(p.repeatSp[0], p.repeatSp[1]), depth: 0,
         title: 'Repeat', desc: 'Roll the whole expression ' + p.repeat + ' separate times.'
@@ -3038,7 +3047,8 @@
     for (const m of mods) {
       if (m.t === 'explode' || m.t === 'unique') return null;   // no ceiling, or coupled
       // a lone die is its own total, so there the two readings agree
-      if (!m.each && !single && (m.t === 'min' || m.t === 'max' || m.t === 'reroll')) return null;
+      if (!m.each && !single && (m.t === 'min' || m.t === 'max')) continue;
+      if (!m.each && !single && m.t === 'reroll') continue;
       if (m.t === 'min' || m.t === 'max') {
         const n = staticCount(m, ctx);
         if (n === null || n === undefined) return null;
@@ -3148,10 +3158,8 @@
     const keepMod = mods.filter((m) => m.t === 'keep' || m.t === 'drop').pop();
     if (mods.filter((m) => m.t === 'keep' || m.t === 'drop').length > 1) return null;
 
-    if (chk) {
-      // a check counts hits, and hits are independent, so this is binomial —
-      // but only when it is the dice being counted rather than their total
-      if (!chk.each && !single) return null;
+    if (chk && (chk.each || single)) {
+      // a check counts hits, and hits are independent, so this is binomial
       if (!CHECKS[chk.check].castable) return null;
       if (keepMod) return null;                    // keeping first changes what is counted
       let p = 0;
@@ -3170,6 +3178,7 @@
       return out;
     }
 
+    let sum;
     if (keepMod) {
       if (node.qty === null) return null;          // nothing to keep from
       const kn = staticCount(keepMod, ctx);
@@ -3177,15 +3186,34 @@
       const want = keepMod.t === 'keep' ? kn : n - kn;
       const high = keepMod.t === 'keep' ? keepMod.end === 'h' : keepMod.end === 'l';
       if (!(want >= 0)) return null;
-      return keptSumDist(faces, n, { n: Math.min(want, n), high });
+      sum = keptSumDist(faces, n, { n: Math.min(want, n), high });
+    } else {
+      sum = single ? faces : dPower(faces, n);
     }
-    return node.qty === null ? faces : dPower(faces, n);
+    // and then whatever the term's own total is put through
+    return totalMods(sum, node, ctx, n);
   }
 
   /* ------------------------------------------------------- the whole tree */
   function distOf(node, ctx) {
     if (!node || typeof node !== 'object') return null;
     const mods = node.mods || [];
+
+    /* Exploding or re-rolling a whole term is about its total, so it is exact
+       from that total's own distribution. An unbounded explode is the one that
+       has nothing exact to say. */
+    const term = mods.find((m) => aboutTerm(node, m));
+    if (term) {
+      const inner = distOf(Object.assign({}, node, { mods: mods.filter((m) => m !== term) }), ctx);
+      if (!inner) return null;
+      let cp = term.cp;
+      if (!cp) {
+        const vals = Array.from(inner.keys());
+        cp = { op: '=', v: term.t === 'explode' ? Math.max.apply(null, vals) : Math.min.apply(null, vals) };
+      } else if (cp.node && constOf(cp.node) === null) return null;
+      if (term.t === 'reroll') return rerollDist(inner, cp, term.inf, ctx);
+      return term.inf ? null : explodeDist(inner, cp, term.pen, ctx);
+    }
 
     /* Advantage rolls the term again and keeps the best or worst total, so it
        is the extreme of n independent copies — exact from the running sum. */
@@ -3277,25 +3305,96 @@
                       (MODS[b.t === 'check' ? 'check' : b.t] || { order: 99 }).order)) {
       if (m.t === 'adv') continue;                            // handled above
       if (m.each) return null;                                // members this cannot see
-      if (m.t === 'min' || m.t === 'max') {
-        const n = staticCount(m, ctx);
-        if (n === null || n === undefined) return null;
-        // this is one value, so a clamp is simply the larger or smaller of two
-        d = dPair(d, dOne(n), m.t === 'min' ? Math.max : Math.min);
-      }
-      else if (m.t === 'map') { d = dPair(d, distOf(m.r, ctx), (x, y) => arith(m.op, x, y, m.opSp)); }
-      else if (m.t === 'check') {
-        if (!CHECKS[m.check].castable) return null;
-        let p = 0;
-        for (const [v, q] of d) {
-          const h = cpConst(m.cp, v);
-          if (h === null) return null;
-          if (h) p += q;
-        }
-        d = new Map([[0, 1 - p], [1, p]]);
+      if (m.t === 'map') { d = dPair(d, distOf(m.r, ctx), (x, y) => arith(m.op, x, y, m.opSp)); }
+      else if (m.t === 'min' || m.t === 'max' || m.t === 'check') {
+        d = totalMods(d, { mods: [m] }, ctx, 1);
       } else return null;
       if (!d) return null;
     }
+    return d;
+  }
+
+  /** does any of this distribution's mass qualify, and how much */
+  function cpMass(d, cp, ctx) {
+    let p = 0;
+    for (const [v, q] of d) {
+      const hit = cpConst(cp, v);
+      if (hit === null) return null;
+      if (hit) p += q;
+    }
+    return p;
+  }
+
+  /* A clamp on a total: the mass below the floor piles up on it. */
+  function clampDist(d, n, low) {
+    const out = new Map();
+    for (const [v, p] of d) {
+      const w = low ? Math.max(v, n) : Math.min(v, n);
+      out.set(w, (out.get(w) || 0) + p);
+    }
+    return out;
+  }
+
+  /* A term thrown again when its own total qualifies. Once over, the qualifying
+     mass is replaced by a fresh throw; repeatedly, it simply cannot be where
+     this stops, so what is left is renormalised. Either way it is exact. */
+  function rerollDist(d, cp, inf, ctx) {
+    const bad = cpMass(d, cp, ctx);
+    if (bad === null || bad >= 1) return null;
+    const out = new Map();
+    for (const [v, p] of d) {
+      const hit = cpConst(cp, v);
+      const kept = hit ? 0 : p;
+      out.set(v, (out.get(v) || 0) + (inf ? kept / (1 - bad) : kept + bad * p));
+    }
+    return out;
+  }
+
+  /* A term thrown again and added when its total qualifies. Once over this is
+     a convolution over the qualifying mass; repeated, the support has no top
+     and there is nothing exact to say. */
+  function explodeDist(d, cp, pen, ctx) {
+    const out = new Map();
+    for (const [v, p] of d) {
+      const hit = cpConst(cp, v);
+      if (hit === null) return null;
+      if (!hit) { out.set(v, (out.get(v) || 0) + p); continue; }
+      for (const [w, q] of d) {
+        const t = v + w - (pen ? 1 : 0);
+        out.set(t, (out.get(t) || 0) + p * q);
+      }
+    }
+    return out.size > DLIM.vals ? null : out;
+  }
+
+  /* Everything a modifier can say about a total once that total is known. The
+     ones marked @ have already been folded into the faces, and keep and drop
+     into the sum, so what is left here is only ever about the one number. */
+  function totalMods(d, node, ctx, members) {
+    const mods = (node.mods || []).slice().sort((a, b) =>
+      (MODS[a.t === 'check' ? 'check' : a.t] || { order: 99 }).order -
+      (MODS[b.t === 'check' ? 'check' : b.t] || { order: 99 }).order);
+
+    for (const m of mods) {
+      if (!d) return null;
+      if (m.each || m.t === 'adv' || m.t === 'keep' || m.t === 'drop') continue;
+      if (m.t === 'unique') return null;
+      if (m.t === 'map') continue;                     // per member by definition
+      if (m.t === 'min' || m.t === 'max') {
+        const n = staticCount(m, ctx);
+        if (n === null || n === undefined) return null;
+        d = clampDist(d, n, m.t === 'min');
+      } else if (m.t === 'explode' || m.t === 'reroll') {
+        // handled where the term is thrown again, not here
+        continue;
+      } else if (m.t === 'check') {
+        if (!CHECKS[m.check].castable) return null;
+        const p = cpMass(d, m.cp, ctx);
+        if (p === null) return null;
+        d = new Map([[0, 1 - p], [1, p]]);
+      } else return null;
+    }
+    void members;
     return d;
   }
 

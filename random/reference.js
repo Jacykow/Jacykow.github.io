@@ -47,7 +47,6 @@
     ]],
     ['Keep & drop', [
       ['4d6~kh3', 'keep the highest 3 — needs a set', 'suffix', 'Keep and drop need a set. On one value there is nothing to choose between, and it is refused before the roll.'],
-      ['4d6~kh(d4)', 'a count worked out at roll time', 'suffix', 'Any count can be a bracket instead of a number, and it is thrown afresh every time it is asked — kh(d4) keeps as many as a d4 says. min, max, kh, kl, dh, dl, u, a and the Nx prefix all take one. For a count that should stay put, bind it with ::= and name that.'],
       ['2d20~kl1', 'keep the lowest die', 'suffix', 'This picks a die. To pick between whole totals instead, use da.'],
       ['4d6~dl1', 'drop the lowest', 'suffix'],
       ['4d6~dh1', 'drop the highest', 'suffix'],

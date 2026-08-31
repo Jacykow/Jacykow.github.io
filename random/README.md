@@ -19,6 +19,27 @@ also works.) The server sits a directory up because this is one part of a larger
 
 ---
 
+## Contents
+
+* [Where the notation comes from](#where-the-notation-comes-from)
+* [Syntax](#syntax)
+  * [Dice](#dice)
+  * [Values and sets](#values-and-sets)
+  * [Modifiers](#modifiers)
+  * [Maths](#maths)
+  * [Advantage](#advantage)
+  * [Bracket groups](#bracket-groups)
+  * [Words and choices](#words-and-choices)
+  * [Custom dice](#custom-dice)
+  * [Variables](#variables)
+  * [Whole-roll extras](#whole-roll-extras)
+  * [Categories](#categories)
+* [Interface](#interface)
+  * [What a colour means](#what-a-colour-means)
+  * [Two kinds of link](#two-kinds-of-link)
+* [Files](#files)
+  * [The dice art](#the-dice-art)
+
 ## Where the notation comes from
 
 The syntax is the one popularised by the Discord dice bots — **Sidekick** and
@@ -38,101 +59,6 @@ into the `e`/`ei`, `r`/`ri` pairs described below.
 | `4d6` | four six-sided dice, summed |
 | `(2+2)d6` | computed quantity |
 | `3d(2*6)` | computed number of sides |
-
-### Modifiers
-
-Modifiers chain onto a dice term in any written order — they are always **applied** in the
-fixed order below, so `4d6kh3@e` and `4d6@ekh3` mean the same thing. A term may only carry
-one explode modifier.
-
-Each of them is about the term's **total** unless it is written with `@` in front, which
-makes it about each member: `4d6>=5` asks one question about the sum, `4d6@>=5` asks four.
-See [Values and sets](#values-and-sets).
-
-Anything that can repeat follows one rule: **the plain letter does it once, a trailing
-`i` does it for as long as it keeps qualifying** — `e` / `ei`, `r` / `ri`. `u` is exempt:
-it narrows the set of allowed values rather than repeating a roll.
-
-| # | Notation | Meaning |
-|---|---|---|
-| 1 | `min2` | any roll below 2 counts as 2 |
-| 2 | `max5` | any roll above 5 counts as 5 |
-| 3 | `e` | exploding: roll again and add on the highest face |
-| 3 | `e5`, `e>=5` | explode on a comparison |
-| 3 | `ei`, `epi` | the same, repeated while it keeps qualifying |
-| 3 | `ep` | penetrating: every extra roll takes −1 |
-| 4 | `r`, `r2`, `r<=2` | re-roll once |
-| 4 | `ri`, `ri2` | re-roll until it no longer qualifies |
-| 5 | `u`, `u3` | force unique results (`u3` gives up after 3 attempts) |
-| 6 | `kh3`, `kl1` | keep the highest / lowest N |
-| | `kh(d4)` | any count may be a bracket, thrown afresh each time |
-| 7 | `dl1`, `dh1` | drop the lowest / highest N |
-| 8 | `@*2`, `@^2`, `@-1` | arithmetic, to each member rather than to the total |
-| 9 | `>=8` | a plain yes/no: each die reads success or failure |
-| 9 | `s>=8` | mark the hits and say nothing about the rest |
-| 9 | `f1`, `f<=1` | mark each qualifying die a failure |
-| 9 | `cs>=19` | flag critical successes |
-| 9 | `cf<=2` | flag critical failures |
-| 10 | `a`, `a3` | advantage: roll it all again and keep the best total |
-| 10 | `da`, `da3` | disadvantage: keep the worst |
-
-Writing the `s` says what counts as a hit and nothing at all about the rest —
-the alternative to a success need not be a failure — so `3d6s5` marks its hits
-and leaves the other dice unmarked. A bare comparison is a plain yes/no, so
-`3d6>=5` marks every die one way or the other.
-
-Comparison points are `=`, `!=`, `<`, `>`, `<=`, `>=`. A bare number reads in whichever
-direction the modifier naturally means: `e5` explodes on 5 **or more**, `r2` re-rolls 2
-**and below**, `cs19` flags 19+, `cf2` and `f1` flag the low end, `u3` matches exactly 3.
-
-The other side of an explicit comparison need not be a number. It can be anything that
-works out to a single value — another roll, a word, a variable — and it is worked out
-afresh for every comparison it takes part in, so `4d6>d4` rolls its own d4 four times.
-A set there is refused before the roll.
-
-```
-4d6>d4                  each die against its own fresh d4
-loot=gem                a word on the right
-4d20>=atk               a variable on the right
-```
-
-### Advantage
-
-`a` rolls everything to its left a second time and keeps the better result; `da`
-keeps the worse. A number says how many attempts to make. Each attempt is summed
-before they are compared, so this is the best **total**, not the best single die
-— `2d6a` is the better of two 2d6 sums, while `2d6kh1` is the higher of two dice.
-
-```
-2d6a            the better of two 2d6 totals
-2d6da           the worse
-d20a            the familiar one
-2d6a3           best of three
-4d6dl1a         everything else happens first, then the better of two
-```
-
-Because it re-rolls everything before it, `a` has to be the last modifier on a
-term. Bracket it to carry on: `(2d6a)>=9` compares the winning total, where
-`2d6a>=9` would have compared each attempt.
-
-### Bracket groups
-
-A modifier written after a closing bracket acts on everything the bracket holds — as long
-as the bracket holds a set. **The comma is what makes one.** `+` sums, and a sum is a
-single value with no members left to keep, drop or count:
-
-```
-(3d6,2d8)kh3      keep the best 3 dice across the whole group
-(4d6,2d10)dl2     drop the worst 2 overall
-(2d6,3d8)>=5      count every die of 5 or more as a success — 0 to 5 of them
-(2d20,2d12)kl1    keep the single worst die
-```
-
-With `+` in place of the comma, `(3d6+2d8)kh3` is refused: there is one value there, not
-five dice. `(2d6+3d8)>=5` is not refused, and that is worse — it is one comparison
-against the total, which is never below 5, so it is always exactly one success.
-
-Keep, drop and target success/failure are the modifiers that make sense here.
 
 ### Values and sets
 
@@ -206,6 +132,62 @@ x::=2d6, x@>=5, x@>=5     two dice, asked about twice
 x::=2d6, x>=7             one verdict, about the total
 ```
 
+### Modifiers
+
+Modifiers chain onto a dice term in any written order — they are always **applied** in the
+fixed order below, so `4d6kh3@e` and `4d6@ekh3` mean the same thing. A term may only carry
+one explode modifier.
+
+Each of them is about the term's **total** unless it is written with `@` in front, which
+makes it about each member: `4d6>=5` asks one question about the sum, `4d6@>=5` asks four.
+See [Values and sets](#values-and-sets).
+
+Anything that can repeat follows one rule: **the plain letter does it once, a trailing
+`i` does it for as long as it keeps qualifying** — `e` / `ei`, `r` / `ri`. `u` is exempt:
+it narrows the set of allowed values rather than repeating a roll.
+
+| # | Notation | Meaning |
+|---|---|---|
+| 1 | `min2` | any roll below 2 counts as 2 |
+| 2 | `max5` | any roll above 5 counts as 5 |
+| 3 | `e` | exploding: roll again and add on the highest face |
+| 3 | `e5`, `e>=5` | explode on a comparison |
+| 3 | `ei`, `epi` | the same, repeated while it keeps qualifying |
+| 3 | `ep` | penetrating: every extra roll takes −1 |
+| 4 | `r`, `r2`, `r<=2` | re-roll once |
+| 4 | `ri`, `ri2` | re-roll until it no longer qualifies |
+| 5 | `u`, `u3` | force unique results (`u3` gives up after 3 attempts) |
+| 6 | `kh3`, `kl1` | keep the highest / lowest N |
+| 7 | `dl1`, `dh1` | drop the lowest / highest N |
+| 8 | `@*2`, `@^2`, `@-1` | arithmetic, to each member rather than to the total |
+| 9 | `>=8` | a plain yes/no: each die reads success or failure |
+| 9 | `s>=8` | mark the hits and say nothing about the rest |
+| 9 | `f1`, `f<=1` | mark each qualifying die a failure |
+| 9 | `cs>=19` | flag critical successes |
+| 9 | `cf<=2` | flag critical failures |
+| 10 | `a`, `a3` | advantage: roll it all again and keep the best total |
+| 10 | `da`, `da3` | disadvantage: keep the worst |
+
+Writing the `s` says what counts as a hit and nothing at all about the rest —
+the alternative to a success need not be a failure — so `3d6s5` marks its hits
+and leaves the other dice unmarked. A bare comparison is a plain yes/no, so
+`3d6>=5` marks every die one way or the other.
+
+Comparison points are `=`, `!=`, `<`, `>`, `<=`, `>=`. A bare number reads in whichever
+direction the modifier naturally means: `e5` explodes on 5 **or more**, `r2` re-rolls 2
+**and below**, `cs19` flags 19+, `cf2` and `f1` flag the low end, `u3` matches exactly 3.
+
+The other side of an explicit comparison need not be a number. It can be anything that
+works out to a single value — another roll, a word, a variable — and it is worked out
+afresh for every comparison it takes part in, so `4d6>d4` rolls its own d4 four times.
+A set there is refused before the roll.
+
+```
+4d6>d4                  each die against its own fresh d4
+loot=gem                a word on the right
+4d20>=atk               a variable on the right
+```
+
 ### Maths
 
 `+ - * / % ^` (or `**`), parentheses, and three functions that reduce several values to
@@ -251,6 +233,44 @@ doubles each die and then adds 3 **once**. Chain another `@` to do both to each.
 
 It runs after keep and drop and before a check, so `2d6@*2>=8` compares the doubled
 values, and a member already thrown away is left alone.
+
+### Advantage
+
+`a` rolls everything to its left a second time and keeps the better result; `da`
+keeps the worse. A number says how many attempts to make. Each attempt is summed
+before they are compared, so this is the best **total**, not the best single die
+— `2d6a` is the better of two 2d6 sums, while `2d6kh1` is the higher of two dice.
+
+```
+2d6a            the better of two 2d6 totals
+2d6da           the worse
+d20a            the familiar one
+2d6a3           best of three
+4d6dl1a         everything else happens first, then the better of two
+```
+
+Because it re-rolls everything before it, `a` has to be the last modifier on a
+term. Bracket it to carry on: `(2d6a)>=9` compares the winning total, where
+`2d6a>=9` would have compared each attempt.
+
+### Bracket groups
+
+A modifier written after a closing bracket acts on everything the bracket holds — as long
+as the bracket holds a set. **The comma is what makes one.** `+` sums, and a sum is a
+single value with no members left to keep, drop or count:
+
+```
+(3d6,2d8)kh3      keep the best 3 dice across the whole group
+(4d6,2d10)dl2     drop the worst 2 overall
+(2d6,3d8)>=5      count every die of 5 or more as a success — 0 to 5 of them
+(2d20,2d12)kl1    keep the single worst die
+```
+
+With `+` in place of the comma, `(3d6+2d8)kh3` is refused: there is one value there, not
+five dice. `(2d6+3d8)>=5` is not refused, and that is worse — it is one comparison
+against the total, which is never below 5, so it is always exactly one success.
+
+Keep, drop and target success/failure are the modifiers that make sense here.
 
 ### Words and choices
 
