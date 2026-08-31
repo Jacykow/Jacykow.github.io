@@ -512,6 +512,26 @@
       return null;
     }
 
+    /* A modifier's count: a plain number, or a bracket worked out at roll time.
+       Returns null when there is neither, so a caller can fall back. */
+    countArg(signed) {
+      this.ws();
+      if (this.peek() === '(') {
+        this.lit('(');
+        const node = this.expr();
+        if (!this.lit(')')) this.fail('expected ")" after a count');
+        return { nNode: node };
+      }
+      const n = signed ? this.signedInt() : this.digits();
+      return n === null ? null : { n };
+    }
+
+    /** the same, with what to fall back to when nothing is written */
+    count(dflt, signed) {
+      const c = this.countArg(signed);
+      return c || (dflt === null ? null : { n: dflt });
+    }
+
     /** an explicit comparison, or a bare number in the modifier's direction */
     cpDir(dir) {
       const cp = this.comparePoint();
@@ -534,7 +554,7 @@
           this.fail('advantage rolls everything to its left, so it has to come last — ' +
             'bracket it to carry on, like (2d6a)>=9');
         }
-        if (m.t === 'adv') {
+        if (m.t === 'adv' && !m.nNode) {
           if (!(m.n >= 1)) this.fail('advantage needs at least one roll');
           if (m.n > LIMIT.repeat) this.fail('too many rolls (max ' + LIMIT.repeat + ')');
         }
@@ -572,12 +592,12 @@
       }
 
       if (this.lit('min')) {
-        const n = this.signedInt();
-        return n === null ? back() : this.fin(start, { t: 'min', n });
+        const c = this.count(null, true);
+        return c === null ? back() : this.fin(start, Object.assign({ t: 'min' }, c));
       }
       if (this.lit('max')) {
-        const n = this.signedInt();
-        return n === null ? back() : this.fin(start, { t: 'max', n });
+        const c = this.count(null, true);
+        return c === null ? back() : this.fin(start, Object.assign({ t: 'max' }, c));
       }
 
       /* repeatable things: bare letter once, trailing i for as long as it holds */
@@ -590,22 +610,23 @@
 
       if (this.lit('u')) {
         const cp = this.comparePoint();
-        const tries = cp ? 0 : (this.digits() || 0);
-        return this.fin(start, { t: 'unique', tries, cp });
+        const c = cp ? null : this.countArg(false);
+        return this.fin(start, Object.assign({ t: 'unique', tries: 0, cp },
+          c ? (c.nNode ? { triesNode: c.nNode } : { tries: c.n }) : {}));
       }
 
       /* `da` has to be tried before the `d` that starts dh/dl/drop, which would
          otherwise match its first letter and give up on the whole modifier */
-      if (this.lit('da')) return this.fin(start, { t: 'adv', end: 'l', n: this.digits() ?? 2 });
-      if (this.lit('a')) return this.fin(start, { t: 'adv', end: 'h', n: this.digits() ?? 2 });
+      if (this.lit('da')) return this.fin(start, Object.assign({ t: 'adv', end: 'l' }, this.count(2)));
+      if (this.lit('a')) return this.fin(start, Object.assign({ t: 'adv', end: 'h' }, this.count(2)));
 
-      if (this.lit('kh')) return this.fin(start, { t: 'keep', end: 'h', n: this.digits() ?? 1 });
-      if (this.lit('kl')) return this.fin(start, { t: 'keep', end: 'l', n: this.digits() ?? 1 });
-      if (this.lit('dh')) return this.fin(start, { t: 'drop', end: 'h', n: this.digits() ?? 1 });
-      if (this.lit('dl')) return this.fin(start, { t: 'drop', end: 'l', n: this.digits() ?? 1 });
+      if (this.lit('kh')) return this.fin(start, Object.assign({ t: 'keep', end: 'h' }, this.count(1)));
+      if (this.lit('kl')) return this.fin(start, Object.assign({ t: 'keep', end: 'l' }, this.count(1)));
+      if (this.lit('dh')) return this.fin(start, Object.assign({ t: 'drop', end: 'h' }, this.count(1)));
+      if (this.lit('dl')) return this.fin(start, Object.assign({ t: 'drop', end: 'l' }, this.count(1)));
       if (this.lit('d')) {
-        const n = this.digits();
-        return n === null ? back() : this.fin(start, { t: 'drop', end: 'l', n });
+        const c = this.count(null);
+        return c === null ? back() : this.fin(start, Object.assign({ t: 'drop', end: 'l' }, c));
       }
 
       /* checks. `s` may be left out: 3d6>=5 is 3d6s>=5 */
@@ -885,21 +906,22 @@
   function modNote(m, future) {
     const end = (e) => e === 'h' ? 'highest' : 'lowest';
     const w = (now, then) => future ? now : then;
+    const n = cnt(m);
     switch (m.t) {
-      case 'min': return w('floor at ', 'floored at ') + m.n;
-      case 'max': return w('cap at ', 'capped at ') + m.n;
+      case 'min': return w('floor at ', 'floored at ') + n;
+      case 'max': return w('cap at ', 'capped at ') + n;
       case 'explode': return (m.pen ? w('penetrate', 'penetrated') : w('explode', 'exploded')) +
         (m.inf ? ' repeatedly' : '');
       case 'reroll': return w('re-roll', 're-rolled') + (m.inf ? ' repeatedly' : '');
       case 'unique': return w('make unique', 'made unique');
-      case 'keep': return w('keep ', 'kept ') + m.n + ' ' + end(m.end);
-      case 'drop': return w('drop ', 'dropped ') + m.n + ' ' + end(m.end);
+      case 'keep': return w('keep ', 'kept ') + n + ' ' + end(m.end);
+      case 'drop': return w('drop ', 'dropped ') + n + ' ' + end(m.end);
       case 'check': return CHECK_SHORT[m.check] + ' on ' + cpShort(m.cp);
       case 'map': return w('each ', 'each ') + m.op + plain(m.r);
       case 'adv': {
         const best = m.end === 'h';
-        if (m.n === 2) return best ? 'advantage' : 'disadvantage';
-        return (best ? 'best of ' : 'worst of ') + m.n;
+        if (!m.nNode && m.n === 2) return best ? 'advantage' : 'disadvantage';
+        return (best ? 'best of ' : 'worst of ') + n;
       }
     }
     return '';
@@ -1241,6 +1263,17 @@
      EVALUATION
      ========================================================================== */
   const makeDie = (sides) => rng.int(1, sides);
+
+  /* What a modifier's count comes to now. A bracket is thrown afresh every time
+     it is asked, which is the point of writing one — a count that should stay
+     put is what a ::= binding is for. */
+  function countOf(m, ctx, key) {
+    const node = m[(key || 'n') + 'Node'];
+    if (!node) return m[key || 'n'];
+    const v = Math.floor(num(node, ctx));
+    if (!isFinite(v)) throw new DiceError('a count has to come to a number');
+    return v;
+  }
   const num = (node, ctx) => evalNode(node, ctx).total();
 
   /* Infinity and NaN mean nothing as a roll, so they are an error here rather
@@ -1313,10 +1346,11 @@
   function applyElement(item, m, ctx) {
     if (m.t === 'min' || m.t === 'max') {
       if (!item.roll) return;                       // clamping only means something on a face
-      const over = m.t === 'min' ? item.roll.v < m.n : item.roll.v > m.n;
+      const n = countOf(m, ctx);
+      const over = m.t === 'min' ? item.roll.v < n : item.roll.v > n;
       if (!over) return;
       if (item.roll.from === null) item.roll.from = item.roll.v;
-      item.roll.v = m.n;
+      item.roll.v = n;
       if (item.roll.tags.indexOf('clamped') < 0) item.roll.tags.push('clamped');
       return;
     }
@@ -1356,8 +1390,8 @@
   function applyWhole(value, m, ctx) {
     if (m.t === 'check' || value.roll) { applyElement(value, m, ctx); return value; }
     if (m.t !== 'min' && m.t !== 'max') return value;
-    const t = safeTotal(value);
-    const v = m.t === 'min' ? Math.max(t, m.n) : Math.min(t, m.n);
+    const t = safeTotal(value), n = countOf(m, ctx);
+    const v = m.t === 'min' ? Math.max(t, n) : Math.min(t, n);
     return v === t ? value : Expr(v, [value]);
   }
 
@@ -1365,19 +1399,20 @@
     if (!value.set) throw new DiceError('"' + modText(m) + '" needs a set of values');
     const members = value.members;
     if (m.t === 'keep' || m.t === 'drop') {
+      const n = Math.max(0, countOf(m, ctx));
       const live = members.filter((x) => !x.dropped);
       const order = live.slice().sort((a, b) => safeTotal(b) - safeTotal(a));
       if (m.t === 'keep') {
-        const keep = new Set(m.end === 'l' ? order.slice(-m.n) : order.slice(0, m.n));
+        const keep = new Set(n === 0 ? [] : (m.end === 'l' ? order.slice(-n) : order.slice(0, n)));
         for (const x of live) if (!keep.has(x)) x.dropped = true;
-      } else {
-        for (const x of (m.end === 'h' ? order.slice(0, m.n) : order.slice(-m.n))) x.dropped = true;
+      } else if (n) {
+        for (const x of (m.end === 'h' ? order.slice(0, n) : order.slice(-n))) x.dropped = true;
       }
       return;
     }
     if (m.t === 'unique') {
       const seen = new Set();
-      const cap = m.tries || LIMIT.reroll;
+      const cap = countOf(m, ctx, 'tries') || LIMIT.reroll;
       for (const x of members) {
         if (!x.die) throw new DiceError('"u" needs dice to re-roll');
         let n = 0;
@@ -1494,8 +1529,11 @@
      of two totals rather than the best of four dice. */
   function rollAdv(node, m, ctx) {
     const once = Object.assign({}, node, { mods: node.mods.filter((x) => x !== m) });
+    const n = countOf(m, ctx);
+    if (!(n >= 1)) throw new DiceError('advantage needs at least one roll', m.sp && m.sp[0]);
+    if (n > LIMIT.repeat) throw new DiceError('too many rolls (max ' + LIMIT.repeat + ')', m.sp && m.sp[0]);
     const tries = [];
-    for (let i = 0; i < m.n; i++) tries.push(evalNode(once, ctx));
+    for (let i = 0; i < n; i++) tries.push(evalNode(once, ctx));
     const out = SetVal(tries, { uid: uidOf(node, ctx), brackets: tries.length > 1 });
     out.mods = [m];
     applySet(out, { t: 'keep', end: m.end, n: 1 }, null, ctx);
@@ -1725,18 +1763,24 @@
     return (m.each ? '@' : '') + modBody(m);
   }
 
+  /* A written-out count keeps its brackets, since that is what says it is worked
+     out afresh rather than fixed. */
+  const cnt = (m, key) => m[(key || 'n') + 'Node']
+    ? '(' + plain(m[(key || 'n') + 'Node']) + ')' : String(m[key || 'n']);
+
   function modBody(m) {
     switch (m.t) {
-      case 'min': return 'min' + m.n;
-      case 'max': return 'max' + m.n;
+      case 'min': return 'min' + cnt(m);
+      case 'max': return 'max' + cnt(m);
       case 'explode': return 'e' + (m.pen ? 'p' : '') + (m.inf ? 'i' : '') + cpText(m.cp);
       case 'reroll': return 'r' + (m.inf ? 'i' : '') + cpText(m.cp);
-      case 'unique': return 'u' + (m.tries || '') + cpText(m.cp);
-      case 'keep': return 'k' + m.end + m.n;
-      case 'drop': return 'd' + m.end + m.n;
+      case 'unique': return 'u' + (m.triesNode ? cnt(m, 'tries') : (m.tries || '')) + cpText(m.cp);
+      case 'keep': return 'k' + m.end + cnt(m);
+      case 'drop': return 'd' + m.end + cnt(m);
       case 'check': return (m.bare ? '' : m.check) + cpText(m.cp);
       case 'map': return '@' + m.op + plain(m.r);
-      case 'adv': return (m.end === 'h' ? 'a' : 'da') + (m.n === 2 ? '' : m.n);
+      case 'adv': return (m.end === 'h' ? 'a' : 'da') +
+        (m.nNode ? cnt(m) : (m.n === 2 ? '' : m.n));
     }
     return '';
   }
@@ -1788,10 +1832,14 @@
     return '';
   }
 
+  /** what a bracketed count means, for anything that can carry one */
+  const thrown = (m, key) => m[(key || 'n') + 'Node']
+    ? ' The count is worked out afresh every time this runs.' : '';
+
   function modExplain(m) {
     switch (m.t) {
-      case 'min': return ['Minimum', 'Any face below ' + m.n + ' counts as ' + m.n + '.'];
-      case 'max': return ['Maximum', 'Any face above ' + m.n + ' counts as ' + m.n + '.'];
+      case 'min': return ['Minimum', 'Anything below ' + cnt(m) + ' counts as ' + cnt(m) + '.' + thrown(m)];
+      case 'max': return ['Maximum', 'Anything above ' + cnt(m) + ' counts as ' + cnt(m) + '.' + thrown(m)];
       case 'explode': return [m.pen ? 'Penetrating explode' : 'Exploding',
         'When a die rolls ' + cpPhrase(m.cp, 'its highest face') + ', roll an extra die and add it' +
         (m.pen ? ', subtracting 1 from every extra roll' : '') + '.' +
@@ -1800,14 +1848,16 @@
         'Any die showing ' + cpPhrase(m.cp, 'its lowest face') + ' is re-rolled' +
         (m.inf ? ' until it no longer qualifies.' : ' once — the new value stands.')];
       case 'unique': return ['Unique',
-        'Duplicates are re-rolled' + (m.tries ? ' up to ' + m.tries + ' times' : '') +
+        'Duplicates are re-rolled' +
+        ((m.tries || m.triesNode) ? ' up to ' + cnt(m, 'tries') + ' times' : '') +
         ' so every die shows a different value. Needs a set.'];
       case 'keep': return ['Keep ' + (m.end === 'h' ? 'highest' : 'lowest'),
-        'Keep the ' + (m.n === 1 ? '' : m.n + ' ') + (m.end === 'h' ? 'highest' : 'lowest') +
-        ' member; the rest are struck out. Needs a set.'];
+        'Keep the ' + (!m.nNode && m.n === 1 ? '' : cnt(m) + ' ') +
+        (m.end === 'h' ? 'highest' : 'lowest') +
+        ' member; the rest are struck out. Needs a set.' + thrown(m)];
       case 'drop': return ['Drop ' + (m.end === 'h' ? 'highest' : 'lowest'),
-        'Throw away the ' + (m.n === 1 ? '' : m.n + ' ') + (m.end === 'h' ? 'highest' : 'lowest') +
-        ' member. Needs a set.'];
+        'Throw away the ' + (!m.nNode && m.n === 1 ? '' : cnt(m) + ' ') +
+        (m.end === 'h' ? 'highest' : 'lowest') + ' member. Needs a set.' + thrown(m)];
       case 'map': return ['Each',
         'Apply ' + m.op + plain(m.r) + ' to every member on its own, instead of to the sum. ' +
         'The right side is worked out afresh for each one, so 2d6@*d4 rolls a d4 per die. ' +
@@ -1815,7 +1865,8 @@
       case 'adv': {
         const best = m.end === 'h' ? 'best' : 'worst';
         return [m.end === 'h' ? 'Advantage' : 'Disadvantage',
-          'Roll everything to the left ' + (m.n === 2 ? 'twice' : m.n + ' times') +
+          'Roll everything to the left ' +
+          (!m.nNode && m.n === 2 ? 'twice' : cnt(m) + ' times') +
           ' and keep the ' + best + '. Each attempt is summed before they are compared, ' +
           'so this is the ' + best + ' total rather than the ' + best + ' single die.'];
       }
@@ -2229,6 +2280,29 @@
   const FIXED_RE = /^\s*([a-zA-Z_]+)\s*::=/;
   const ASSIGN_RE = /^\s*([a-zA-Z_]+)\s*:=/;
 
+  function repeatPrefix(src) {
+    const flat = /^(\d+)\s*[x×]\s*(?=\S)/i.exec(src);
+    if (flat) {
+      return { n: parseInt(flat[1], 10), len: flat[0].length,
+               end: flat[0].replace(/\s+$/, '').length };
+    }
+    if (src[0] !== '(') return null;
+    let depth = 0, quoted = false;
+    for (let i = 0; i < src.length; i++) {
+      const c = src[i];
+      if (quoted) { if (c === '"') quoted = false; continue; }
+      if (c === '"') { quoted = true; continue; }
+      if (c === '(') depth++;
+      else if (c === ')' && --depth === 0) {
+        const after = /^\s*[x×]\s*(?=\S)/i.exec(src.slice(i + 1));
+        if (!after) return null;
+        return { src: src.slice(1, i), len: i + 1 + after[0].length,
+                 end: i + 1 + after[0].replace(/\s+$/, '').length };
+      }
+    }
+    return null;
+  }
+
   function parse(input) {
     const raw = String(input == null ? '' : input);
     let src = raw.trim();
@@ -2242,12 +2316,17 @@
       src = src.slice(0, hash);
     }
 
-    let repeat = 1, repeatSp = null, offset = 0;
-    const rep = /^(\d+)\s*[x×]\s*(?=\S)/i.exec(src);
+    let repeat = 1, repeatNode = null, repeatSp = null, offset = 0;
+    const rep = repeatPrefix(src);
     if (rep) {
-      repeat = Math.max(1, Math.min(parseInt(rep[1], 10), 100));
-      repeatSp = [0, rep[0].replace(/\s+$/, '').length];
-      offset = rep[0].length;
+      if (rep.src !== undefined) {
+        try { repeatNode = typeCheck(new Parser(rep.src).parse(), true); }
+        catch (e) { if (e instanceof DiceError && e.pos != null) e.pos += 1; throw e; }
+      } else {
+        repeat = Math.max(1, Math.min(rep.n, LIMIT.repeat));
+      }
+      repeatSp = [0, rep.end];
+      offset = rep.len;
       src = src.slice(offset);
     }
     if (!src.trim()) throw new DiceError('nothing to roll', offset);
@@ -2292,10 +2371,12 @@
       throw new DiceError('this only sets variables — add something to roll', offset);
     }
 
+    // the prefix belongs to the notation, or a repeated roll loses its repeat
+    const shown = repeatNode ? '(' + plain(repeatNode) + ')x ' : (repeat > 1 ? repeat + 'x ' : '');
     return {
-      parts, rolls, vars, fixed, ast: rolls[0].ast, repeat, repeatSp, label, labelSp, offset, src,
-      trimmed: raw.trim(),
-      notation: parts.map((p) =>
+      parts, rolls, vars, fixed, ast: rolls[0].ast, repeat, repeatNode, repeatSp,
+      label, labelSp, offset, src, trimmed: raw.trim(),
+      notation: shown + parts.map((p) =>
         (p.assign ? p.assign + (p.once ? '::=' : ':=') : '') + plain(p.ast)).join(', ')
     };
   }
@@ -2416,8 +2497,14 @@
   function roll(input) {
     const p = parse(input);
     const sets = [];
-    const multi = p.repeat > 1 || p.rolls.length > 1;
-    for (let i = 0; i < p.repeat; i++) {
+    let reps = p.repeat;
+    if (p.repeatNode) {
+      reps = Math.floor(evaluate(p.repeatNode, p.vars, p.fixed).total());
+      if (!(reps >= 0)) throw new DiceError('how many times to roll has to be 0 or more');
+      if (reps > LIMIT.repeat) throw new DiceError('too many repeats (max ' + LIMIT.repeat + ')');
+    }
+    const multi = reps > 1 || p.rolls.length > 1;
+    for (let i = 0; i < reps; i++) {
       const ctx = rollCtx(p);
       for (const part of p.rolls) {
         const r = evalNode(part.ast, ctx);
@@ -2437,7 +2524,7 @@
     for (const s of sets) collectMarks(s, marks);
 
     return {
-      input: p.trimmed, notation: p.notation, label: p.label, repeat: p.repeat,
+      input: p.trimmed, notation: p.notation, label: p.label, repeat: reps,
       sets, diceCount, total, numeric, possible: possibleMarks(p),
       defs: p.parts.filter((x) => x.assign && !x.once)
         .map((x) => x.assign + ' := ' + plain(x.ast)),
@@ -2604,6 +2691,7 @@
         let lo = 1, hi = Math.floor(sides), n = Math.floor(qty);
         for (const m of mods) {
           if (m.t === 'explode') return null;            // no ceiling worth quoting
+          if (m.nNode) return null;                      // a count that is thrown, not written
           if (m.t === 'min') lo = Math.max(lo, m.n);
           if (m.t === 'max') hi = Math.min(hi, m.n);
           if (m.t === 'keep') n = Math.min(n, m.n);
@@ -2646,11 +2734,11 @@
       if (!b) { numeric = false; break; }
       lo += b.min; hi += b.max;
     }
-    const reps = p.repeat > 1 ? p.repeat : 1;
+    const reps = p.repeatNode ? constOf(p.repeatNode) : Math.max(1, p.repeat);
     return {
       words,
-      min: numeric ? lo * reps : null,
-      max: numeric ? hi * reps : null
+      min: (numeric && reps !== null) ? lo * reps : null,
+      max: (numeric && reps !== null) ? hi * reps : null
     };
   }
 
@@ -2768,7 +2856,8 @@
     // a binding rolled once cannot be taken apart without changing what it means
     const preamble = p.parts.filter((x) => x.assign && !x.once)
       .map((x) => x.assign + ':=' + x.src).join(', ');
-    const splittable = !p.parts.some((x) => x.assign && x.once);
+    // a repeat thrown afresh gives no fixed number of units to report on
+    const splittable = !p.parts.some((x) => x.assign && x.once) && !p.repeatNode;
 
     const units = [];
     if (splittable) {
@@ -2877,6 +2966,14 @@
   /* A count or a number of sides may be written as a variable rather than
      typed. Anything that comes to exactly one value is as good as a constant
      here, which is what lets a pool written as (pool)d10 be worked out. */
+  /** a modifier's count, when it is a number the solver can rely on */
+  function staticCount(m, ctx, key) {
+    const k = key || 'n';
+    if (!m[k + 'Node']) return m[k];
+    const v = constVal(m[k + 'Node'], ctx);
+    return v === null ? null : Math.floor(v);
+  }
+
   function constVal(node, ctx) {
     const c = constOf(node);
     if (c !== null) return c;
@@ -2943,9 +3040,11 @@
       // a lone die is its own total, so there the two readings agree
       if (!m.each && !single && (m.t === 'min' || m.t === 'max' || m.t === 'reroll')) return null;
       if (m.t === 'min' || m.t === 'max') {
+        const n = staticCount(m, ctx);
+        if (n === null || n === undefined) return null;
         const out = new Map();
         for (const [f, p] of faces) {
-          const v = m.t === 'min' ? Math.max(f, m.n) : Math.min(f, m.n);
+          const v = m.t === 'min' ? Math.max(f, n) : Math.min(f, n);
           out.set(v, (out.get(v) || 0) + p);
         }
         faces = out;
@@ -3073,7 +3172,9 @@
 
     if (keepMod) {
       if (node.qty === null) return null;          // nothing to keep from
-      const want = keepMod.t === 'keep' ? keepMod.n : n - keepMod.n;
+      const kn = staticCount(keepMod, ctx);
+      if (kn === null || kn === undefined) return null;
+      const want = keepMod.t === 'keep' ? kn : n - kn;
       const high = keepMod.t === 'keep' ? keepMod.end === 'h' : keepMod.end === 'l';
       if (!(want >= 0)) return null;
       return keptSumDist(faces, n, { n: Math.min(want, n), high });
@@ -3092,6 +3193,8 @@
     if (adv) {
       const inner = distOf(Object.assign({}, node, { mods: mods.filter((m) => m !== adv) }), ctx);
       if (!inner) return null;
+      const an = staticCount(adv, ctx);
+      if (an === null || an === undefined || !(an >= 1)) return null;
       const vals = Array.from(inner.keys()).sort((a, b) => a - b);
       const out = new Map();
       let below = 0;
@@ -3099,8 +3202,8 @@
         const p = inner.get(v), atOrBelow = below + p;
         // P(best = v) = P(all <= v) - P(all < v); the worst is the mirror image
         out.set(v, adv.end === 'h'
-          ? Math.pow(atOrBelow, adv.n) - Math.pow(below, adv.n)
-          : Math.pow(1 - below, adv.n) - Math.pow(1 - atOrBelow, adv.n));
+          ? Math.pow(atOrBelow, an) - Math.pow(below, an)
+          : Math.pow(1 - below, an) - Math.pow(1 - atOrBelow, an));
         below = atOrBelow;
       }
       return out;
@@ -3175,8 +3278,10 @@
       if (m.t === 'adv') continue;                            // handled above
       if (m.each) return null;                                // members this cannot see
       if (m.t === 'min' || m.t === 'max') {
+        const n = staticCount(m, ctx);
+        if (n === null || n === undefined) return null;
         // this is one value, so a clamp is simply the larger or smaller of two
-        d = dPair(d, dOne(m.n), m.t === 'min' ? Math.max : Math.min);
+        d = dPair(d, dOne(n), m.t === 'min' ? Math.max : Math.min);
       }
       else if (m.t === 'map') { d = dPair(d, distOf(m.r, ctx), (x, y) => arith(m.op, x, y, m.opSp)); }
       else if (m.t === 'check') {

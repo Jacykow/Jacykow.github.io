@@ -65,6 +65,7 @@ it narrows the set of allowed values rather than repeating a roll.
 | 4 | `ri`, `ri2` | re-roll until it no longer qualifies |
 | 5 | `u`, `u3` | force unique results (`u3` gives up after 3 attempts) |
 | 6 | `kh3`, `kl1` | keep the highest / lowest N |
+| | `kh(d4)` | any count may be a bracket, thrown afresh each time |
 | 7 | `dl1`, `dh1` | drop the lowest / highest N |
 | 8 | `@*2`, `@^2`, `@-1` | arithmetic, to each member rather than to the total |
 | 9 | `>=8` | a plain yes/no: each die reads success or failure |
@@ -378,6 +379,7 @@ A variable that refers back to itself is caught at a fixed depth rather than han
 
 ```
 6x 4d6dl1               roll the entire expression 6 times and report each set
+(d4)x 4d6dl1            roll it as many times as a d4 says, thrown afresh
 2d6, 3d8, d20           comma: separate rolls, reported as one entry
 2d20kh1+5 # attack      everything after # is a label, ignored by the maths
 ```
