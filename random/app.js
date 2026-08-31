@@ -1267,7 +1267,7 @@
           '<span class="dieval">D' + n + '</span>' +
         '</span></div>';
     }).join('');
-    return '<div class="refgroup"><h3>The dice</h3><div class="refdice">' + dice + '</div></div>';
+    return '<div class="refgroup"><h3>Quick dice</h3><div class="refdice">' + dice + '</div></div>';
   }
 
   /* '4d6~kh3' -> '4d6' faded, 'kh3' at full strength. Odd segments are the

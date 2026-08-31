@@ -39,18 +39,18 @@
       ['(d10,~-~2d6)', 'a minus flips every member', 'atom', 'A minus in front of a set negates each member rather than the sum.'],
       ['4d6~@>=5', 'ask each member, not the total', 'suffix', 'A modifier is about the total of what it follows unless it says @. 4d6>=5 asks one question about the sum; 4d6@>=5 asks four and counts the hits. Any modifier a single member can answer for takes it — a check, a clamp, an explode, a re-roll — so d6r and 4d6@r are both ordinary. Keeping, dropping, making unique and advantage are about the set as a whole and refuse it.']
     ]],
-    ['Advantage', [
-      ['2d6~a', 'roll it all again, keep the better total', 'suffix', 'Everything to the left is rolled again and the better result kept. Each attempt is summed before they are compared, so this is the better total, not the better die. It has to be the last modifier.'],
-      ['2d6~da', 'keep the worse total', 'suffix', 'The same, keeping the worse.'],
-      ['2d6~a3', 'best of three', 'suffix', 'The number is how many attempts to make in total.'],
-      ['d20~a', 'the familiar one', 'suffix', 'On a single die this is the usual advantage roll; 2d20kh1 says the same thing.']
-    ]],
     ['Keep & drop', [
       ['4d6~kh3', 'keep the highest 3 — needs a set', 'suffix', 'Keep and drop need a set. On one value there is nothing to choose between, and it is refused before the roll.'],
       ['2d20~kl1', 'keep the lowest die', 'suffix', 'This picks a die. To pick between whole totals instead, use da.'],
       ['4d6~dl1', 'drop the lowest', 'suffix'],
       ['4d6~dh1', 'drop the highest', 'suffix'],
       ['(3d6,2d8)~kh3', 'best 3 across a listed set', 'suffix', 'Brackets only group. (3d6+2d8) is a value and refuses kh; (3d6,2d8) is a set and takes it.']
+    ]],
+    ['Advantage', [
+      ['2d6~a', 'roll it all again, keep the better total', 'suffix', 'Everything to the left is rolled again and the better result kept. Each attempt is summed before they are compared, so this is the better total, not the better die. It has to be the last modifier.'],
+      ['2d6~da', 'keep the worse total', 'suffix', 'The same, keeping the worse.'],
+      ['2d6~a3', 'best of three', 'suffix', 'The number is how many attempts to make in total.'],
+      ['d20~a', 'the familiar one', 'suffix', 'On a single die this is the usual advantage roll; 2d20kh1 says the same thing.']
     ]],
     ['Exploding', [
       ['d6~e', 'roll again and add when it lands on 6', 'suffix', 'Explode needs dice, so it cannot attach to a bracket. The plain letter does it once.'],
@@ -66,6 +66,18 @@
       ['4d10~u', 'force every die to a different value', 'suffix', 'Duplicates are re-rolled. Needs dice, and a set of them.'],
       ['4d10~u3', 'give up after three attempts', 'suffix']
     ]],
+    ['Clamp', [
+      ['d6~min2', 'treat any face below 2 as 2', 'suffix', 'Clamps a face rather than re-rolling it; the die shows what it was.'],
+      ['d6~max5', 'treat any face above 5 as 5', 'suffix']
+    ]],
+    ['Comparisons', [
+      ['d6e~=6', 'exactly', 'suffix'],
+      ['d6e~>=5', 'at least', 'suffix'],
+      ['d6r~<=2', 'at most', 'suffix'],
+      ['d6r~!=3', 'anything but', 'suffix'],
+      ['d6~>d4', 'against a fresh roll each time', 'suffix', 'The other side of an explicit comparison can be any expression that works out to one value, rolled again for every comparison it takes part in.'],
+      ['loot~=gem', 'against a word', 'suffix', 'Words compare by being the same word.']
+    ]],
     ['Results', [
       ['d6~s5', 'mark each 5+ a success — counts as 1', 'suffix', 'Writing the s says what a hit is and nothing about the rest, so a miss stays blank. A hit counts as 1, so this can still be used in a calculation.'],
       ['d6~>=5', 'the same, with s left out', 'suffix', 'A bare comparison is a plain yes or no, so it names both sides: success or failure.'],
@@ -73,9 +85,15 @@
       ['d20~cs19', 'mark 19+ a critical success', 'suffix', 'A result type with no number of its own. If criticals are possible at all, the tally shows a nought when none turn up.'],
       ['d20~cf2', 'mark 2 or less a critical failure', 'suffix']
     ]],
-    ['Clamp', [
-      ['d6~min2', 'treat any face below 2 as 2', 'suffix', 'Clamps a face rather than re-rolling it; the die shows what it was.'],
-      ['d6~max5', 'treat any face above 5 as 5', 'suffix']
+    ['Words', [
+      ['~\"a long word\"', 'a quoted word, spaces allowed', 'atom'],
+      ['~hit', 'a bare word — a variable if one is set', 'atom', 'A bare word becomes a variable when one of that name exists, and stays a word otherwise.'],
+      ['~{atk}', 'always the variable, never a word', 'atom', 'Insists on the variable, and says so if none is set.']
+    ]],
+    ['Choices', [
+      ['d20>=15~?hit:miss', 'pick between two results', 'suffix', 'The choice goes the way its comparison went: one asked about the total gives one answer, and one marked @ gives one answer per member.'],
+      ['d6>4?yes~:>2?maybe:no~', 'more comparisons on the same roll', 'atom', 'An else that opens with a comparison carries on about the same subject. The subject is worked out once and each comparison tried in the order written.'],
+      ['(2d6)>=10?good~:>=7?mixed:bad~', 'bracket what the chain is about', 'atom', 'A comparison binds to a term, not a sum, so 2d6+3>=10 would compare the 3. Bracket what the chain is about.']
     ]],
     ['Maths', [
       ['2d6~+2', 'add', 'suffix'],
@@ -89,11 +107,11 @@
       ['~max(~d20,10~)', 'the largest value', 'wrap', 'Each argument is reduced to a value first, so max(2d6,7) compares the total of 2d6 against 7.'],
       ['~min(~d20,10~)', 'the smallest value', 'wrap']
     ]],
-    ['Words & choices', [
-      ['d20>=15~?hit:miss', 'pick between two results', 'suffix', 'The choice distributes exactly as the comparison does: 4d20>10?hit:miss is four choices, not one taken on the sum.'],
-      ['~\"a long word\"', 'a quoted word, spaces allowed', 'atom'],
-      ['~hit', 'a bare word — a variable if one is set', 'atom', 'A bare word becomes a variable when one of that name exists, and stays a word otherwise.'],
-      ['~{atk}', 'always the variable, never a word', 'atom', 'Insists on the variable, and says so if none is set.']
+    ['Custom dice', [
+      ['~[1,1,1,1,1,6]', 'six faces, mostly ones', 'atom', 'A die whose faces you write out. It is drawn with the shape matching the face count.'],
+      ['~[hit,hit,miss]', 'faces can be words', 'atom', 'A face that is a word is written out rather than fitted onto a die.'],
+      ['~[d6,d10]', 'a face can be another roll', 'atom', 'One face is picked, then whatever is written on it is worked out.'],
+      ['~3~[a,b]', 'roll a custom die three times', 'atom']
     ]],
     ['Variables', [
       ['~roll:=d6~,roll,roll', 'a fresh roll at every mention', 'atom', 'A variable holds text, not a result, so every mention rolls again — this throws two dice. It has to stand as its own top-level item, and it shadows a variable of the same name in the panel.'],
@@ -102,28 +120,10 @@
       ['~atk:=d20+5,~2atk', 'set one for this expression only', 'prefix', 'Has to stand as its own top-level item. It shadows a variable of the same name in the panel, and is worked out afresh at every mention.'],
       ['~2~atk', 'used twice means rolled twice', 'atom', 'A variable holds text, not a result, so every mention is a fresh roll.']
     ]],
-    ['Chained choices', [
-      ['d6>4?yes~:>2?maybe:no~', 'more comparisons on the same roll', 'atom', 'An else that opens with a comparison carries on about the same subject. The subject is worked out once and each comparison tried in the order written.'],
-      ['(2d6)>=10?good~:>=7?mixed:bad~', 'bracket what the chain is about', 'atom', 'A comparison binds to a term, not a sum, so 2d6+3>=10 would compare the 3. Bracket what the chain is about.']
-    ]],
-    ['Custom dice', [
-      ['~[1,1,1,1,1,6]', 'six faces, mostly ones', 'atom', 'A die whose faces you write out. It is drawn with the shape matching the face count.'],
-      ['~[hit,hit,miss]', 'faces can be words', 'atom', 'A face that is a word is written out rather than fitted onto a die.'],
-      ['~[d6,d10]', 'a face can be another roll', 'atom', 'One face is picked, then whatever is written on it is worked out.'],
-      ['~3~[a,b]', 'roll a custom die three times', 'atom']
-    ]],
     ['Whole roll', [
       ['~6x~4d6dl1', 'repeat the whole expression 6 times', 'prefix', 'Rolls the whole expression separately that many times and reports each.'],
       ['2d6~,3d8', 'separate rolls, reported together', 'append', 'At the top level a comma starts another roll. Inside brackets the same comma builds a set.'],
       ['2d20kh1~#attack', 'label, ignored by the maths', 'append', 'The label names the roll. It is also what a saved roll or a variable is called, and saving needs one.']
-    ]],
-    ['Comparisons', [
-      ['d6e~=6', 'exactly', 'suffix'],
-      ['d6e~>=5', 'at least', 'suffix'],
-      ['d6r~<=2', 'at most', 'suffix'],
-      ['d6r~!=3', 'anything but', 'suffix'],
-      ['d6~>d4', 'against a fresh roll each time', 'suffix', 'The other side of an explicit comparison can be any expression that works out to one value, rolled again for every comparison it takes part in.'],
-      ['loot~=gem', 'against a word', 'suffix', 'Words compare by being the same word.']
     ]]
   ];
 

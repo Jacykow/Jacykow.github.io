@@ -639,8 +639,11 @@ kbd{
   font-size:12px; border:1px solid var(--border); border-radius:999px;
   background:var(--pane); padding:3px 10px; color:var(--dim);
 }
+/* A roll shortcut is a small Roll button and shares its class, so it shares
+   that button’s amber ground. Its hover has to brighten the ground the way
+   that button does — colouring the text accent on this ground rubs it out. */
 .sc.roll{cursor:pointer}
-.sc.roll:hover{color:var(--accent); border-color:var(--accent)}
+.sc.roll:hover{filter:brightness(1.09)}
 .sc.var i{font-style:normal; color:var(--accent)}
 .sc .vval{
   background:none; border:none; color:var(--text); font-family:var(--mono);

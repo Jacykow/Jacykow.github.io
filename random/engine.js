@@ -468,12 +468,13 @@
 
     dice(qty, a) {
       this.lit('d');
-      let sides;
+      let sides, sBrk = null;
       this.ws();
       const sA = this.i;
       if (this.lit('(')) {
         sides = this.expr();
         if (!this.lit(')')) this.fail('expected ")" after computed sides');
+        sBrk = [[sA, sA + 1], [this.i - 1, this.i]];
       } else {
         const v = this.number();
         if (v === null) this.fail('expected the number of sides after "d"');
@@ -481,7 +482,7 @@
       }
       const coreEnd = this.i;
       const mods = this.modifiers();
-      return { t: 'dice', qty, sides, mods, core: [a, coreEnd], sp: [a, this.i], uid: ++this.uid };
+      return { t: 'dice', qty, sides, mods, sBrk, core: [a, coreEnd], sp: [a, this.i], uid: ++this.uid };
     }
 
     /* ------------------------------------------------------- comparisons */
@@ -2109,7 +2110,8 @@
             if (node.qty.t === 'num') push(node.qty.sp, 't-num', null);
             else walk(node.qty, depth + 1);
           }
-          push([many ? node.qty.sp[1] : node.core[0], node.core[1]], 't-dice', {
+          const from = many ? node.qty.sp[1] : node.core[0];
+          push([from, node.sBrk ? node.sBrk[0][0] : node.core[1]], 't-dice', {
             title: many ? 'Dice — a set' : 'One die — a value',
             desc: many
               ? 'Roll ' + q + ' ' + sides + '-sided dice. That is a set of ' + q +
@@ -2118,7 +2120,13 @@
                 'set modifiers like kh will not attach to it.',
             depth
           }, 'd' + node.uid);
-          if (node.sides.t !== 'num') walk(node.sides, depth + 1);
+          if (node.sBrk) {
+            push(node.sBrk[0], 't-brk');
+            walk(node.sides, depth + 1);
+            push(node.sBrk[1], 't-brk');
+          } else if (node.sides.t !== 'num') {
+            walk(node.sides, depth + 1);
+          }
           mods(node, depth);
           break;
         }
