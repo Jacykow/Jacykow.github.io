@@ -112,15 +112,20 @@ term. Bracket it to carry on: `(2d6a)>=9` compares the winning total, where
 
 ### Bracket groups
 
-Modifiers written after a closing bracket act on every die inside it, rather than on a
-single term:
+A modifier written after a closing bracket acts on everything the bracket holds — as long
+as the bracket holds a set. **The comma is what makes one.** `+` sums, and a sum is a
+single value with no members left to keep, drop or count:
 
 ```
-(3d6+2d8)kh3      keep the best 3 dice across the whole group
-(4d6+2d10)dl2     drop the worst 2 overall
-(2d6+3d8)>=5      count every die of 5 or more as a success
-(2d20+2d12)kl1    keep the single worst die
+(3d6,2d8)kh3      keep the best 3 dice across the whole group
+(4d6,2d10)dl2     drop the worst 2 overall
+(2d6,3d8)>=5      count every die of 5 or more as a success — 0 to 5 of them
+(2d20,2d12)kl1    keep the single worst die
 ```
+
+With `+` in place of the comma, `(3d6+2d8)kh3` is refused: there is one value there, not
+five dice. `(2d6+3d8)>=5` is not refused, and that is worse — it is one comparison
+against the total, which is never below 5, so it is always exactly one success.
 
 Keep, drop and target success/failure are the modifiers that make sense here.
 
@@ -175,6 +180,66 @@ The top four each ask one question and give one answer. The bottom two ask **two
 set on the left distributes, so each die is compared separately — and because the other
 side is worked out afresh for every comparison, `2d6=sum(2d6)` rolls two dice on the left
 and two *more* for each of them on the right. Six dice, two answers.
+
+#### Every place it is decided
+
+Taking `2d6` as the example throughout. Variants of one modifier are collapsed: `e`
+covers `ei` and `ep`, `kh` covers `kl`/`dh`/`dl`, and so on.
+
+**Summed to one number** — everywhere a single value is required:
+
+| Where | Written | Comes to |
+|---|---|---|
+| either side of `+ - * / % ^` | `2d6+1` | 7 + 1 |
+| an argument to `sum`, `max`, `min` | `max(2d6,7)` | the total against 7 |
+| how many dice to roll | `(2d6)d10` | seven d10s |
+| how many sides a die has | `d(2d6)` | one d7 |
+| a `::=` binding, everywhere it is named | `x::=2d6, x+1` | x is one number |
+| each attempt of `a` / `da` | `2d6a` | the better **total**, not the better die |
+| a face of a custom die | `[2d6,99]` | that face is worth 7 |
+| a bracket used as **one item of a list** | `((2d6),(3d8))kh1` | keeps the better group, by total |
+
+**Left as two rolls** — everywhere something acts on members, one at a time:
+
+| Where | Written | Comes to |
+|---|---|---|
+| die modifiers `e`, `r`, `u` | `2d6e` | each die explodes on its own |
+| `min` and `max` | `2d6min3` | each face clamped |
+| checks `s`, `f`, `cs`, `cf`, and a bare comparison | `2d6>=5` | two comparisons, 0 to 2 successes |
+| `@` | `2d6@*2` | each die doubled |
+| `kh`, `kl`, `dh`, `dl` | `2d6kh1` | needs the members to choose between |
+| `?:` and a chain of them | `2d6>=5?hit:miss` | two answers |
+| a minus in front | `-2d6` | each member flipped |
+| a comma inside brackets | `(2d6,d8)` | three members, flattened |
+| a repeat | `2(2d6)` | four dice, flat |
+| a `:=` variable, wherever it is named | `x:=2d6, 2x>=5` | four dice, four comparisons |
+
+Brackets do neither on their own: `(2d6)` is two dice, `(2d6)kh1` keeps one of them, and
+`(2d6>=5)?hit:miss` still gives two answers. They matter in exactly one place — as an
+item of a list, where a bracket makes what it holds a **single member**:
+
+```
+(2d6,3d8)kh1        five dice; keep the best one
+((2d6),(3d8))kh1    two groups; keep the better total
+```
+
+That is how you compare groups rather than dice, and it is the only thing a bracket
+changes about a set.
+
+**Refused rather than guessed at** — the right-hand side of a comparison. `d6=2d6` is an
+error; write `sum(2d6)` for the total, or put the set on the left to compare each die.
+
+**And in the result:**
+
+| What you see | Which it is |
+|---|---|
+| the big number at the top | the **sum** — of every set, across every top-level comma and every `Nx` repeat |
+| a score like `2-0` | a **count of members**, never a sum |
+| the words, when a roll lands on one | one word per member |
+| a subtotal bracket | the sum of what it spans |
+| **Details**, per-unit section | one member: `2d6` charts `d6 ×2` |
+| **Details**, total section | the sum: 2 to 12 |
+| *can be* / min and max | the sum |
 
 ### Maths
 
