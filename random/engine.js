@@ -904,20 +904,35 @@
   };
   const CHECK_SHORT = { s: 'success', f: 'failure', cs: 'crit', cf: 'crit fail' };
 
+  /* Told to do, or reported as done — and, when it is marked, told of every
+     member rather than of the one thing they add up to. A bracket spanning one
+     die is too narrow to letter, so this wording is the only thing that says
+     which it reaches. */
   function modNote(m, future) {
     const end = (e) => e === 'h' ? 'highest' : 'lowest';
     const w = (now, then) => future ? now : then;
     const n = cnt(m);
+    const each = m.each;
     switch (m.t) {
-      case 'min': return w('floor at ', 'floored at ') + n;
-      case 'max': return w('cap at ', 'capped at ') + n;
-      case 'explode': return (m.pen ? w('penetrate', 'penetrated') : w('explode', 'exploded')) +
-        (m.inf ? ' repeatedly' : '');
-      case 'reroll': return w('re-roll', 're-rolled') + (m.inf ? ' repeatedly' : '');
+      case 'min': return each ? w('floor each at ', 'each floored at ') + n
+                              : w('floor at ', 'floored at ') + n;
+      case 'max': return each ? w('cap each at ', 'each capped at ') + n
+                              : w('cap at ', 'capped at ') + n;
+      case 'explode': {
+        const verb = m.pen ? w('penetrate', 'penetrated') : w('explode', 'exploded');
+        const rep = m.inf ? ' repeatedly' : '';
+        return each ? w(verb + ' each' + rep, 'each die ' + verb + rep)
+                    : verb + rep + (future ? '' : '');
+      }
+      case 'reroll': {
+        const rep = m.inf ? ' repeatedly' : '';
+        return each ? w('re-roll each' + rep, 'each die re-rolled' + rep)
+                    : w('re-roll', 're-rolled') + rep;
+      }
       case 'unique': return w('make unique', 'made unique');
       case 'keep': return w('keep ', 'kept ') + n + ' ' + end(m.end);
       case 'drop': return w('drop ', 'dropped ') + n + ' ' + end(m.end);
-      case 'check': return CHECK_SHORT[m.check] + ' on ' + cpShort(m.cp);
+      case 'check': return (each ? 'each ' : '') + CHECK_SHORT[m.check] + ' on ' + cpShort(m.cp);
       case 'map': return w('each ', 'each ') + m.op + plain(m.r);
       case 'adv': {
         const best = m.end === 'h';
@@ -932,8 +947,10 @@
   function noteList(mods, future) {
     if (!mods || !mods.length) return [];
     const rank = (m) => { const k = MODS[m.t === 'check' ? 'check' : m.t]; return k ? k.order : 99; };
-    // the preview writes comparisons out in full, so they are not steps there
-    return mods.filter((m) => !(future && m.t === 'check'))
+    /* The preview writes comparisons out in full, so they are not steps there —
+       except a marked one where there is no room to draw it beside each die,
+       which would otherwise lose the only thing saying it is per die. */
+    return mods.filter((m) => !(future && m.t === 'check' && !m.each))
       .sort((a, b) => rank(a) - rank(b))
       .map((m) => modNote(m, future)).filter(Boolean);
   }
@@ -2142,10 +2159,12 @@
   }
 
   /** comparisons belong in the preview: they are what the roll is being read for */
-  function previewChecks(node, ctx) {
+  function previewChecks(node, ctx, which) {
     let out = '';
     for (const m of node.mods || []) {
       if (m.t !== 'check') continue;
+      if (which === 'each' && !m.each) continue;
+      if (which === 'whole' && m.each) continue;
       out += '<span class="r-cmp">' + esc(m.bare ? '' : m.check) + CMP_SYM[m.cp.op] + '</span>' +
         (m.cp.node ? previewNode(m.cp.node, ctx)
                    : '<span class="r-num">' + fmt(m.cp.v) + '</span>');
@@ -2159,7 +2178,8 @@
     const X = (p) => ctx.mute ? '' : ' data-x="' + p + node.uid + '"';
     // every other modifier shows as a step in the tree below, in the tense of
     // something that has not happened yet
-    const steps = noteAttr('data-steps', noteList(node.mods, true));
+    const mods = node.mods || [];
+    const steps = noteAttr('data-steps', noteList(mods, true));
     const cmp = previewChecks(node, ctx);
 
     switch (node.t) {
@@ -2229,12 +2249,20 @@
         const n = (qty === null || !(qty >= 0)) ? 1 : Math.floor(qty);
         const shown = Math.max(1, Math.min(n, PREVIEW_MAX));
         const tag = X('d');
-        const one = ghostDie(shape, face, tag);
         const squeezed = n > SQUEEZE_AT;
-        const parts = new Array(shown).fill(one);
-        return '<span class="r-term' + (squeezed ? ' squeezed' : '') + '"' + tag + steps +
+        /* A marked comparison is short enough to sit beside the die it is about,
+           which says more plainly than any wording could that it is asked once
+           per die. Overlapping dice leave no room for that, and then the step
+           label carries it instead. */
+        const eachCmp = previewChecks(node, ctx, 'each');
+        const onDice = !squeezed && !!eachCmp;
+        const shownMods = onDice ? mods.filter((m) => !(m.t === 'check' && m.each)) : mods;
+        const one = ghostDie(shape, face, tag);
+        const parts = new Array(shown).fill(onDice ? one + eachCmp : one);
+        return '<span class="r-term' + (squeezed ? ' squeezed' : '') + '"' + tag +
+          noteAttr('data-steps', noteList(shownMods, true)) +
           squeezeStyle(shown) + '>' + (squeezed ? parts.join('') : parts.join(PLUS)) +
-          '</span>' + cmp;
+          '</span>' + previewChecks(node, ctx, 'whole');
       }
     }
     return '';
