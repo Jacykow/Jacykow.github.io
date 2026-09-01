@@ -56,7 +56,16 @@ const varsOf = (preset) => {
   return map;
 };
 
-/* ------------------------------------------------------- exact vs the run */
+/* ------------------------------------------------------- exact vs the run
+   One word is the result; several are a score, counted rather than ordered,
+   which is how the solver answers and so how the run has to be read. */
+function outcome(r) {
+  const words = r.words.concat(Object.keys(r.tally).filter((w) => r.words.indexOf(w) < 0));
+  let held = 0;
+  for (const w of words) held += r.tally[w] || 0;
+  return held > 1 ? words.map((w) => (r.tally[w] || 0) + ' ' + w).join(' - ') : r.text;
+}
+
 function exactAgrees(src) {
   let d = null;
   try { d = E.distribution(src); } catch (e) { return 0; }
@@ -64,9 +73,11 @@ function exactAgrees(src) {
 
   if (d.words) {
     const tally = {};
-    for (let i = 0; i < N; i++) { const t = E.roll(src).text; tally[t] = (tally[t] || 0) + 1; }
+    for (let i = 0; i < N; i++) { const t = outcome(E.roll(src)); tally[t] = (tally[t] || 0) + 1; }
+    // a long list of scores is cut short by the solver, so the tail is untested
+    const whole = d.words.size < E.LIMIT.combos;
     for (const w in tally) {
-      if (!d.words.has(w)) { fail(src, 'the run turned up "' + w + '", which the exact answer never names'); return 1; }
+      if (whole && !d.words.has(w)) { fail(src, 'the run turned up "' + w + '", which the exact answer never names'); return 1; }
     }
     for (const [w, p] of d.words) {
       const seen = (tally[w] || 0) / N;
@@ -114,6 +125,9 @@ E.setVars({ mod: '3', pool: '5', atk: 'd20+5' });
   const ATOM = ['d6', 'd20', '4d6', '3d10', 'd4', '2', '7', 'mod', 'atk', '[1,2,3]', '[0,0,1]', 'd100'];
   const MOD = ['', 'kh2', 'kl1', 'dl1', 'a', 'da', 'min3', 'max4', 'r1', 'ri2', '@*2', '@+1', '>=4', 's>=3'];
   const OP = ['+', '-', '*', '/', '%'];
+  // a question put to every member of a set, which is answered as a score
+  const SET = ['2d6', '4d6', '3d10', '10d2', '2(d20)', '3([gold,gem,dust])', '2([a,b])'];
+  const ASK = ['@>=4?hit:miss', '@=1?one:other', '@>=5?"a":"b"', '@=20?crit:>=10?hit:miss', ''];
   const pick = (a) => a[Math.floor(Math.random() * a.length)];
   for (let i = 0; i < (FULL ? 400 : 120); i++) {
     const r = Math.random();
@@ -122,7 +136,8 @@ E.setVars({ mod: '3', pool: '5', atk: 'd20+5' });
     else if (r < 0.6) src = pick(ATOM) + pick(OP) + pick(ATOM);
     else if (r < 0.75) src = '(' + pick(ATOM) + ',' + pick(ATOM) + ')';
     else if (r < 0.85) src = Math.ceil(Math.random() * 3) + '(' + pick(ATOM) + '+1)';
-    else src = '(' + pick(ATOM) + '+mod)>=8?"good":>=4?"ok":"bad"';
+    else if (r < 0.93) src = '(' + pick(ATOM) + '+mod)>=8?"good":>=4?"ok":"bad"';
+    else src = pick(SET) + pick(ASK);
     try { E.roll(src); } catch (e) { continue; }
     looked++;
     claimed += exactAgrees(src);

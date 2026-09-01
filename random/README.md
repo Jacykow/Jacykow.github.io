@@ -19,6 +19,27 @@ also works.) The server sits a directory up because this is one part of a larger
 
 ---
 
+## Contents
+
+* [Where the notation comes from](#where-the-notation-comes-from)
+* [Syntax](#syntax)
+  * [Dice](#dice)
+  * [Values and sets](#values-and-sets)
+  * [Modifiers](#modifiers)
+  * [Maths](#maths)
+  * [Advantage](#advantage)
+  * [Bracket groups](#bracket-groups)
+  * [Words and choices](#words-and-choices)
+  * [Custom dice](#custom-dice)
+  * [Variables](#variables)
+  * [Whole-roll extras](#whole-roll-extras)
+  * [Categories](#categories)
+* [Interface](#interface)
+  * [What a colour means](#what-a-colour-means)
+  * [Two kinds of link](#two-kinds-of-link)
+* [Files](#files)
+  * [The dice art](#the-dice-art)
+
 ## Where the notation comes from
 
 The syntax is the one popularised by the Discord dice bots — **Sidekick** and
@@ -37,13 +58,89 @@ into the `e`/`ei`, `r`/`ri` pairs described below.
 | `d20` | one twenty-sided die |
 | `4d6` | four six-sided dice, summed |
 | `(2+2)d6` | computed quantity |
-| `3d(2*6)` | computed number of sides |
+| `3d(3*5)` | computed number of sides |
+
+### Values and sets
+
+There are two structural types, and one rule ties them together:
+
+> **A term's value is its total.** A modifier is about that value unless it is marked
+> `@`, which is about each member instead.
+
+A set is built by a count (`4d6`), a list (`(d6,d8)`) or a repeat (`3(d6+1)`). Brackets do
+not build one: `(2d6)` is still two dice.
+
+```
+2d6>=5           is the total 5 or more? one yes or no
+2d6@>=5          is each die 5 or more? two verdicts, 0 to 2 successes
+
+2d6e             roll 2d6 again and add, when the total is 12
+2d6@e            roll a die again and add, for each die that shows 6
+
+2d6min3          the total, floored at 3
+2d6@min3         each die, floored at 3
+```
+
+The `@` goes in front of whichever modifier it is about, and only in front of the ones a
+single member can answer for. Keeping, dropping and making unique are choices made
+*between* members, and advantage throws the whole term again, so none of them takes one:
+
+```
+4d6dl1           drop the lowest of the four — about the set, so no @
+4d6@kh1          refused: kh is about the set as a whole
+2d6a             the better of two totals — about the term, so no @
+```
+
+A lone die is its own total, so the two readings agree and `d6e` needs no mark.
+
+**Where the total is still what is meant**, because nothing else would make sense:
+
+```
+2d6+1            arithmetic reduces each side to a value
+(2d6)d10         how many dice to roll
+d(2d6)           how many sides a die has
+2d6a             each attempt of advantage, compared by total
+[2d6,99]         a face of a custom die is worth one number
+```
+
+**Where the members are what is meant:**
+
+```
+sum(2d6)         everything added up
+max(2d6)         the largest member — min() the smallest
+2d6@*2           each die doubled
+4d6kh3           keep and drop choose between members
+((2d6),(3d8))kh1 a bracket, as an item of a list, is one member
+```
+
+`sum`, `max` and `min` take the members of everything handed to them, flattened together,
+so `max(2d6,7)` is the largest of three numbers.
+
+**And one place a set is refused rather than reduced**: the right-hand side of a
+comparison. `d6 = 2d6` is an error — write `sum(2d6)` for the total, or put the set on the
+left to compare each die.
+
+#### The two bindings differ in one thing only
+
+`:=` is worked out afresh at every mention; `::=` is thrown once and then referred to.
+Both hold whatever they were given, set or value, and behave identically in every other
+respect:
+
+```
+x:=2d6, x@>=5, x@>=5      four dice, two pairs of verdicts
+x::=2d6, x@>=5, x@>=5     two dice, asked about twice
+x::=2d6, x>=7             one verdict, about the total
+```
 
 ### Modifiers
 
 Modifiers chain onto a dice term in any written order — they are always **applied** in the
-fixed order below, so `4d6kh3e` and `4d6ekh3` mean the same thing. A term may only carry
+fixed order below, so `4d6kh3@e` and `4d6@ekh3` mean the same thing. A term may only carry
 one explode modifier.
+
+Each of them is about the term's **total** unless it is written with `@` in front, which
+makes it about each member: `4d6>=5` asks one question about the sum, `4d6@>=5` asks four.
+See [Values and sets](#values-and-sets).
 
 Anything that can repeat follows one rule: **the plain letter does it once, a trailing
 `i` does it for as long as it keeps qualifying** — `e` / `ei`, `r` / `ri`. `u` is exempt:
@@ -62,7 +159,7 @@ it narrows the set of allowed values rather than repeating a roll.
 | 5 | `u`, `u3` | force unique results (`u3` gives up after 3 attempts) |
 | 6 | `kh3`, `kl1` | keep the highest / lowest N |
 | 7 | `dl1`, `dh1` | drop the lowest / highest N |
-| 8 | `@*2`, `@^2`, `@-1` | do it to each member rather than to the sum |
+| 8 | `@*2`, `@^2`, `@-1` | arithmetic, to each member rather than to the total |
 | 9 | `>=8` | a plain yes/no: each die reads success or failure |
 | 9 | `s>=8` | mark the hits and say nothing about the rest |
 | 9 | `f1`, `f<=1` | mark each qualifying die a failure |
@@ -91,47 +188,17 @@ loot=gem                a word on the right
 4d20>=atk               a variable on the right
 ```
 
-### Advantage
-
-`a` rolls everything to its left a second time and keeps the better result; `da`
-keeps the worse. A number says how many attempts to make. Each attempt is summed
-before they are compared, so this is the best **total**, not the best single die
-— `2d6a` is the better of two 2d6 sums, while `2d6kh1` is the higher of two dice.
-
-```
-2d6a            the better of two 2d6 totals
-2d6da           the worse
-d20a            the familiar one
-2d6a3           best of three
-4d6dl1a         everything else happens first, then the better of two
-```
-
-Because it re-rolls everything before it, `a` has to be the last modifier on a
-term. Bracket it to carry on: `(2d6a)>=9` compares the winning total, where
-`2d6a>=9` would have compared each attempt.
-
-### Bracket groups
-
-Modifiers written after a closing bracket act on every die inside it, rather than on a
-single term:
-
-```
-(3d6+2d8)kh3      keep the best 3 dice across the whole group
-(4d6+2d10)dl2     drop the worst 2 overall
-(2d6+3d8)>=5      count every die of 5 or more as a success
-(2d20+2d12)kl1    keep the single worst die
-```
-
-Keep, drop and target success/failure are the modifiers that make sense here.
-
 ### Maths
 
-`+ - * / % ^` (or `**`), parentheses, and `max` / `min` — the two functions that reduce
-several values down to one. The scalar helpers (`floor`, `sqrt`, `abs`, …) are gone.
+`+ - * / % ^` (or `**`), parentheses, and three functions that reduce several values to
+one: `sum`, `max` and `min`. The scalar helpers (`floor`, `sqrt`, `abs`, …) are gone.
 
 ```
-(1d6+2)*3        max(d20,10)        min(2d6,7)
+(1d6+2)*3        max(d20,10)        min(2d6,7)        sum(2d6)
 ```
+
+A function call is a term like any other, so a modifier hangs off it:
+`max(d20,10)>=15`.
 
 Division is **whole-number**, truncated toward zero, because dice are: `7/2` is 3 and
 `-7/2` is −3. With `%` that reads the digits off a roll, and `(a/b)*b + a%b` still comes
@@ -166,6 +233,44 @@ doubles each die and then adds 3 **once**. Chain another `@` to do both to each.
 
 It runs after keep and drop and before a check, so `2d6@*2>=8` compares the doubled
 values, and a member already thrown away is left alone.
+
+### Advantage
+
+`a` rolls everything to its left a second time and keeps the better result; `da`
+keeps the worse. A number says how many attempts to make. Each attempt is summed
+before they are compared, so this is the best **total**, not the best single die
+— `2d6a` is the better of two 2d6 sums, while `2d6kh1` is the higher of two dice.
+
+```
+2d6a            the better of two 2d6 totals
+2d6da           the worse
+d20a            the familiar one
+2d6a3           best of three
+4d6dl1a         everything else happens first, then the better of two
+```
+
+Because it re-rolls everything before it, `a` has to be the last modifier on a
+term. Bracket it to carry on: `(2d6a)>=9` compares the winning total, where
+`2d6a>=9` would have compared each attempt.
+
+### Bracket groups
+
+A modifier written after a closing bracket acts on everything the bracket holds — as long
+as the bracket holds a set. **The comma is what makes one.** `+` sums, and a sum is a
+single value with no members left to keep, drop or count:
+
+```
+(3d6,2d8)kh3      keep the best 3 dice across the whole group
+(4d6,2d10)dl2     drop the worst 2 overall
+(2d6,3d8)>=5      count every die of 5 or more as a success — 0 to 5 of them
+(2d20,2d12)kl1    keep the single worst die
+```
+
+With `+` in place of the comma, `(3d6+2d8)kh3` is refused: there is one value there, not
+five dice. `(2d6+3d8)>=5` is not refused, and that is worse — it is one comparison
+against the total, which is never below 5, so it is always exactly one success.
+
+Keep, drop and target success/failure are the modifiers that make sense here.
 
 ### Words and choices
 
@@ -294,6 +399,7 @@ A variable that refers back to itself is caught at a fixed depth rather than han
 
 ```
 6x 4d6dl1               roll the entire expression 6 times and report each set
+(d4)x 4d6dl1            roll it as many times as a d4 says, thrown afresh
 2d6, 3d8, d20           comma: separate rolls, reported as one entry
 2d20kh1+5 # attack      everything after # is a label, ignored by the maths
 ```
@@ -328,7 +434,15 @@ one place they fold, since the drawer is where you go to see all of them at once
 
   The headline is a number, or — when the roll produces result types — a game score:
   every type the expression could possibly produce, best to worst, so a critical that
-  never turned up still shows its nought. A roll that lands on a word shows the word.
+  never turned up still shows its nought. A roll that lands on a word shows the word, and
+  one that lands on several shows them as a score too: one figure per word the expression
+  could say, in the order it says them.
+
+  A headline is one figure and a set is not one thing, so an opened card also reads the
+  members one at a time, wherever they say more than the dice under them already do.
+  `10d2@=1?1:3` is ten dice showing 1 or 2 and a result of `1, 3, 1, 3, …`; a set of
+  words shows the words as they fell, and under them the score with its words named,
+  `6 heads - 4 tails`.
 
   A choice shows only the branch it took, joined to the comparison that caused it by
   **so** — `18 ≥ 15 so hit`, `7 < 15 so miss`. The statement written out is always the one
@@ -354,9 +468,16 @@ one place they fold, since the drawer is where you go to see all of them at once
   Past three dice a term overlaps its own dice so it never takes more room than three;
   the individual faces stop mattering there and the subtotal speaks for the term.
 
+  An opened card writes the expression in the colours the editor gives it, since a colour
+  means one thing everywhere.
+
   Each card carries a **roll again** button, and clicking an opened entry anywhere inert
-  folds it back up. Collapsed entries show their dice, and their label if they have one,
-  otherwise the expression — never both.
+  folds it back up. A collapsed entry is four columns — what you called it, what it came
+  to, what it was thrown with, and when — in the order they matter when you are looking
+  back down a log. The name is the label if there is one and the expression if there is
+  not, never both, and it holds a column of its own so the results line up under each
+  other. The dice are only the dice: ten coins read as ten faces, and the reasoning that
+  turned them into words is the opened card's business.
 
   Each die is a 3D render of a real solid, drawn from one inline SVG sprite referenced
   with `<use>`, so the shapes cost no extra requests and recolour from CSS:
@@ -388,20 +509,36 @@ one place they fold, since the drawer is where you go to see all of them at once
 * **Details** — what the expression can come to. Where the shape of the expression allows
   it the answer is **worked out exactly** rather than watched for, and the run is drawn
   over the top as a second opinion; where it does not, the run is all there is. The line
-  under the chart says which you are looking at.
+  under the chart says which you are looking at, how many rolls stand behind it, and how
+  many of them are yours.
 
   A roll that makes several kinds of value is broken into the smallest repeated piece and
   each is charted in turn, then the total: `3d10` reports the d10 and then the sum. It
-  only splits where the pieces are independent — keep, drop and advantage couple them.
-  Words get a bar each, including the ones that never turned up.
+  only splits where the pieces are independent — keep, drop and advantage couple them —
+  and a choice is several pieces only when it is marked `@`, since a choice about a total
+  is one question however many dice the total is made of.
+  Words get a bar each, including the ones that never turned up, and every roll of this
+  expression still in the log is marked beside the word it landed on, the most recent
+  picked out. A set of words is two questions — what one member is likely to say, and what
+  the set is likely to come to once they all have — so both are answered, the member first
+  and then the set. The set is counted rather than ordered: ten coins land in a thousand
+  orders and in eleven scores, and the score is what anybody reads. Two words make a line,
+  `0 heads - 6 tails` through to `6 heads - 0 tails`, and are read along it; more than
+  two have no such line, so there the commonest comes first.
 
   Numbers get one bar per value while they will fit, and past that one bar per run of
   whole numbers, inclusive at both ends. The first bar starts at the smallest the
   expression can reach and the last ends at the largest, so the axis never offers a value
-  that cannot happen. Everything else is on the chart itself: the middle half and the
-  tenth-to-ninetieth as bands behind the bars, the median and the mean as lines across
-  them, and every roll of this expression still in the log as a tick along the bottom with
-  the most recent picked out.
+  that cannot happen, and each bar is named under its own middle. Everything else is on
+  the chart itself: the middle half and the tenth-to-ninetieth as bands behind the bars,
+  the median and the mean as lines across them, and every roll of this expression still
+  in the log as a tick along the bottom with the most recent picked out — a roll lands
+  there as you make it.
+
+  The chart answers questions rather than only showing a shape. Point at a bar and it
+  says how often that value comes up, how often less, and how often more, lighting the
+  bars each figure is counted from. Point at one of the figures underneath — the median,
+  a percentile — and it lights the bars that figure is about and says what it means.
 
   The run fills in bursts — a short stretch of throwing, a redraw, a gap long enough for
   the page to stay answerable — until there are twenty thousand or a second has gone.
@@ -432,10 +569,14 @@ one place they fold, since the drawer is where you go to see all of them at once
   number. Clicking the name puts a variable
   into the expression, or replaces the expression with a saved roll — and <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back, as it does for anything
   else that writes into the field. <kbd>Ctrl</kbd>+<kbd>S</kbd> saves what you are
-  editing, under its `# name`.
+  editing, under its `# name` — or under `roll 1`, then `roll 2`, when it has none, since
+  a missing name is a thing to supply rather than a reason to refuse. Saving opens this
+  list at the row it just made and marks it for a moment, which says what "saved" would
+  have said and shows where it went.
 
   Both lists are grouped under the same categories, so adding one in either adds it to
-  both, and renaming one renames it in both. A row is dragged by its name to reorder it or
+  both, and renaming one renames it in both. Each heading says how much it holds, counted
+  across both lists. A row is dragged by its name to reorder it or
   to move it under another heading; a heading is dragged by its grip, and what is in it
   comes along. A new item starts under no heading, in the loose group at the end, which is
   also where something is dragged back out to. Removing a heading leaves what was under it
@@ -444,7 +585,8 @@ one place they fold, since the drawer is where you go to see all of them at once
   from.
 * **Preset** — your saved rolls and variables together. They live in this browser's
   `localStorage` between visits, like the rest; a preset link is only a way of moving them
-  to another browser. Opening one loads it straight away. Pasting one into the panel
+  to another browser. **export** and **import** open their boxes when asked and stay shut
+  otherwise. Opening a link loads it straight away. Pasting one into the panel
   instead offers what it holds first, marking each entry **new**, **update** or **same**,
   with everything but the sames selected; what you take is added to what you already have,
   or replaces the lot outright, and one button offers the same list back to undo it. Ready-made
@@ -458,8 +600,9 @@ reference and the Explain list all draw the same token the same way.
 
 | | | |
 |---|---|---|
-| **value** | white | a number or a word, a die face, a total |
-| **name** | amber | a variable, a die, a `# label`, a binding, `max` and `min` |
+| **value** | white | a number or a word, a die face, a total — including a number that is an operand, like the 3 in `d6>3` or `3[a,b]` |
+| **name** | amber | a variable, a die, a binding, `max` and `min` |
+| **label** | sage | the `# name` a roll is given, and the titles it becomes |
 | **modifier** | blue | `kh3`, `e`, `>=5`, `@*2`, `6x` — and a die a modifier reached |
 | **joinery** | grey | brackets, commas, operators, `?` and `:` |
 | **inert** | fainter grey | times, hints, and scaffolding shown for context |
@@ -471,7 +614,17 @@ what tells them apart is that only one of them can be added up. A die is a name 
 same sense a variable is: it stands for a value rather than being one, which is why `d20`
 and `mod` read alike.
 
-Green and red are spent entirely on verdicts, and a verdict always beats the role colour
+A number that could have been written as an expression is an operand, and reads as the
+value it is: the count in `4d6`, the `3` in `3[a,b]`, the threshold in `d6>3`. A digit
+baked into a modifier’s spelling is part of that modifier’s name and is not — `kh3` and
+`min2` are one token each.
+
+A label is the one name the notation never reads: it is what you called the roll rather
+than something standing for a value, so it is the one name that is not amber. Its sage is
+deliberately cooler and quieter than the verdict green, which is never a colour you can
+write.
+
+Green and red at full strength are spent entirely on verdicts, and a verdict always beats the role colour
 of whatever carries it, so the same `"Miss"` is white where it is only a word and red
 where a check made it one. A bare word is drawn as a name exactly when a variable of that
 name is set, and as a value when it is not — the colour answers the question the word
@@ -488,15 +641,32 @@ They are for two different things:
   (`#2d20kh1+5`), updated when you roll. Copy it out of the browser and send it to
   someone. **Copy link** in the top bar puts it on the clipboard.
 * **A setup link** carries every saved roll and variable, and the categories they sit
-  under. Opening one takes on that setup
-  whole; pasting one into the Preset tab lists what it holds and waits to be told. The
-  setup it replaced is kept, and one button puts it back.
+  under. Opening one adds what it holds to what you already have; pasting one into the
+  Preset tab lists it first and waits to be told. Either way what it added is
+  remembered, and one button takes it back out again.
+
+A setup link comes in two forms, and they are read by the same code:
+
+```
+#setup=eyJuIjoyLCJjIjpbIkt…       a setup that exists nowhere else, spelled out
+#preset=huberts-dream             a ready-made preset, named
+```
+
+The short form only needs the name because both ends already have the preset. Every
+ready-made preset has one — **link** beside its name in the Preset tab copies it. The
+first preset is the exception: it is what a browser with nothing stored already starts
+from, so there is nobody to send it to, and its button is left off. `#preset=reset`
+still works if you want it.
 
 Neither reaches the server — a fragment never leaves the browser — so length is only a
 question of what a browser holds, which a setup of any sane size comes nowhere near.
 
-The tool drawer collapses to just its tab strip via the chevron on the right, handing the
-full screen to the results — worth it on a phone. The choice is remembered. Layout uses
+A tab is open or the drawer is shut, and there is no third state. Nothing is open when you
+arrive: the tools are there when you go looking for them, and until then the results have
+the room. Pressing the tab that is already open shuts it again, so the way back to a taller
+result is the button you are already pointing at, and the chevron on the right does the
+same for the tab you had last. One line under the tabs says what the open tab is for, and
+the panes themselves carry no prose — a tab cannot arrive without its line. Layout uses
 `dvh` units and safe-area insets, so browser chrome, the on-screen keyboard and notches
 don't clip it.
 
@@ -506,7 +676,7 @@ don't clip it.
 |---|---|
 | `engine.js` | tokenizer, recursive-descent parser, evaluator, explainer. No DOM. |
 | `app.js` | UI: highlighting, caret sync, result log, tools, storage. |
-| `presets.js` | ready-made rolls per game, as data |
+| `presets.js` | ready-made rolls per game, as data; each has the `id` its link names |
 | `reference.js` | the reference panel, as data |
 | `SYSTEMS.md` | what each game asks for, and what the notation cannot yet say |
 | `index.html`, `style.css` | markup and theme |

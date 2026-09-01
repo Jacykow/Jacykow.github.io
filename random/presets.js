@@ -25,14 +25,16 @@
     {
       name: 'Reset',
       id: 'reset',
-      note: 'Every solid on its own, and nothing else — where a browser with nothing stored starts.',
-      cats: ['Dice'],
+      note: 'A die of each common size and three rolls to press — where a browser with ' +
+        'nothing stored starts.',
+      cats: ['Dice', 'Try out'],
       vars: [],
       saved: [
-        ['d4 # <d4>', 'Dice'], ['d6 # <d6>', 'Dice'], ['d8 # <d8>', 'Dice'],
-        ['d10 # <d10>', 'Dice'], ['d12 # <d12>', 'Dice'], ['d20 # <d20>', 'Dice'],
-        ['d100 # <d100>', 'Dice'],
-        '2d6 # 2x <d6>'
+        ['d6 # <d6>', 'Dice'], ['d10 # <d10>', 'Dice'], ['d12 # <d12>', 'Dice'],
+        ['d20 # <d20>', 'Dice'], ['d100 # <d100>', 'Dice'],
+        ['2d6 # 2x <d6>', 'Try out'],
+        ['d2=1?heads:tails # Coin toss', 'Try out'],
+        ['4d6dl1 # Best 3 of 4', 'Try out']
       ]
     },
 
@@ -105,12 +107,12 @@
       vars: [['5 # Dice pool {pool}', 'Pools']],
       saved: [
         ['d10 # <d10>', 'Dice'],
-        ['(pool)d10>=8 # Roll', 'Pools'],
-        ['(pool)d10ei>=8 # Ten again', 'Pools'],
-        ['(pool)d10ei>=9 # Nine again', 'Pools'],
+        ['(pool)d10@>=8 # Roll', 'Pools'],
+        ['(pool)d10@ei>=8 # Ten again', 'Pools'],
+        ['(pool)d10@ei>=9 # Nine again', 'Pools'],
         ['d10>=10?"Success":"Failure" # Chance die', 'Pools'],
-        ['(pool)d10>=8?"Success":"Failure" # Each die, named', 'Pools'],
-        ['h::=(pool)d10>=8, c::=(pool)d10=10, c>=2?"Critical":h>0?"Success":"Failure" # With criticals', 'Pools']
+        ['(pool)d10@>=8?"Success":"Failure" # Each die, named', 'Pools'],
+        ['h::=(pool)d10@>=8, c::=(pool)d10@=10, c>=2?"Critical":h>0?"Success":"Failure" # With criticals', 'Pools']
       ]
     },
 
@@ -122,10 +124,10 @@
       vars: [['2 # Dice pool {pool}', 'Action rolls']],
       saved: [
         ['d6 # <d6>', 'Dice'],
-        ['((pool)d6kh1)>=6?"Full success":>=4?"Partial success":"Bad outcome" # Action roll', 'Action rolls'],
-        ['(2d6kl1)>=6?"Full success":>=4?"Partial success":"Bad outcome" # Zero dice', 'Action rolls'],
-        ['h::=(pool)d6=6, b::=(pool)d6kh1, h>=2?"Critical":b>=6?"Full success":b>=4?"Partial success":"Bad outcome" # With criticals', 'Action rolls'],
-        ['(pool)d6=6 # Sixes rolled', 'Action rolls'],
+        ['((pool)d6kh1)@>=6?"Full success":>=4?"Partial success":"Bad outcome" # Action roll', 'Action rolls'],
+        ['(2d6kl1)@>=6?"Full success":>=4?"Partial success":"Bad outcome" # Zero dice', 'Action rolls'],
+        ['h::=(pool)d6@=6, b::=(pool)d6kh1, h>=2?"Critical":b>=6?"Full success":b>=4?"Partial success":"Bad outcome" # With criticals', 'Action rolls'],
+        ['(pool)d6@=6 # Sixes rolled', 'Action rolls'],
         ['(pool)d6kh1 # Best die', 'Action rolls'],
         'd6+d6 # Fortune'
       ]
@@ -157,10 +159,10 @@
       vars: [['8 # Dice pool {pool}', 'Pools']],
       saved: [
         ['d6 # <d6>', 'Dice'],
-        ['(pool)d6>=5 # Hits', 'Pools'],
-        ['(pool)d6=1 # Ones, for a glitch', 'Pools'],
-        ['h::=(pool)d6>=5, g::=(pool)d6=1, (g*2)>pool?"Glitch":h>0?"Hit":"Miss" # Hits and glitches', 'Pools'],
-        ['(pool)d6ei>=5 # Edge, exploding', 'Pools'],
+        ['(pool)d6@>=5 # Hits', 'Pools'],
+        ['(pool)d6@=1 # Ones, for a glitch', 'Pools'],
+        ['h::=(pool)d6@>=5, g::=(pool)d6@=1, (g*2)>pool?"Glitch":h>0?"Hit":"Miss" # Hits and glitches', 'Pools'],
+        ['(pool)d6@ei>=5 # Edge, exploding', 'Pools'],
         ['(pool)d6kh1 # Best die', 'Pools']
       ]
     },
@@ -184,13 +186,14 @@
       id: 'huberts-dream',
       note: 'Two d6 and a modifier, banded four ways.',
       cats: ['Kości', 'Rzuty'],
-      vars: [['0 # Modyfikatory {mod}', 'Rzuty']],
+      vars: [['0 # Modyfikator {mod}', 'Rzuty']],
       saved: [
         ['d4 # <d4>', 'Kości'], ['d6 # <d6>', 'Kości'], ['d8 # <d8>', 'Kości'],
         ['d10 # <d10>', 'Kości'], ['d12 # <d12>', 'Kości'], ['d20 # <d20>', 'Kości'],
         ['(2d6a+mod)>=13?"Sukces krytyczny":>=10?"Pełny sukces":>=7?"Sukces z konsekwencją":"Porażka i konsekwencja" # Rzut z ułatwieniem', 'Rzuty'],
-        ['(2d6+mod)>=13?"Sukces krytyczny":>=10?"Pełny sukces":>=7?"Sukces z konsekwencją":"Porażka i konsekwencja" # Rzut zwykły', 'Rzuty'],
-        ['(2d6da+mod)>=13?"Sukces krytyczny":>=10?"Pełny sukces":>=7?"Sukces z konsekwencją":"Porażka i konsekwencja" # Rzut z utrudnieniem', 'Rzuty']
+        ['(2d6+mod)>=13?"Sukces krytyczny":>=10?"Pełny sukces":>=7?"Sukces z konsekwencją":"Porażka i konsekwencja" # Rzut', 'Rzuty'],
+        ['(2d6da+mod)>=13?"Sukces krytyczny":>=10?"Pełny sukces":>=7?"Sukces z konsekwencją":"Porażka i konsekwencja" # Rzut z utrudnieniem', 'Rzuty'],
+        ['2d6 # 2x <d6>', 'Rzuty']
       ]
     },
 
@@ -201,9 +204,9 @@
       cats: ['Two readings', 'Digits', 'Still out of reach'],
       vars: [['3 # Dice pool {pool}', 'Two readings'], ['0 # Modifier {mod}', 'Two readings']],
       saved: [
-        ['h::=(pool)d10>=6, c::=(pool)d10=10, c>=2?"Critical":h>0?"Success":"Failure" # Vampire 5e, successes and tens', 'Two readings'],
-        ['h::=(pool)d6>=5, g::=(pool)d6=1, (g*2)>pool?"Glitch":h>0?"Hit":"Miss" # Shadowrun, hits and glitches', 'Two readings'],
-        ['s::=(pool)d6>=6, b::=(pool)d6=1, b>0?"Bane":s>0?"Success":"Failure" # Year Zero, sixes and banes', 'Two readings'],
+        ['h::=(pool)d10@>=6, c::=(pool)d10@=10, c>=2?"Critical":h>0?"Success":"Failure" # Vampire 5e, successes and tens', 'Two readings'],
+        ['h::=(pool)d6@>=5, g::=(pool)d6@=1, (g*2)>pool?"Glitch":h>0?"Hit":"Miss" # Shadowrun, hits and glitches', 'Two readings'],
+        ['s::=(pool)d6@>=6, b::=(pool)d6@=1, b>0?"Bane":s>0?"Success":"Failure" # Year Zero, sixes and banes', 'Two readings'],
         ['roll::=d100, roll/10, roll%10 # Percentile, tens and units', 'Digits'],
         ['roll::=d100, roll<=50?"Success":"Failure", roll%10 # Warhammer 4e, roll and its units', 'Digits'],
         ['g::=2[505,506,506,507,605,605,705,606]+2[505,504,503,405,405,405,305,404], (g%100)-20, (g/100)-20 # Genesys, successes then advantages', 'Digits'],
@@ -214,7 +217,7 @@
         ['(2d6,2d6)kh1 # Doubles-hunting pool', 'Still out of reach'],
         ['10d10 # One Roll Engine pool', 'Still out of reach'],
         '(d3,d5,d7,d14,d16,d24,d30) # Dungeon Crawl Classics dice chain',
-        '3d6ei # Burning Wheel, open-ended sixes',
+        '3d6@ei # Burning Wheel, open-ended sixes',
         '2d6@^2 # Every die squared',
         '(d20a)>=15?"Hit":"Miss" # Advantage on the whole roll',
         'x::=2d6, x>=10?"Strong":x>=7?"Weak":"Miss" # One roll, three bands'

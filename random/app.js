@@ -27,6 +27,7 @@
     notation: $('notation'), result: $('result'), rollBtn: $('rollBtn'),
     tabs: $('tabs'), explain: $('tab-explain'), details: $('tab-details'),
     reference: $('tab-reference'), saved: $('tab-saved'), vars: $('tab-vars'), toast: $('toast'),
+    tabhint: $('tabhint'),
     paneTools: $('paneTools'), drawer: $('drawerToggle'), refSide: $('refSide'),
     preview: $('preview'), shortcuts: $('shortcuts')
   };
@@ -41,9 +42,9 @@
   const DEFAULT_EXPR = '2d6';
   const LS_SAVED = 're.saved.v1';
   const LS_LAST = 're.last.v1';
-  const LS_DRAWER = 're.drawer.v1';
   const LS_VARS = 're.vars.v1';
   const LS_CATS = 're.cats.v1';
+  const LS_LANG = 're.lang.v2';
   const LS_SHUT = 're.cats.shut.v1';
 
   let state = {
@@ -51,9 +52,10 @@
     spans: [],         // spans actually painted (overlaps removed)
     error: null,
     log: [],           // [{roll, expanded}] newest first
-    activeTab: window.matchMedia('(min-width: 1000px)').matches ? 'explain' : 'reference',
+    activeTab: null,
     statsToken: 0,
     curRow: null,      // Explain row the caret last sat on
+    setOpen: null,     // which of the Preset tab's two boxes is open, if any
     hot: null, hotScope: null   // token currently hovered, and in which expression
   };
 
@@ -122,8 +124,8 @@
 
   /* Safari rate-limits replaceState to about a hundred calls per half minute,
      so this is only ever called on a roll, never on a keystroke. */
-  function syncURL() {
-    const e = el.ta.value.trim();
+  function syncURL(src) {
+    const e = String(src === undefined ? el.ta.value : src).trim();
     try {
       history.replaceState(null, '', e ? '#' + encodeURIComponent(e) : location.pathname);
     } catch (err) { /* file:// refuses replaceState */ }
@@ -188,7 +190,7 @@
       const pairs = (a) => (Array.isArray(a) ? a.filter(Array.isArray) : [])
         .map(d.n >= 2 ? row2 : row1)
         .filter((x) => titleOf(x.expr));
-      return { cats, vars: pairs(d.v), saved: pairs(d.s) };
+      return { cats, vars: pairs(d.v).map(reword), saved: pairs(d.s).map(reword) };
     } catch (e) { return null; }
   }
 
@@ -199,6 +201,12 @@
     if (!raw || raw.indexOf(SETUP_TAG) === 0 || raw.indexOf(PRESET_TAG) === 0) return null;
     try { return decodeURIComponent(raw); } catch (e) { return raw; }
   }
+
+  /* Two items are the same when they say the same thing in the same place. The
+     heading counts: a preset that files a roll you already have under a name of
+     its own is telling you something, and skipping it as a duplicate would drop
+     half of what the preset is for. */
+  const sameItem = (a, b) => a.expr === b.expr && (a.cat || '') === (b.cat || '');
 
   /* An import adds to what you already have rather than taking its place, and
      nothing is added without being picked out first — opening a link is the same
@@ -217,13 +225,13 @@
     saveCats(cats);
     for (const v of pick.vars) {
       const at = vars.findIndex((x) => nameOf(x.expr) === nameOf(v.expr));
-      if (at >= 0 && vars[at].expr === v.expr) continue;      // already exactly this
+      if (at >= 0 && sameItem(vars[at], v)) continue;         // already exactly this
       if (at >= 0) vars[at] = v; else vars.push(v);
       added.v.push(v.expr);
     }
     for (const x of pick.saved) {
       const at = saved.findIndex((y) => titleOf(y.expr) === titleOf(x.expr));
-      if (at >= 0 && saved[at].expr === x.expr) continue;
+      if (at >= 0 && sameItem(saved[at], x)) continue;
       if (at >= 0) saved[at] = x; else saved.push(x);
       added.s.push(x.expr);
     }
@@ -414,6 +422,26 @@
     store.write(LS_SAVED, loosen(loadSaved()));
   }
 
+  /* An expression written before `@` existed meant every element modifier a
+     member at a time, because that was the only reading there was. Rewriting it
+     once keeps it saying what it always said — `4d6>=5` counted four dice, and
+     goes on counting four dice as `4d6@>=5`.
+
+     Stored rolls are rewritten once and marked; anything arriving from outside
+     is rewritten as it arrives, since a link carries no idea of its age. The
+     rewrite is idempotent, so doing it twice costs nothing but time. */
+  const reword = (x) => Object.assign({}, x, { expr: E.migrate(x.expr) });
+
+  function migrateStored() {
+    if (store.read(LS_LANG, false)) return;
+    const v = store.read(LS_VARS, null), s = store.read(LS_SAVED, null);
+    if (Array.isArray(v)) store.write(LS_VARS, v.map(normalise).map(reword));
+    if (Array.isArray(s)) store.write(LS_SAVED, s.map(normalise).map(reword));
+    const last = store.read(LS_LAST, '');
+    if (last) store.write(LS_LAST, E.migrate(last));
+    store.write(LS_LANG, true);
+  }
+
   /* ------------------------------------------------------------- editing
      Everything that writes into the field types it the way a person would, so
      the browser keeps its own undo history and Ctrl+Z does what it should. */
@@ -490,7 +518,8 @@
     /* A chip names the item it stands for by where it is kept, so the bar can
        be cut into groups without the wiring having to count anything. */
     const rollChip = (r, i) =>
-      '<button class="sc roll" data-roll="' + i + '" title="' + esc(r.expr) + '">' +
+      '<button class="sc roll" data-roll="' + i + '" title="' + esc(r.expr) +
+      ' — click to roll, right-click or hold to put it in the field">' +
         titleHTML(r.expr) + '</button>';
     const varChip = (v) => {
       const body = bodyOf(v.expr);
@@ -561,16 +590,38 @@
       if (fold) { toggleShut(fold.getAttribute('data-fold')); renderShortcuts(); return; }
       const r = ev.target.closest('[data-roll]');
       if (!r) return;
+      if (held) { held = false; return; }      // the press has already loaded it
       const item = loadSaved()[+r.getAttribute('data-roll')];
-      if (!item) return;
-      typeInto(item.expr, true);
-      commitRoll();              // a bookmark is a roll, not a thing to load
+      if (item) commitRoll(item.expr);
     });
-    // the right button is the quick way to move by ten without a keyboard
+
+    /* The right button moves a number by ten, and loads a roll into the field
+       rather than throwing it. */
     el.shortcuts.addEventListener('contextmenu', (ev) => {
       const s = stepDelta(ev);
-      if (s) stepVar(s.b, s.by);
+      if (s) return stepVar(s.b, s.by);
+      const r = ev.target.closest('[data-roll]');
+      if (!r) return;
+      ev.preventDefault();
+      const item = loadSaved()[+r.getAttribute('data-roll')];
+      if (item) typeInto(item.expr, true);
     });
+
+    /* A long press is the right button on a screen that has none. The flag
+       stops the click that follows it from throwing what was just loaded. */
+    let held = false, timer = null;
+    const letGo = () => { clearTimeout(timer); timer = null; };
+    el.shortcuts.addEventListener('pointerdown', (ev) => {
+      const r = ev.target.closest('[data-roll]');
+      if (!r || ev.button) return;
+      timer = setTimeout(() => {
+        held = true;
+        const item = loadSaved()[+r.getAttribute('data-roll')];
+        if (item) typeInto(item.expr, true);
+      }, 500);
+    });
+    ['pointerup', 'pointercancel', 'pointerleave', 'pointermove']
+      .forEach((e) => el.shortcuts.addEventListener(e, letGo));
   }
 
   /* Where the line wraps, the field has to grow to hold it — and the <pre>
@@ -750,15 +801,39 @@
     });
   }
 
+  /** the words a roll could say, once it has said more than one of them */
+  function wordScore(roll) {
+    const words = roll.words || [], tally = roll.tally || {};
+    let landed = 0;
+    for (const w of words) landed += tally[w] || 0;
+    return (words.length < 2 || landed < 2) ? null : words;
+  }
+
   /* A roll that produces result types reads like a game score — every type the
      expression could produce, best to worst, so a critical that never turned up
      still shows its nought. */
   function scoreHTML(roll) {
     const poss = roll.possible || [];
-    if (!poss.length) return null;
     const m = roll.marks || {};
-    return '<span class="score">' + poss.map((k) =>
-      '<b class="' + k + '">' + (m[k] || 0) + '</b>').join('<i>-</i>') + '</span>';
+    if (poss.length) {
+      return '<span class="score">' + poss.map((k) =>
+        '<b class="' + k + '">' + (m[k] || 0) + '</b>').join('<i>-</i>') + '</span>';
+    }
+    const words = wordScore(roll);
+    if (!words) return null;
+    const tally = roll.tally || {};
+    return '<span class="score" title="' + esc(words.map((w) =>
+      w + ' ' + (tally[w] || 0)).join(', ')) + '">' + words.map((w) =>
+      '<b>' + (tally[w] || 0) + '</b>').join('<i>-</i>') + '</span>';
+  }
+
+  /** how a roll reads on a chart of words: the word it said, or the score it made */
+  function wordOutcome(roll) {
+    const words = wordScore(roll);
+    if (words) {
+      return words.map((w) => ((roll.tally || {})[w] || 0) + ' ' + w).join(' - ');
+    }
+    return roll.text || null;
   }
 
   /* The headline: a number, a score, or the word it landed on. A number and a
@@ -786,10 +861,11 @@
     const name = roll.label
       ? '<span class="ll">' + dieText(roll.label) + '</span>'
       : '<span class="lx">' + esc(roll.notation) + '</span>';
+    const opts = roll.diceCount > DENSITY.plain ? { plain: true } : null;
     return '<div class="line" data-open="' + idx + '" data-scope="' + scopeFor(roll.input) +
-      '" title="show the breakdown">' +
-      '<span class="lt">' + totalHTML(roll) + '</span>' + name +
-      '<span class="ldice">' + roll.sets[0].html(roll.diceCount > DENSITY.plain ? { plain: true } : null) + '</span>' +
+      '" title="show the breakdown">' + name +
+      '<span class="lt">' + totalHTML(roll) + '</span>' +
+      '<span class="ldice">' + roll.sets.map((s) => E.diceHTML(s, opts)).join('') + '</span>' +
       '<span class="lm">' + esc(roll.time) + '</span>' +
     '</div>';
   }
@@ -816,11 +892,22 @@
       rows = '<div class="setrow"><span class="body">' + roll.sets[0].html(opts) + '</span></div>';
     }
 
+    const outcome = (roll.outcome || []).length
+      ? '<div class="outcome">' + roll.outcome.map(esc).join('<span>&middot;</span>') + '</div>'
+      : '';
+
     let tally = '';
     if (roll.marks) {
       tally = '<div class="tally">' + markList(roll.marks)
         .map((t) => '<b>' + esc(t) + '</b>').join(' &middot; ') +
         (roll.numeric ? ' &rarr; ' + E.fmt(roll.total) : '') + '</div>';
+    } else {
+      const words = wordScore(roll);
+      if (words) {
+        tally = '<div class="tally words">' + words.map((w) =>
+          '<b>' + ((roll.tally || {})[w] || 0) + ' ' + esc(w) + '</b>')
+          .join('<i>&ndash;</i>') + '</div>';
+      }
     }
 
     const meta = [];
@@ -834,7 +921,7 @@
       '<div class="top">' +
         '<div class="total">' + totalHTML(roll) + '</div>' +
         '<div class="meta">' +
-          '<div class="expr">' + esc(roll.notation) + '</div>' +
+          '<div class="expr">' + paintExpr(roll.notation) + '</div>' +
           ((roll.defs || []).length
             ? '<div class="defs">' + roll.defs.map(esc).join('<span>&middot;</span>') + '</div>'
             : '') +
@@ -842,7 +929,7 @@
           '<div class="sub">' + meta.join('<span>&middot;</span>') + '</div>' +
         '</div>' +
       '</div>' +
-      '<div class="rows' + density + '">' + rows + '</div>' + tally +
+      '<div class="rows' + density + '">' + rows + '</div>' + outcome + tally +
     '</div>';
   }
 
@@ -859,9 +946,9 @@
     drawTrees(el.result);
   }
 
-  function makeRoll() {
+  function makeRoll(src) {
     let roll;
-    try { roll = E.roll(el.ta.value); }
+    try { roll = E.roll(src === undefined ? el.ta.value : src); }
     catch (e) { return null; }
     roll.time = new Date().toLocaleTimeString();
     return { roll, expanded: false };
@@ -876,13 +963,17 @@
   }
 
   /** Rolling only ever happens here: on Enter, or the Roll button. */
-  function commitRoll() {
-    if (state.error) { flashError(); return; }
-    const entry = makeRoll();
+  function commitRoll(src) {
+    // the field may be mid-edit and invalid while a bookmark beside it is not
+    if (src === undefined && state.error) { flashError(); return; }
+    const entry = makeRoll(src);
     if (!entry) { flashError(); return; }
     el.rollBtn.classList.remove('pulse');   // it has been rolled; it can stop asking
+    setTimeout(noteRoll, 0);                // and it belongs on the chart at once
+    // on a phone the field keeping focus means the keyboard covering the result
+    if (!wide.matches) el.ta.blur();
     state.log.unshift(entry);
-    syncURL();                 // the link in the bar is the roll you just made
+    syncURL(src);              // the link in the bar is the roll you just made
     if (state.log.length > LOG_MAX) state.log.length = LOG_MAX;
     renderResult();
     el.result.scrollTop = 0;
@@ -926,58 +1017,140 @@
         }
         started = performance.now();
       }
-      const t0 = performance.now();
-      do { st.run(SAMPLE.chunk); }
-      while (performance.now() - t0 < SAMPLE.burst && st.count() < SAMPLE.cap);
-
-      drawDetails(st.snapshot());
+      /* Parsing says an expression is well formed; only throwing it says it can
+         be thrown. Anything that gets this far and still fails belongs on the
+         screen — left uncaught it kills the timer and the chart says "rolling"
+         for ever, which is the most misleading thing it could say. */
+      try {
+        const t0 = performance.now();
+        do { st.run(SAMPLE.chunk); }
+        while (performance.now() - t0 < SAMPLE.burst && st.count() < SAMPLE.cap);
+        drawDetails(st.snapshot());
+      } catch (err) {
+        el.details.innerHTML = '<div class="muted">' + esc(err.message) + '</div>';
+        return;
+      }
       if (st.count() < SAMPLE.cap && performance.now() - started < SAMPLE.budget) {
         setTimeout(() => step(st, started), SAMPLE.gap);
       }
     }, 0);
   }
 
+  /* The last chart drawn, kept so a roll can put itself on it without setting
+     the whole run going again — the numbers have not changed, only the log. */
+  let lastSnap = null;
+
   function drawDetails(snap) {
+    lastSnap = snap;
     // past rolls of this very expression, newest first, so the last one stands out
-    const past = state.log.filter((e) => e.roll.notation === snap.notation && e.roll.numeric)
-      .map((e) => e.roll.total);
+    const mine = state.log.filter((e) => e.roll.notation === snap.notation);
+    const past = mine.filter((e) => e.roll.numeric).map((e) => e.roll.total);
+    const said = mine.map((e) => wordOutcome(e.roll)).filter(Boolean);
     el.details.innerHTML = snap.sections.map((sec) => {
-      const body = statsHTML(sec, sec.whole ? past : []);
+      const body = statsHTML(sec, sec.whole ? past : [], sec.whole ? said : []);
       if (!body) return '';
-      const head = sec.title
-        ? '<h4 class="stathead">' + esc(sec.title + (sec.times > 1 ? ' ×' + sec.times : '')) + '</h4>'
+      const name = (sec.whole && sec.scored && sec.title) ? 'all together' : sec.title;
+      const head = name
+        ? '<h4 class="stathead">' + esc(name + (sec.times > 1 ? ' ×' + sec.times : '')) + '</h4>'
         : '';
-      return head + body;
+      return '<div class="dsec">' + head + body + '</div>';
     }).join('') + '<div class="tailroom"></div>';
   }
 
+  /** a roll of what is being charted belongs on the chart at once */
+  function noteRoll() {
+    if (state.activeTab === 'details' && lastSnap) drawDetails(lastSnap);
+  }
+
+  /* ------------------------------------------------- reading a chart by hand
+     Hovering a bar answers the three questions worth asking about a value at
+     once — how often it, how often less, how often more — and lights the bars
+     each answer is counted from. Hovering one of the figures underneath lights
+     the bars that figure is about. */
+  function clearMarks(host) {
+    (host || el.details).querySelectorAll('.bar').forEach((x) =>
+      x.classList.remove('at', 'lo', 'hi'));
+    (host || el.details).querySelectorAll('.readout').forEach((x) => { x.textContent = ''; });
+  }
+
+  function markBars(sec, from, to, cls) {
+    sec.querySelectorAll('.bar').forEach((x) => {
+      const i = +x.getAttribute('data-i');
+      if (i >= from && i <= to) x.classList.add(cls);
+    });
+  }
+
+  function hoverBar(bar) {
+    const sec = bar.closest('.dsec');
+    clearMarks(sec);
+    const i = +bar.getAttribute('data-i');
+    const last = sec.querySelectorAll('.bar').length - 1;
+    if (i > 0) markBars(sec, 0, i - 1, 'lo');
+    if (i < last) markBars(sec, i + 1, last, 'hi');
+    bar.classList.add('at');
+    const pc = (a) => bar.getAttribute(a) + '%';
+    sec.querySelector('.readout').innerHTML =
+      '<b>' + esc(bar.getAttribute('data-of')) + '</b>' +
+      '<span class="at">' + pc('data-at') + ' exactly</span>' +
+      '<span class="lo">' + pc('data-lt') + ' below</span>' +
+      '<span class="hi">' + pc('data-gt') + ' above</span>';
+  }
+
+  function hoverStat(sv) {
+    const sec = sv.closest('.dsec');
+    clearMarks(sec);
+    const [from, to] = sv.getAttribute('data-marks').split('..').map(Number);
+    markBars(sec, from, to, 'at');
+    sec.querySelector('.readout').innerHTML =
+      '<b>' + esc(sv.querySelector('i').textContent + ' ' +
+        sv.textContent.slice(sv.querySelector('i').textContent.length)) + '</b>' +
+      '<span>' + esc(sv.getAttribute('data-say') || '') + '</span>';
+  }
+
+  function wireDetails() {
+    el.details.addEventListener('mouseover', (ev) => {
+      const bar = ev.target.closest('.bar');
+      if (bar) return hoverBar(bar);
+      const sv = ev.target.closest('.sv[data-marks]');
+      if (sv) return hoverStat(sv);
+      clearMarks();
+    });
+    el.details.addEventListener('mouseleave', () => clearMarks());
+  }
+
   /* --------------------------------------------------------------- words */
-  function wordHTML(s) {
+  function wordHTML(s, said) {
     const exact = s.exact && s.exact.words;
-    const shown = exact
-      ? s.words.filter((w) => exact.has(w)).concat(
-          Array.from(exact.keys()).filter((w) => s.words.indexOf(w) < 0))
-      : s.words;
+    const shown = exact ? Array.from(exact.keys()) : s.words;
     if (!shown.length) return '';
+    const log = {};
+    for (const w of (said || [])) log[w] = (log[w] || 0) + 1;
+    const last = (said || [])[0];
     const pOf = (w) => exact ? (exact.get(w) || 0) : ((s.tally[w] || 0) / Math.max(1, s.n));
     const peak = Math.max.apply(null, shown.map(pOf)) || 1;
     return '<div class="wordhist">' + shown.map((w) => {
-      const p = pOf(w), seen = (s.tally[w] || 0) / Math.max(1, s.n);
+      const p = pOf(w), seen = (s.tally[w] || 0) / Math.max(1, s.n), mine = log[w] || 0;
       return '<div class="wrow" title="' + esc(w) + ': ' + (p * 100).toFixed(2) + '%' +
-          (exact ? ' exact, ' + (seen * 100).toFixed(2) + '% over ' + s.n.toLocaleString() + ' rolls' : '') + '">' +
+          (exact ? ' exact, ' + (seen * 100).toFixed(2) + '% over ' + s.n.toLocaleString() + ' rolls' : '') +
+          (mine ? ', rolled ' + mine + (mine === 1 ? ' time' : ' times') + ' by you' : '') + '">' +
         '<span class="wname">' + esc(w) + '</span>' +
         '<span class="wbar"><i style="width:' + ((p / peak) * 100).toFixed(2) + '%"></i>' +
           (exact ? '<u style="left:' + ((seen / peak) * 100).toFixed(2) + '%"></u>' : '') +
         '</span>' +
-        '<span class="wpct">' + (p * 100).toFixed(1) + '%</span></div>';
+        '<span class="wpct">' + (p * 100).toFixed(1) + '%</span>' +
+        '<i class="wlog' + (mine ? ' on' : '') + (w === last ? ' last' : '') + '"></i></div>';
     }).join('') + '</div>';
   }
 
   /* --------------------------------------------------------------- numbers
      One bar per value while they will fit; past that each bar is a run of
      whole numbers, inclusive at both ends. Either way the first bar starts at
-     the smallest the expression can reach and the last ends at the largest,
-     so the axis never promises a value that cannot happen. */
+     the smallest the expression can reach and the last ends at the largest, so
+     the axis never promises a value that cannot happen.
+
+     Every overlay is measured in the same box as the bars, which is what the
+     inner layer is for: the chart is padded, and a band positioned against the
+     padded box would sit a few pixels wide of the bars it is describing. */
   function binning(lo, hi, whole) {
     if (!(hi > lo)) return { bins: 1, w: 1, lo, hi };
     if (whole) {
@@ -987,26 +1160,65 @@
     }
     return { bins: MAXBARS, w: (hi - lo) / MAXBARS, lo, hi };
   }
-  const binAt = (b, v) => Math.max(0, Math.min(b.bins - 1, Math.floor((v - b.lo) / b.w)));
-  /* where a value sits across the chart: the middle of its own bar, and the
-     two edges of it, which is what a band between two values spans */
-  const mid = (b, v) => ((binAt(b, v) + 0.5) / b.bins) * 100;
-  const from = (b, v) => (binAt(b, v) / b.bins) * 100;
-  const to = (b, v) => ((binAt(b, v) + 1) / b.bins) * 100;
+  const barOf = (b, v) => Math.max(0, Math.min(b.bins - 1, Math.floor((v - b.lo) / b.w)));
+  /* Where a value sits across the chart. A whole number sits in the middle of
+     its own cell, so a mean of 3.5 lands on the line between 3 and 4 rather
+     than inside one of them. The two edges are the bar's, since a band between
+     two values has to end where a bar does. */
+  const pctOf = (b, v) =>
+    Math.max(0, Math.min(100, ((v - b.lo + 0.5) / (b.w * b.bins)) * 100));
+  const barFrom = (b, v) => (barOf(b, v) / b.bins) * 100;
+  const barTo = (b, v) => ((barOf(b, v) + 1) / b.bins) * 100;
 
-  function statsHTML(s, past) {
+  /** what one bar stands for: a value, or an inclusive run of them */
+  function barLabel(b, i, whole) {
+    const a = b.lo + i * b.w;
+    if (!whole) return E.fmt(Math.round(a * 100) / 100) + '–' +
+      E.fmt(Math.round((a + b.w) * 100) / 100);
+    const z = Math.min(a + b.w - 1, b.hi);
+    return b.w === 1 ? E.fmt(a) : E.fmt(a) + '–' + E.fmt(z);
+  }
+
+  /* The axis names as many bars as it can without the labels touching. The
+     first and the last are always named, since between them they say what the
+     expression can reach at all. */
+  function axisHTML(b, whole) {
+    const most = Math.max(2, Math.min(b.bins, 10));
+    const step = Math.max(1, Math.ceil(b.bins / most));
+    const at = new Set([0, b.bins - 1]);
+    for (let i = step; i < b.bins - 1; i += step) at.add(i);
+    // a label crowding the last one reads worse than one label fewer
+    if (b.bins > 2 && at.has(b.bins - 1 - (b.bins - 1) % step) &&
+        (b.bins - 1) % step && (b.bins - 1) % step < step / 2) {
+      at.delete(b.bins - 1 - (b.bins - 1) % step);
+    }
+    let out = '';
+    for (let i = 0; i < b.bins; i++) {
+      out += '<span' + (at.has(i) ? '>' + esc(barLabel(b, i, whole)) : ' class="blank">') + '</span>';
+    }
+    return '<div class="histticks">' + out + '</div>';
+  }
+
+  function statsHTML(s, past, said) {
     if (!s.words.length && !s.numeric) return '';
     const parts = [];
 
     if (s.words.length) {
-      parts.push(wordHTML(s));
+      if (s.each && !s.title) {
+        const per = s.each.n / Math.max(1, s.n);
+        const one = Number.isInteger(per);
+        parts.push('<div class="subhead">' + (one ? 'each of the ' + per : 'each member') + '</div>');
+        parts.push(wordHTML({ words: s.each.words, tally: s.each.tally, n: s.each.n,
+          exact: (s.exact && s.exact.each) ? { words: s.exact.each } : null }, []));
+        parts.push('<div class="subhead">' + (one ? 'all ' + per + ' together' : 'all together') + '</div>');
+      }
+      parts.push(wordHTML(s, said));
       if (!s.numeric) {
-        parts.push(caption(s, 'every result it can give'));
+        parts.push(legend(s, said || [], s.exact || null));
         return parts.join('');
       }
-      parts.push('<div class="histaxis"><span>&nbsp;</span><span>and ' +
-        s.numeric.toLocaleString() + ' of ' + s.n.toLocaleString() +
-        ' came to a number</span></div>');
+      parts.push('<div class="histaxis"><span>' + s.numeric.toLocaleString() +
+        ' of ' + s.n.toLocaleString() + ' came to a number</span></div>');
     }
 
     const ex = (s.exact && s.exact.pmf) ? s.exact : null;
@@ -1020,25 +1232,25 @@
 
     // what is known, and what merely turned up
     const want = new Array(b.bins).fill(0);
-    if (ex) for (const [v, p] of ex.pmf) want[binAt(b, v)] += p;
+    if (ex) for (const [v, p] of ex.pmf) want[barOf(b, v)] += p;
     const seen = new Array(b.bins).fill(0);
-    for (const t of s.totals) seen[binAt(b, t)]++;
+    for (const t of s.totals) seen[barOf(b, t)]++;
     const seenP = seen.map((c) => c / Math.max(1, s.numeric));
 
     const bars = ex ? want : seenP;
     const peak = Math.max.apply(null, bars) || 1;
-    const label = (i) => {
-      const a = b.lo + i * b.w;
-      if (!whole) return E.fmt(Math.round(a * 100) / 100) + '–' +
-        E.fmt(Math.round((a + b.w) * 100) / 100);
-      const z = Math.min(a + b.w - 1, b.hi);
-      return b.w === 1 ? E.fmt(a) : E.fmt(a) + '–' + E.fmt(z);
-    };
-    const barHTML = bars.map((p, i) =>
-      '<div class="bar' + (p ? '' : ' empty') + '" style="height:' +
-      Math.max(p > 0 ? 2 : 1, (p / peak) * 100).toFixed(2) + '%" title="' + label(i) + ': ' +
-      (p * 100).toFixed(2) + '%' +
-      (ex ? ' exact, ' + (seenP[i] * 100).toFixed(2) + '% rolled' : '') + '"></div>').join('');
+    /* Each bar carries what it is worth and what lies either side of it, so
+       hovering one can answer all three without going back to the numbers. */
+    let below = 0;
+    const barHTML = bars.map((p, i) => {
+      const under = below;
+      below += p;
+      return '<div class="bar' + (p ? '' : ' empty') + '" data-i="' + i +
+        '" data-at="' + (p * 100).toFixed(2) + '" data-lt="' + (under * 100).toFixed(2) +
+        '" data-gt="' + (Math.max(0, 1 - under - p) * 100).toFixed(2) +
+        '" data-of="' + esc(barLabel(b, i, whole)) + '" style="height:' +
+        Math.max(p > 0 ? 2 : 1, (p / peak) * 100).toFixed(2) + '%"></div>';
+    }).join('');
 
     // the run, laid over the worked-out answer as a second opinion
     const overlay = ex && s.numeric ? '<svg class="overlay" viewBox="0 0 ' + b.bins +
@@ -1047,50 +1259,76 @@
         .join(' ') + '"/></svg>' : '';
 
     const q = ex || s;
-    const band = (a, z, cls) => '<div class="' + cls + '" style="left:' + from(b, a).toFixed(2) +
-      '%; right:' + (100 - to(b, z)).toFixed(2) + '%"></div>';
-    // a label near the right edge would run off it, so it goes the other way
-    const line = (v, cls, txt) => {
-      const x = mid(b, v);
-      return '<div class="' + cls + (x > 66 ? ' flip' : '') + '" style="left:' + x.toFixed(2) +
-        '%"><i>' + esc(txt) + '</i></div>';
-    };
+    const band = (a, z, cls) => '<div class="' + cls + '" style="left:' + barFrom(b, a).toFixed(2) +
+      '%; right:' + (100 - barTo(b, z)).toFixed(2) + '%"></div>';
+    const line = (v, cls) =>
+      '<div class="' + cls + '" style="left:' + pctOf(b, v).toFixed(2) + '%"></div>';
     const ticks = past.map((t, i) =>
       '<div class="rolltick' + (i === 0 ? ' last' : '') + '" style="left:' +
-      mid(b, t).toFixed(2) + '%" title="rolled ' + E.fmt(t) + '"></div>').join('');
+      pctOf(b, t).toFixed(2) + '%" title="rolled ' + E.fmt(t) + '"></div>').join('');
+
+    /* A statistic and the bars it is about: the extremes and the middle are one
+       bar each, and a percentile is the slice it cuts off. */
+    const span = (a, z) => a + '..' + z;
+    const marks = {
+      min: span(0, 0), max: span(b.bins - 1, b.bins - 1),
+      median: span(barOf(b, q.median), barOf(b, q.median)),
+      mean: span(barOf(b, q.mean), barOf(b, q.mean)),
+      p10: span(0, barOf(b, q.p10)), p25: span(0, barOf(b, q.p25)),
+      p75: span(barOf(b, q.p75), b.bins - 1), p90: span(barOf(b, q.p90), b.bins - 1)
+    };
 
     parts.push(
       '<div class="chart">' +
-        band(q.p10, q.p90, 'band wide') + band(q.p25, q.p75, 'band') +
-        '<div class="hist">' + barHTML + '</div>' + overlay +
-        line(q.median, 'mline', 'median ' + E.fmt(q.median)) +
-        line(q.mean, 'aline', 'mean ' + q.mean.toFixed(2)) +
-        ticks +
+        '<div class="hist">' + barHTML + '</div>' +
+        '<div class="layer">' +
+          band(q.p10, q.p90, 'band wide') + band(q.p25, q.p75, 'band') +
+          overlay + line(q.median, 'mline') + line(q.mean, 'aline') + ticks +
+        '</div>' +
       '</div>' +
-      '<div class="histaxis"><span>' + E.fmt(lo) + '</span>' +
-        '<span>' + (b.w > 1 ? E.fmt(b.w) + ' per bar' : (whole ? 'one bar each' : '')) + '</span>' +
-        '<span>' + E.fmt(hi) + '</span></div>' +
+      axisHTML(b, whole) +
+      '<div class="readout"></div>' +
       '<div class="statline">' +
-        chip('min', E.fmt(q.min)) + chip('10%', E.fmt(q.p10)) + chip('25%', E.fmt(q.p25)) +
-        chip('median', E.fmt(q.median), 'med') + chip('mean', q.mean.toFixed(2), 'avg') +
-        chip('75%', E.fmt(q.p75)) + chip('90%', E.fmt(q.p90)) + chip('max', E.fmt(q.max)) +
+        chip('min', E.fmt(q.min), '', marks.min) + chip('10%', E.fmt(q.p10), '', marks.p10) +
+        chip('25%', E.fmt(q.p25), '', marks.p25) +
+        chip('median', E.fmt(q.median), 'med', marks.median) +
+        chip('mean', q.mean.toFixed(2), 'avg', marks.mean) +
+        chip('75%', E.fmt(q.p75), '', marks.p75) + chip('90%', E.fmt(q.p90), '', marks.p90) +
+        chip('max', E.fmt(q.max), '', marks.max) +
       '</div>' +
-      caption(s, past.length
-        ? past.length + (past.length === 1 ? ' roll' : ' rolls') + ' of this in the log'
-        : ''));
+      legend(s, past, ex));
     return parts.join('');
   }
 
-  const chip = (k, v, cls) =>
-    '<span class="sv' + (cls ? ' ' + cls : '') + '"><i>' + esc(k) + '</i>' + esc(v) + '</span>';
+  /* Each figure says what it means when it is hovered, since the shorthand
+     over it is only a name. */
+  const SAYS = {
+    min: 'the least it can come to',
+    max: 'the most it can come to',
+    median: 'half of all rolls land here or below',
+    mean: 'the average of every roll',
+    '10%': 'one roll in ten lands here or below',
+    '25%': 'one roll in four lands here or below',
+    '75%': 'one roll in four lands here or above',
+    '90%': 'one roll in ten lands here or above'
+  };
 
-  /** how the chart was arrived at, and anything else worth a line under it */
-  const caption = (s, extra) =>
-    '<div class="histnote">' +
-      (s.exact ? '<b>worked out exactly</b>, checked against ' : '') +
-      s.n.toLocaleString() + (s.n === 1 ? ' roll' : ' rolls') +
-      (extra ? ' &middot; ' + esc(extra) : '') +
-    '</div>';
+  const chip = (k, v, cls, marks) =>
+    '<span class="sv' + (cls ? ' ' + cls : '') + '"' + (marks ? ' data-marks="' + marks + '"' : '') +
+    ' data-say="' + esc(SAYS[k] || '') + '"><i>' + esc(k) + '</i>' + esc(v) + '</span>';
+
+  /* What each thing on the chart is, in the colour it is drawn in — named for
+     what it shows rather than for how it was arrived at. */
+  function legend(s, past, ex) {
+    const rolls = s.n.toLocaleString() + (s.n === 1 ? ' roll' : ' rolls');
+    const keys = [
+      ['bars', ex ? 'exact distribution' : 'sampled distribution'],
+      [ex ? 'run' : 'count', rolls],
+      past.length ? ['log', past.length + ' in your log'] : null
+    ].filter(Boolean);
+    return '<div class="histnote">' + keys.map(([cls, text]) =>
+      '<span class="key ' + cls + '">' + esc(text) + '</span>').join('') + '</div>';
+  }
   /* ============================================================ reference */
   /** the dice gallery: every size that has a solid of its own, drawn */
   function galleryHTML() {
@@ -1102,7 +1340,7 @@
           '<span class="dieval">D' + n + '</span>' +
         '</span></div>';
     }).join('');
-    return '<div class="refgroup"><h3>The dice</h3><div class="refdice">' + dice + '</div></div>';
+    return '<div class="refgroup"><h3>Common dice</h3><div class="refdice">' + dice + '</div></div>';
   }
 
   /* '4d6~kh3' -> '4d6' faded, 'kh3' at full strength. Odd segments are the
@@ -1124,6 +1362,20 @@
       }
     } catch (e) { /* an example that does not parse keeps the plain colour */ }
     return cls;
+  }
+
+  /** any expression in the colours the editor gives its own */
+  function paintExpr(src) {
+    const cls = tokenClasses(src);
+    let html = '', i = 0;
+    while (i < src.length) {
+      const c = cls[i];
+      let j = i;
+      while (j < src.length && cls[j] === c) j++;
+      html += '<i class="' + (c || 't-op') + '">' + esc(src.slice(i, j)) + '</i>';
+      i = j;
+    }
+    return html;
   }
 
   function snippet(code) {
@@ -1175,8 +1427,9 @@
         return '<div class="refrow" title="' + esc(tip) + '"><code' + tag + '>' + s.html +
           '</code><span>' + esc(desc) + '</span></div>';
       }).join('') + '</div>').join('') +
-      '<div class="refgroup"><a class="refdoc" href="README.md" target="_blank" ' +
-        'rel="noopener">Full rules in the README &rarr;</a>' +
+      '<div class="refgroup"><a class="refdoc" target="_blank" rel="noopener" ' +
+        'href="https://github.com/Jacykow/Jacykow.github.io/blob/main/random/README.md">' +
+        'Full rules in the README &rarr;</a>' +
         '<div class="refrow"><span>Every rule set out at length: the type model, ' +
         'what each modifier needs, and how to build a whole setup.</span></div></div></div>';
 
@@ -1407,20 +1660,9 @@
      A variable and a saved roll are the same thing — an expression named by
      its own label — so one pair of functions draws and wires both. All that
      differs is where they are kept and what clicking the name does. */
-  /* Categories belong to neither list, so the same sentence explains them in
-     both. */
-  const CAT_HINT = ' Categories are shared with the other list. They group the ' +
-    'shortcuts under the expression, where a category can be folded away; drag ' +
-    'something by its name to put it under another.';
-
   const LISTS = {
     var: {
       pane: 'vars', add: '+ add a variable',
-      hint: 'A variable holds an expression and is worked out again at every occurrence. ' +
-        'It is named by the <code>#&nbsp;name</code> at its end, and its name can only use ' +
-        'letters and _. Inside an expression, <code>atk:=d20+5</code> as its own item sets ' +
-        'one for that roll alone, and <code>atk::=d20+5</code> rolls it once however often ' +
-        'it is mentioned.' + CAT_HINT,
       placeholder: 'd20+5 # name',
       nameHint: 'put this name into the expression',
       load: loadVars,
@@ -1430,9 +1672,6 @@
     },
     saved: {
       pane: 'saved', add: '+ add a roll',
-      hint: 'A roll is an expression named by the <code>#&nbsp;name</code> at its end. ' +
-        'Save the one you are editing with the Save button, or ' +
-        '<kbd>Ctrl</kbd>+<kbd>S</kbd>.' + CAT_HINT,
       placeholder: '4d6dl1 # name',
       nameHint: 'put this roll into the expression',
       load: loadSaved,
@@ -1465,6 +1704,17 @@
     '</div>';
   }
 
+  const plural = (n, one) => n + ' ' + one + (n === 1 ? '' : 's');
+
+  /** what a heading holds, counted across both lists, since it belongs to both */
+  function catCount(cat) {
+    const r = loadSaved().filter((x) => (x.cat || '') === cat).length;
+    const v = loadVars().filter((x) => (x.cat || '') === cat).length;
+    if (!r && !v) return 'empty';
+    return [r ? plural(r, 'roll') : '', v ? plural(v, 'variable') : '']
+      .filter(Boolean).join(', ');
+  }
+
   /** the heading a group is drawn under; the loose ones get a plain rule */
   function catHTML(cat) {
     if (!cat) {
@@ -1478,6 +1728,7 @@
         'title="drag to reorder — what is in it comes too">&#10303;</span>' +
       '<input class="cname" value="' + esc(cat) + '" spellcheck="false" ' +
         'title="rename this category in both lists">' +
+      '<span class="ccount">' + esc(catCount(cat)) + '</span>' +
     '</div>';
   }
 
@@ -1494,8 +1745,7 @@
         rows.map((r) => rowHTML(kind, r[0], r[1])).join('') + '</div>';
     }).join('');
 
-    host.innerHTML =
-      '<div class="varhint">' + L.hint + '</div>' + body +
+    host.innerHTML = body +
       '<div class="listend">' +
         '<button class="varadd" data-add="1">' + esc(L.add) + '</button>' +
         '<button class="varadd" data-addcat="1">+ add a category</button>' +
@@ -1719,28 +1969,38 @@
   const renderSaved = () => renderList('saved');
 
   /* The label names it, so there is nothing to ask for — and nothing that can
-     drift out of step with what the expression actually says. */
+     drift out of step with what the expression actually says. Not having one
+     is no reason to refuse: an unnamed roll is `roll 1`, then `roll 2`, and
+     the name is a field in the list like any other. */
+  function autoName(expr) {
+    const taken = loadSaved().map((x) => titleOf(x.expr));
+    let n = 1;
+    while (taken.indexOf('roll ' + n) >= 0) n++;
+    return expr + ' # roll ' + n;
+  }
+
+  /* Saying "saved" and leaving it at that asks you to take it on trust. Showing
+     the row it became says the same thing and shows where it went. */
+  function revealSaved(expr) {
+    switchTab('saved');
+    const at = loadSaved().findIndex((x) => x.expr === expr);
+    const row = el.saved.querySelector('.lrow[data-i="' + at + '"]');
+    if (!row) return;
+    row.scrollIntoView({ block: 'nearest' });
+    row.classList.remove('fresh');
+    void row.offsetWidth;                      // so a second save flashes again
+    row.classList.add('fresh');
+  }
+
   function saveCurrent() {
-    const expr = el.ta.value.trim();
+    let expr = el.ta.value.trim();
     if (!expr) return;
-    if (!titleOf(expr)) {
-      toast('name it first — add # a name to the end');
-      return;
-    }
+    if (!titleOf(expr)) expr = autoName(expr);
     const items = loadSaved().filter((x) => titleOf(x.expr) !== titleOf(expr));
     items.unshift({ expr, mark: false });
     store.write(LS_SAVED, items.slice(0, 60));
     renderSaved(); renderShortcuts();
-    switchTab('saved');
-    toast('saved');
-  }
-
-  /* =============================================================== drawer */
-  function setDrawer(collapsed) {
-    el.paneTools.classList.toggle('collapsed', collapsed);
-    el.drawer.setAttribute('aria-expanded', String(!collapsed));
-    el.drawer.setAttribute('aria-label', collapsed ? 'Expand panel' : 'Collapse panel');
-    store.write(LS_DRAWER, collapsed);
+    revealSaved(expr);
   }
 
   /* ------------------------------------------------------ what is stored
@@ -1793,19 +2053,21 @@
     const link = setupLink();
     const back = lastImport();
     $('tab-setup').innerHTML =
-      '<div class="varhint">Your saved rolls and variables together, kept in this ' +
-      'browser between visits. The link below carries them somewhere else: open it there, ' +
-      'or paste one here to look it over first. A ready-made preset has a short link of ' +
-      'its own, since both ends already have it — take one with its name, or copy that ' +
-      'link with the button beside it. The expression link in the top bar is a ' +
-      'different thing — it holds only the roll you last made.</div>' +
+      /* The two boxes are big and wanted rarely, so they stay shut until asked
+         for. Which one is open outlives a redraw, or opening one would close it
+         again the moment the lists were drawn afresh. */
       '<div class="setrowb"><label>Yours</label>' +
-        '<textarea class="setbox" id="setOut" readonly rows="2">' + esc(link) + '</textarea>' +
-        '<button class="varadd" id="setCopy">export</button></div>' +
-      '<div class="setrowb"><label>Paste one</label>' +
-        '<textarea class="setbox" id="setIn" rows="2" spellcheck="false" ' +
-          'placeholder="paste a link here"></textarea>' +
-        '<button class="varadd" id="setLoad">import</button></div>' +
+        '<button class="varadd" id="setExport">export</button>' +
+        '<button class="varadd" id="setImport">import</button></div>' +
+      (state.setOpen === 'out'
+        ? '<div class="setrowb"><label>Link</label>' +
+          '<textarea class="setbox" id="setOut" readonly rows="2">' + esc(link) + '</textarea>' +
+          '<button class="varadd" id="setCopy">copy</button></div>' : '') +
+      (state.setOpen === 'in'
+        ? '<div class="setrowb"><label>Paste one</label>' +
+          '<textarea class="setbox" id="setIn" rows="2" spellcheck="false" ' +
+            'placeholder="paste a link here"></textarea>' +
+          '<button class="varadd" id="setLoad">load</button></div>' : '') +
       '<div class="setrowb"><label>Or take one</label>' +
         '<div class="presets">' + PRESETS.map((x, i) => {
           const take = '<button class="varadd" data-preset="' + i + '" title="' +
@@ -1822,8 +2084,18 @@
         '</button>' : '') +
       '<div class="tailroom"></div>';
 
-    $('setCopy').addEventListener('click', () => copy(link, 'link copied', 'could not copy'));
-    $('setLoad').addEventListener('click', () => {
+    const open = (which) => {
+      state.setOpen = state.setOpen === which ? null : which;
+      renderSetup();
+      const box = $(which === 'out' ? 'setOut' : 'setIn');
+      if (box) { box.focus(); if (which === 'out') box.select(); }
+    };
+    $('setExport').addEventListener('click', () => open('out'));
+    $('setImport').addEventListener('click', () => open('in'));
+    if ($('setCopy')) {
+      $('setCopy').addEventListener('click', () => copy(link, 'link copied', 'could not copy'));
+    }
+    if ($('setLoad')) $('setLoad').addEventListener('click', () => {
       const st = readSetup($('setIn').value);
       if (!st || (!st.vars.length && !st.saved.length)) { toast('that is not a preset link'); return; }
       pickDialog('add', st);
@@ -1853,7 +2125,7 @@
     const key = (x) => kind === 'v' ? nameOf(x.expr) : titleOf(x.expr);
     const match = mine.find((x) => key(x) === key(item));
     if (!match) return 'new';
-    return match.expr === item.expr ? 'same' : 'update';
+    return sameItem(match, item) ? 'same' : 'update';
   }
 
   /* One dialog for both directions: adding what a link holds, and taking back
@@ -1892,7 +2164,7 @@
     const shut = () => host.remove();
     const done = (n, verb) => {
       shut();
-      if ($('setIn')) $('setIn').value = '';
+      state.setOpen = null;
       renderSetup();
       onInput();
       toast(n ? n + ' ' + verb : 'nothing ' + verb);
@@ -1911,9 +2183,38 @@
     });
   }
 
-  /* ================================================================= tabs */
+  /* ================================================================= tabs
+     A tab is open or the drawer is shut, and there is no third state: pressing
+     the tab that is already open shuts it, which makes the way back to a taller
+     result the button you are already pointing at. Nothing is open on arrival.
+
+     One line under the tabs says what the open tab is for. They are written
+     together so that they read in one voice and so that a tab cannot arrive
+     without one — the panes themselves carry no prose. */
+  const TAB_HINT = {
+    reference: 'Every piece of the notation, a line each — click one to write it into ' +
+      'the expression.',
+    explain: 'What the expression says, a token at a time — click a row to select that ' +
+      'token in the field.',
+    details: 'What the expression can come to: worked out exactly where its shape allows, ' +
+      'and thrown a great many times where it does not.',
+    vars: 'A variable holds an expression, is named by the <code>#&nbsp;name</code> at its ' +
+      'end, and is worked out afresh wherever its name appears.',
+    saved: 'A roll is an expression named by the <code>#&nbsp;name</code> at its end — save ' +
+      'the one you are editing with Save, or <kbd>Ctrl</kbd>+<kbd>S</kbd>.',
+    setup: 'Your rolls and variables together, kept in this browser; the link below ' +
+      'carries them to another one, and a preset brings a whole game at once.'
+  };
+
+  let lastTab = wide.matches ? 'explain' : 'reference';
+
   function switchTab(name) {
-    state.activeTab = name;
+    state.activeTab = name || null;
+    if (name) lastTab = name;
+    el.paneTools.classList.toggle('collapsed', !name);
+    el.drawer.setAttribute('aria-expanded', String(!!name));
+    el.drawer.setAttribute('aria-label', name ? 'Collapse panel' : 'Expand panel');
+    el.tabhint.innerHTML = TAB_HINT[name] || '';
     el.tabs.querySelectorAll('button').forEach((b) =>
       b.classList.toggle('on', b.getAttribute('data-tab') === name));
     ['reference', 'explain', 'details', 'vars', 'saved', 'setup'].forEach((n) =>
@@ -1997,15 +2298,17 @@
 
   /* ================================================================ wiring */
   function init() {
+    migrateStored();
     renderReference();
     renderSaved();
     pushVars(loadVars());
     renderVars();
     wireLists();
+    wireDetails();
     renderShortcuts();
     wireShortcuts();
     renderSetup();
-    switchTab(state.activeTab);   // on a phone that is the reference, not Explain
+    switchTab(null);              // the tools open when you go looking for them
 
     // a setup link is adopted whole; anything else in the bar is an expression
     const fromLink = readSetup();
@@ -2025,7 +2328,10 @@
 
     // it is not obvious that nothing rolls by itself, so the button says so
     el.rollBtn.classList.add('pulse');
-    el.rollBtn.addEventListener('click', () => { commitRoll(); el.ta.focus(); });
+    el.rollBtn.addEventListener('click', () => {
+      commitRoll();
+      if (wide.matches) el.ta.focus();
+    });
 
     el.wrap.addEventListener('mousemove', (ev) =>
       setHot(spanAtPoint(ev.clientX, ev.clientY), el.wrap.getAttribute('data-scope')));
@@ -2039,8 +2345,9 @@
       renderReference();
       growEditor();
       renderPreview();
-      if (!wide.matches && state.activeTab === 'reference') switchTab('explain');
-      else if (wide.matches && state.activeTab === 'reference') switchTab('explain');
+      // the reference has a rail of its own on a wide screen, so its tab goes
+      if (wide.matches && state.activeTab === 'reference') switchTab('explain');
+      if (wide.matches && lastTab === 'reference') lastTab = 'explain';
     });
 
     el.result.addEventListener('click', (ev) => {
@@ -2074,15 +2381,14 @@
     $('btnUndo').addEventListener('click', () => editUndo('undo'));
     $('btnRedo').addEventListener('click', () => editUndo('redo'));
 
-    setDrawer(store.read(LS_DRAWER, false) === true);
     el.drawer.addEventListener('click', () =>
-      setDrawer(!el.paneTools.classList.contains('collapsed')));
+      switchTab(state.activeTab ? null : lastTab));
 
     el.tabs.addEventListener('click', (ev) => {
       const b = ev.target.closest('button[data-tab]');
       if (!b) return;
-      setDrawer(false);                        // tapping a tab always opens the drawer
-      switchTab(b.getAttribute('data-tab'));
+      const name = b.getAttribute('data-tab');
+      switchTab(name === state.activeTab ? null : name);
     });
 
     // only a person can cause this: replaceState never fires it
@@ -2101,7 +2407,8 @@
     });
 
     onInput();
-    el.ta.focus();
+    // a phone opening on a keyboard would hide most of what there is to see
+    if (wide.matches) el.ta.focus();
     el.ta.setSelectionRange(el.ta.value.length, el.ta.value.length);
     if (fromLink && (fromLink.vars.length || fromLink.saved.length)) {
       const n = addSetup(fromLink);

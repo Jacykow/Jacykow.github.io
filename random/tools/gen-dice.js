@@ -250,7 +250,18 @@ function unit(V) {
 
 /* Fixed camera: unit sphere maps to the box, aimed at the origin. */
 const SCALE = (BOX - MARGIN * 2) / 2;
-const proj = (p) => [BOX / 2 + p[0] * SCALE, BOX / 2 - p[1] * SCALE];
+const project = (p) => [BOX / 2 + p[0] * SCALE, BOX / 2 - p[1] * SCALE];
+
+/** the centre of area of a closed outline, which is where it looks centred */
+function outlineCentre(pts) {
+  let a = 0, cx = 0, cy = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i], q = pts[(i + 1) % pts.length];
+    const f = p[0] * q[1] - q[0] * p[1];
+    a += f; cx += (p[0] + q[0]) * f; cy += (p[1] + q[1]) * f;
+  }
+  return Math.abs(a) < 1e-9 ? [BOX / 2, BOX / 2] : [cx / (3 * a), cy / (3 * a)];
+}
 
 const spinY = (v, t) => [v[0] * Math.cos(t) + v[2] * Math.sin(t), v[1],
                          -v[0] * Math.sin(t) + v[2] * Math.cos(t)];
@@ -318,6 +329,12 @@ function build(name, rawVerts, opts) {
   //    so apparent size comes purely from the solid's own dimensions
   const visible = F.filter((f) => f.nr[2] > 0.001);
   visible.sort((a, b) => a.c[2] - b.c[2]);
+
+  const flat = [].concat.apply([], visible.map((f) => f.pts.map(project)));
+  const centre = outlineCentre(convexHull2(flat));
+  const dx = BOX / 2 - centre[0], dy = BOX / 2 - centre[1];
+  const proj = (p) => { const q = project(p); return [q[0] + dx, q[1] + dy]; };
+
   const hull = convexHull2([].concat.apply([], visible.map((f) => f.pts.map(proj))));
 
   const shade = (nr) => (0.05 + 0.34 * Math.pow(Math.max(0, dot(nr, LIGHT)), 0.75)).toFixed(3);
@@ -357,6 +374,8 @@ const SHAPES = [
   build('d2', prism(28, 0.16), { restSides: 28 }),
   // The d4 is turned a further 60 degrees so a base corner faces the camera:
   // that puts all three ground vertices along the bottom, apex clear above.
+  /* A triangle standing on its base reads as sitting low, so it is lifted to
+     where its weight looks centred, and made a little smaller to have room. */
   build('d4', tetrahedron(), { yaw: 60 }),
   build('d5', prism(5, BARREL), { restSides: 4 }),
   build('d6', cube(), {}),

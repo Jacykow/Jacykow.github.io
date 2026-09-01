@@ -25,7 +25,7 @@ node random/tools/splice.js  # regenerate the dice art into index.html + style.c
 | `index.html`, `style.css` | markup and theme. Both contain a **generated** dice-art block. |
 | `tools/gen-dice.js`, `tools/splice.js` | the generator behind that block. |
 | `tools/check.js` | everything worth checking before committing an engine change. |
-| `presets.js` | ready-made rolls per game, pure data. `PRESETS[0]` is what a fresh browser gets. |
+| `presets.js` | ready-made rolls per game, pure data. `PRESETS[0]` is what a fresh browser gets, and the one preset with no link button — there is nobody to send it to. |
 | `reference.js` | the reference panel, pure data: example, description, form, hover note. |
 | `SYSTEMS.md` | what each game's dice ask for, and which of them the notation cannot yet say. Read it before adding a preset. |
 
@@ -93,11 +93,26 @@ name is drawn once — on its subtotal bracket — and never twice. A `{name}` i
 the label is the identifier expressions use when that differs from the title;
 `<dN>` in a title draws the die (`nameOf` / `titleOf` / `titleHTML`).
 
+**A collapsed line shows what was thrown, not what was made of it** (`diceHTML`).
+It walks a value the way `countDice` does — a named binding is not thrown twice,
+and a choice threw its condition before it took its branch — and carries the
+state from above, so a dropped die is still struck out on one line.
+
 **Details splits a roll into its repeated pieces** (`unitOf`) and summarises each,
 then the total — but only where the pieces are independent, since keep, drop and
-advantage couple them. What the total can be is every way of choosing one from
-each piece, which multiplies out fast, so past `LIMIT.combos` it falls back to
-what the run turned up.
+advantage couple them. A choice is several pieces only when it is marked `@`:
+`2d20@=20?crit:…` is that question put to each die, while `2d20=20?crit:…` puts
+it to the total once and is one piece. Splitting takes the marker off (`unEach`),
+since a lone member has no members of its own. What the total can be is every way
+of choosing one from each piece, which multiplies out fast, so past
+`LIMIT.combos` it falls back to what the run turned up.
+
+**Several answers to one question are counted, not ordered.** Ten coins land in a
+thousand orders and in eleven scores, so a set of words is reported as
+`6 heads - 4 tails` — by the run (`scoreKey`) and by the solver alike, where
+`memberOdds` gives one member's odds and how many members there are and
+`scoreDist` convolves them. Combinations are for answers to *different*
+questions, and are skipped once a score has collapsed the order.
 
 **Details says what could happen, not only what did.** `outcomes()` reads the
 tree rather than the run: `wordsOf` lists every word the result could be, in
@@ -145,6 +160,16 @@ sampler per section that can be filled in as slowly as the screen needs, so the
 chart arrives in bursts instead of one stretch long enough to be felt. Nothing
 is thrown while it is being built.
 
+**A heading is part of what an item says.** Two items count as the same only when the
+expression *and* the category match (`sameItem`). Comparing expressions alone
+makes a preset that files a roll you already have under a name of its own look
+like a duplicate, and half of what the preset is for never arrives.
+
+**A preset's `id` is a promise.** It is what `#preset=<id>` names, so it is
+written out in `presets.js` rather than derived from the name: renaming a preset
+must not break a link somebody is already holding. Add one when you add a
+preset; never change one that has shipped.
+
 ## Things that are easy to break
 
 - **Node ids are the wiring.** Every piece of the editor, Explain, preview and
@@ -162,16 +187,34 @@ is thrown while it is being built.
 - **Everything that writes into the field goes through `typeInto`**, which uses
   `execCommand('insertText')` so the browser keeps its own undo history.
   Assigning `.value` wipes it, and then Ctrl+Z does nothing.
+- **A tab and the drawer are one switch** (`switchTab`). `state.activeTab` is `null`
+  when the drawer is shut, which is how it starts and what pressing the open tab
+  goes back to; `lastTab` is what the chevron reopens. Every tab's one-line
+  description lives in `TAB_HINT` beside them rather than in the pane it
+  describes, so a new tab cannot arrive without one and six render functions do
+  not each hold a paragraph.
 - **Vars and Saved are one list rendered twice** (`LISTS`, `renderList`). They
   differ only in where they are stored and what clicking the name does.
-- **A colour means one thing.** Five roles and two verdicts, listed at the top
+- **A colour means one thing.** Six roles and two verdicts, listed at the top
   of `style.css` and in the README. A number and a word are one role — a value —
-  and a die is a name in the same sense a variable is. Green and red are spent
-  entirely on verdicts. `describe` colours a bare word as a name only when a
-  variable of that name is set, so it takes the variables to answer that. The
-  reference and the Explain chips paint themselves with the editor's own `t-*`
-  classes rather than a colour of their own; emphasis there is carried by
-  fading, never by recolouring.
+  and a die is a name in the same sense a variable is. A label is the exception
+  among names, since it is the one the notation never reads, and it has a sage
+  of its own (`--label`) so that it does not read as a variable. Green and red
+  at full strength are spent entirely on verdicts. `describe` colours a bare
+  word as a name only when a variable of that name is set, so it takes the
+  variables to answer that. The reference, the Explain chips and an opened
+  card's expression paint themselves with the editor's own `t-*` classes
+  (`paint`, `snippet`) rather than a colour of their own; emphasis there is
+  carried by fading, never by recolouring.
+- **The chart is padded, so every overlay lives in `.layer`**, inset by exactly
+  that padding. A band measured against the outer box lands a few pixels wide of
+  the bars it describes — close enough to look like a rounding bug and waste an
+  afternoon. `pctOf` puts a value in the middle of its own cell, which is why a
+  mean of 3.5 lands on the line between 3 and 4 rather than inside one of them.
+- **A phone raises its keyboard whenever the field takes focus**, so nothing
+  refocuses it after a roll. On a narrow screen the expression pane's own title
+  goes too, or the label of what is about to be rolled gets squeezed to nothing
+  by the buttons beside it.
 - **Every die value is one size**, however long. A D8 and a D10 side by side
   have to read as the same kind of thing, and a long one spilling over its shape
   beats one too small to read.
