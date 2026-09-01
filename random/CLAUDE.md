@@ -95,9 +95,19 @@ the label is the identifier expressions use when that differs from the title;
 
 **Details splits a roll into its repeated pieces** (`unitOf`) and summarises each,
 then the total — but only where the pieces are independent, since keep, drop and
-advantage couple them. What the total can be is every way of choosing one from
-each piece, which multiplies out fast, so past `LIMIT.combos` it falls back to
-what the run turned up.
+advantage couple them. A choice is several pieces only when it is marked `@`:
+`2d20@=20?crit:…` is that question put to each die, while `2d20=20?crit:…` puts
+it to the total once and is one piece. Splitting takes the marker off (`unEach`),
+since a lone member has no members of its own. What the total can be is every way
+of choosing one from each piece, which multiplies out fast, so past
+`LIMIT.combos` it falls back to what the run turned up.
+
+**Several answers to one question are counted, not ordered.** Ten coins land in a
+thousand orders and in eleven scores, so a set of words is reported as
+`6 heads - 4 tails` — by the run (`scoreKey`) and by the solver alike, where
+`memberOdds` gives one member's odds and how many members there are and
+`scoreDist` convolves them. Combinations are for answers to *different*
+questions, and are skipped once a score has collapsed the order.
 
 **Details says what could happen, not only what did.** `outcomes()` reads the
 tree rather than the run: `wordsOf` lists every word the result could be, in

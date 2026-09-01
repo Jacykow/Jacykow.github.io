@@ -488,6 +488,7 @@ kbd{
 .key.bars::before{background:linear-gradient(180deg,var(--blue),#1d5570)}
 .key.run::before{height:0; border-top:2px solid var(--accent); opacity:.85; border-radius:0}
 .key.log::before{width:7px; height:7px; border-radius:50%; background:var(--accent)}
+.key.count::before{display:none}
 
 /* reference */
 .refgrid{columns:2; column-gap:22px}
@@ -879,6 +880,17 @@ button.roll.sec kbd{background:#171b23; color:var(--dimmer)}
 .pickrow code{color:var(--dim); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 .sheetend{display:flex; gap:8px; margin-top:14px}
 
+/* The members of a set, spelled out under the dice that made them, and the
+   score with its words named. Both are readings of the same result, so they
+   are set in the same face as the tally they sit beside. */
+.outcome{
+  font-size:12px; margin-top:7px; font-family:var(--mono); color:var(--text);
+  line-height:1.5; word-break:break-word;
+}
+.outcome span{color:var(--dimmer); padding:0 .4em}
+.tally.words b{color:var(--text); font-weight:600}
+.tally.words i{color:var(--dimmer); font-style:normal; padding:0 .3em}
+
 /* ------------------------------------------------- results that are words */
 .wordhist{margin:4px 0 2px}
 .wrow{display:flex; align-items:center; gap:8px; padding:2px 0; font-size:12px}
@@ -891,6 +903,10 @@ button.roll.sec kbd{background:#171b23; color:var(--dimmer)}
   position:absolute; top:0; bottom:0; width:0; border-left:1px solid var(--accent);
   opacity:.85; z-index:2;
 }
+/* a roll of your own, the same dot the chart of numbers marks one with */
+.wlog{width:7px; height:7px; border-radius:50%; flex:none; background:transparent}
+.wlog.on{background:var(--accent); opacity:.4}
+.wlog.on.last{opacity:1}
 .wbar{position:relative; flex:1; min-width:0; height:12px; background:var(--pane-2); border-radius:3px; overflow:hidden}
 .wbar i{display:block; height:100%; background:var(--blue); border-radius:3px; min-width:1px}
 .wpct{font-family:var(--mono); color:var(--dimmer); font-size:11px; width:46px; text-align:right; flex:none}
@@ -936,6 +952,11 @@ button.roll.sec kbd{background:#171b23; color:var(--dimmer)}
   font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .stathead:first-child{margin-top:2px}
+/* the two questions a set of words answers, kept apart */
+.subhead{
+  margin:12px 0 4px; font-size:11px; color:var(--dim); text-transform:lowercase;
+}
+.subhead:first-child{margin-top:2px}
 /* a die inside a preset dialog row sits on a lighter ground */
 .sheet .die.ghost .dieshape, .sc .die.ghost .dieshape{fill:var(--pane)}
 /* Until the first roll of a visit the button says that nothing happens on its

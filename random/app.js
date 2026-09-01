@@ -801,6 +801,14 @@
     });
   }
 
+  /** the words a roll could say, once it has said more than one of them */
+  function wordScore(roll) {
+    const words = roll.words || [], tally = roll.tally || {};
+    let landed = 0;
+    for (const w of words) landed += tally[w] || 0;
+    return (words.length < 2 || landed < 2) ? null : words;
+  }
+
   /* A roll that produces result types reads like a game score — every type the
      expression could produce, best to worst, so a critical that never turned up
      still shows its nought. */
@@ -811,16 +819,21 @@
       return '<span class="score">' + poss.map((k) =>
         '<b class="' + k + '">' + (m[k] || 0) + '</b>').join('<i>-</i>') + '</span>';
     }
-    /* A roll that came down on several words reads as a score too: one figure
-       per word the expression could have named, in the order it names them, so
-       a word that never came up still shows its nought. */
-    const words = roll.words || [], tally = roll.tally || {};
-    let landed = 0;
-    for (const w of words) landed += tally[w] || 0;
-    if (words.length < 2 || landed < 2) return null;
+    const words = wordScore(roll);
+    if (!words) return null;
+    const tally = roll.tally || {};
     return '<span class="score" title="' + esc(words.map((w) =>
       w + ' ' + (tally[w] || 0)).join(', ')) + '">' + words.map((w) =>
       '<b>' + (tally[w] || 0) + '</b>').join('<i>-</i>') + '</span>';
+  }
+
+  /** how a roll reads on a chart of words: the word it said, or the score it made */
+  function wordOutcome(roll) {
+    const words = wordScore(roll);
+    if (words) {
+      return words.map((w) => ((roll.tally || {})[w] || 0) + ' ' + w).join(' - ');
+    }
+    return roll.text || null;
   }
 
   /* The headline: a number, a score, or the word it landed on. A number and a
@@ -878,11 +891,22 @@
       rows = '<div class="setrow"><span class="body">' + roll.sets[0].html(opts) + '</span></div>';
     }
 
+    const outcome = (roll.outcome || []).length
+      ? '<div class="outcome">' + roll.outcome.map(esc).join('<span>&middot;</span>') + '</div>'
+      : '';
+
     let tally = '';
     if (roll.marks) {
       tally = '<div class="tally">' + markList(roll.marks)
         .map((t) => '<b>' + esc(t) + '</b>').join(' &middot; ') +
         (roll.numeric ? ' &rarr; ' + E.fmt(roll.total) : '') + '</div>';
+    } else {
+      const words = wordScore(roll);
+      if (words) {
+        tally = '<div class="tally words">' + words.map((w) =>
+          '<b>' + ((roll.tally || {})[w] || 0) + ' ' + esc(w) + '</b>')
+          .join('<i>&ndash;</i>') + '</div>';
+      }
     }
 
     const meta = [];
@@ -904,7 +928,7 @@
           '<div class="sub">' + meta.join('<span>&middot;</span>') + '</div>' +
         '</div>' +
       '</div>' +
-      '<div class="rows' + density + '">' + rows + '</div>' + tally +
+      '<div class="rows' + density + '">' + rows + '</div>' + outcome + tally +
     '</div>';
   }
 
@@ -1018,13 +1042,15 @@
   function drawDetails(snap) {
     lastSnap = snap;
     // past rolls of this very expression, newest first, so the last one stands out
-    const past = state.log.filter((e) => e.roll.notation === snap.notation && e.roll.numeric)
-      .map((e) => e.roll.total);
+    const mine = state.log.filter((e) => e.roll.notation === snap.notation);
+    const past = mine.filter((e) => e.roll.numeric).map((e) => e.roll.total);
+    const said = mine.map((e) => wordOutcome(e.roll)).filter(Boolean);
     el.details.innerHTML = snap.sections.map((sec) => {
-      const body = statsHTML(sec, sec.whole ? past : []);
+      const body = statsHTML(sec, sec.whole ? past : [], sec.whole ? said : []);
       if (!body) return '';
-      const head = sec.title
-        ? '<h4 class="stathead">' + esc(sec.title + (sec.times > 1 ? ' ×' + sec.times : '')) + '</h4>'
+      const name = (sec.whole && sec.scored && sec.title) ? 'all together' : sec.title;
+      const head = name
+        ? '<h4 class="stathead">' + esc(name + (sec.times > 1 ? ' ×' + sec.times : '')) + '</h4>'
         : '';
       return '<div class="dsec">' + head + body + '</div>';
     }).join('') + '<div class="tailroom"></div>';
@@ -1092,24 +1118,26 @@
   }
 
   /* --------------------------------------------------------------- words */
-  function wordHTML(s) {
+  function wordHTML(s, said) {
     const exact = s.exact && s.exact.words;
-    const shown = exact
-      ? s.words.filter((w) => exact.has(w)).concat(
-          Array.from(exact.keys()).filter((w) => s.words.indexOf(w) < 0))
-      : s.words;
+    const shown = exact ? Array.from(exact.keys()) : s.words;
     if (!shown.length) return '';
+    const log = {};
+    for (const w of (said || [])) log[w] = (log[w] || 0) + 1;
+    const last = (said || [])[0];
     const pOf = (w) => exact ? (exact.get(w) || 0) : ((s.tally[w] || 0) / Math.max(1, s.n));
     const peak = Math.max.apply(null, shown.map(pOf)) || 1;
     return '<div class="wordhist">' + shown.map((w) => {
-      const p = pOf(w), seen = (s.tally[w] || 0) / Math.max(1, s.n);
+      const p = pOf(w), seen = (s.tally[w] || 0) / Math.max(1, s.n), mine = log[w] || 0;
       return '<div class="wrow" title="' + esc(w) + ': ' + (p * 100).toFixed(2) + '%' +
-          (exact ? ' exact, ' + (seen * 100).toFixed(2) + '% over ' + s.n.toLocaleString() + ' rolls' : '') + '">' +
+          (exact ? ' exact, ' + (seen * 100).toFixed(2) + '% over ' + s.n.toLocaleString() + ' rolls' : '') +
+          (mine ? ', rolled ' + mine + (mine === 1 ? ' time' : ' times') + ' by you' : '') + '">' +
         '<span class="wname">' + esc(w) + '</span>' +
         '<span class="wbar"><i style="width:' + ((p / peak) * 100).toFixed(2) + '%"></i>' +
           (exact ? '<u style="left:' + ((seen / peak) * 100).toFixed(2) + '%"></u>' : '') +
         '</span>' +
-        '<span class="wpct">' + (p * 100).toFixed(1) + '%</span></div>';
+        '<span class="wpct">' + (p * 100).toFixed(1) + '%</span>' +
+        '<i class="wlog' + (mine ? ' on' : '') + (w === last ? ' last' : '') + '"></i></div>';
     }).join('') + '</div>';
   }
 
@@ -1170,14 +1198,22 @@
     return '<div class="histticks">' + out + '</div>';
   }
 
-  function statsHTML(s, past) {
+  function statsHTML(s, past, said) {
     if (!s.words.length && !s.numeric) return '';
     const parts = [];
 
     if (s.words.length) {
-      parts.push(wordHTML(s));
+      if (s.each && !s.title) {
+        const per = s.each.n / Math.max(1, s.n);
+        const one = Number.isInteger(per);
+        parts.push('<div class="subhead">' + (one ? 'each of the ' + per : 'each member') + '</div>');
+        parts.push(wordHTML({ words: s.each.words, tally: s.each.tally, n: s.each.n,
+          exact: (s.exact && s.exact.each) ? { words: s.exact.each } : null }, []));
+        parts.push('<div class="subhead">' + (one ? 'all ' + per + ' together' : 'all together') + '</div>');
+      }
+      parts.push(wordHTML(s, said));
       if (!s.numeric) {
-        parts.push(legend(s, [], s.exact || null));
+        parts.push(legend(s, said || [], s.exact || null));
         return parts.join('');
       }
       parts.push('<div class="histaxis"><span>' + s.numeric.toLocaleString() +
@@ -1283,9 +1319,10 @@
   /* What each thing on the chart is, in the colour it is drawn in — named for
      what it shows rather than for how it was arrived at. */
   function legend(s, past, ex) {
+    const rolls = s.n.toLocaleString() + (s.n === 1 ? ' roll' : ' rolls');
     const keys = [
       ['bars', ex ? 'exact distribution' : 'sampled distribution'],
-      ex ? ['run', s.n.toLocaleString() + (s.n === 1 ? ' roll' : ' rolls')] : null,
+      [ex ? 'run' : 'count', rolls],
       past.length ? ['log', past.length + ' in your log'] : null
     ].filter(Boolean);
     return '<div class="histnote">' + keys.map(([cls, text]) =>

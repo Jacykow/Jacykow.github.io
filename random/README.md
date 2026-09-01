@@ -434,7 +434,15 @@ one place they fold, since the drawer is where you go to see all of them at once
 
   The headline is a number, or — when the roll produces result types — a game score:
   every type the expression could possibly produce, best to worst, so a critical that
-  never turned up still shows its nought. A roll that lands on a word shows the word.
+  never turned up still shows its nought. A roll that lands on a word shows the word, and
+  one that lands on several shows them as a score too: one figure per word the expression
+  could say, in the order it says them.
+
+  A headline is one figure and a set is not one thing, so an opened card also reads the
+  members one at a time, wherever they say more than the dice under them already do.
+  `10d2@=1?1:3` is ten dice showing 1 or 2 and a result of `1, 3, 1, 3, …`; a set of
+  words shows the words as they fell, and under them the score with its words named,
+  `6 heads - 4 tails`.
 
   A choice shows only the branch it took, joined to the comparison that caused it by
   **so** — `18 ≥ 15 so hit`, `7 < 15 so miss`. The statement written out is always the one
@@ -494,12 +502,22 @@ one place they fold, since the drawer is where you go to see all of them at once
 * **Details** — what the expression can come to. Where the shape of the expression allows
   it the answer is **worked out exactly** rather than watched for, and the run is drawn
   over the top as a second opinion; where it does not, the run is all there is. The line
-  under the chart says which you are looking at.
+  under the chart says which you are looking at, how many rolls stand behind it, and how
+  many of them are yours.
 
   A roll that makes several kinds of value is broken into the smallest repeated piece and
   each is charted in turn, then the total: `3d10` reports the d10 and then the sum. It
-  only splits where the pieces are independent — keep, drop and advantage couple them.
-  Words get a bar each, including the ones that never turned up.
+  only splits where the pieces are independent — keep, drop and advantage couple them —
+  and a choice is several pieces only when it is marked `@`, since a choice about a total
+  is one question however many dice the total is made of.
+  Words get a bar each, including the ones that never turned up, and every roll of this
+  expression still in the log is marked beside the word it landed on, the most recent
+  picked out. A set of words is two questions — what one member is likely to say, and what
+  the set is likely to come to once they all have — so both are answered, the member first
+  and then the set. The set is counted rather than ordered: ten coins land in a thousand
+  orders and in eleven scores, and the score is what anybody reads. Two words make a line,
+  `0 heads - 6 tails` through to `6 heads - 0 tails`, and are read along it; more than
+  two have no such line, so there the commonest comes first.
 
   Numbers get one bar per value while they will fit, and past that one bar per run of
   whole numbers, inclusive at both ends. The first bar starts at the smallest the

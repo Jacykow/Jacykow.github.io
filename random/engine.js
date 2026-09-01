@@ -1234,6 +1234,29 @@
     if (v.parts) { for (const p of v.parts) if (typeof p !== 'string') collectWords(p, out); }
   }
 
+  /** the numbers in a score, which is what one score can be ordered against another by */
+  const scoreCounts = (key) => key.split(' - ').map((p) => +p.slice(0, p.indexOf(' ')));
+
+  /* Two words make a line — none of the first, then one of it, then two — and
+     that is the order it is read in. More words have no such line, so there the
+     order is what it was: the commonest first. */
+  function scoreOrder(keys, words) {
+    if (words.length !== 2) return keys;
+    const at = {};
+    for (const k of keys) {
+      const n = scoreCounts(k)[0];
+      if (!Number.isFinite(n)) return keys;    // a word with " - " in it is not a line
+      at[k] = n;
+    }
+    return keys.slice().sort((a, b) => at[a] - at[b]);
+  }
+
+  /** how many of each word a set came down on, in the order the words are written */
+  function scoreKey(counts, names) {
+    const extra = Object.keys(counts).filter((w) => names.indexOf(w) < 0);
+    return names.concat(extra).map((w) => (counts[w] || 0) + ' ' + w).join(' - ');
+  }
+
   /** tally the result types in a value. the closest check speaks for what is under it */
   function collectMarks(v, out) {
     if (!v || v.dropped) return;
@@ -2602,6 +2625,26 @@
     return '';
   }
 
+  /** the members of a set read one at a time, where they say more than the dice do */
+  function memberList(v) {
+    if (!v || !v.set) return null;
+    const live = v.live();
+    if (live.length < 2) return null;
+    let told = false;
+    // past a screenful the list has stopped being something anybody reads
+    const shown = live.slice(0, 200);
+    const out = shown.map((m) => {
+      const w = m.word;
+      if (w !== undefined && w !== null) { told = true; return String(w); }
+      const t = safeTotal(m);
+      // a die, checked or not, is already on the screen as itself
+      if (!(m.die && (m.check || t === m.raw()))) told = true;
+      return fmt(t);
+    });
+    if (live.length > shown.length) out.push('… and ' + (live.length - shown.length) + ' more');
+    return told ? out.join(', ') : null;
+  }
+
   function possibleMarks(p) {
     const out = new Set(), ctx = { vars: p.vars, seen: new Set() };
     for (const part of p.rolls) scanMarks(part.ast, out, ctx);
@@ -2651,6 +2694,7 @@
       defs: p.parts.filter((x) => x.assign && !x.once)
         .map((x) => x.assign + ' := ' + plain(x.ast)),
       words, tally,
+      outcome: sets.map(memberList).filter(Boolean),
       text: sets.map(wordText).filter(Boolean).join(', '),
       marks: Object.keys(marks).length ? marks : null
     };
@@ -2876,7 +2920,9 @@
     const totals = [];
     const tally = {};
     for (const w of can.words) tally[w] = 0;
-    let n = 0;
+    const each = {};
+    for (const w of can.words) each[w] = 0;
+    let n = 0, members = 0, scored = false;
 
     function run(k) {
       for (let i = 0; i < k; i++) {
@@ -2886,7 +2932,17 @@
           for (const part of p.rolls) {
             const v = evalNode(part.ast, ctx);
             try { t += v.total(); }
-            catch (e) { word = wordText(v) || word; }
+            catch (e) {
+              // one answer is the answer; several of them are a score
+              const c = {};
+              collectWords(v, c);
+              let held = 0;
+              for (const w in c) { each[w] = (each[w] || 0) + c[w]; held += c[w]; }
+              members += held;
+              if (held > 1) scored = true;
+              const said = held > 1 ? scoreKey(c, can.words) : wordText(v);
+              word = said || word;
+            }
           }
         }
         if (word !== null) tally[word] = (tally[word] || 0) + 1;
@@ -2897,8 +2953,13 @@
 
     function stats() {
       const out = {
-        n, totals, tally,
-        words: can.words.concat(Object.keys(tally).filter((w) => can.words.indexOf(w) < 0)),
+        n, totals, tally, scored,
+        // a score is only named by the run, so the ones that happened stand for it
+        words: scored
+          ? scoreOrder(Object.keys(tally).filter((w) => tally[w])
+              .sort((a, b) => tally[b] - tally[a]).slice(0, LIMIT.combos), can.words)
+          : can.words.concat(Object.keys(tally).filter((w) => can.words.indexOf(w) < 0)),
+        each: scored ? { words: can.words, tally: each, n: members } : null,
         canMin: can.min, canMax: can.max
       };
       if (!totals.length) return Object.assign(out, { numeric: 0 });
@@ -2950,10 +3011,10 @@
         const n = constOf(node.qty);
         if (n !== null && n >= 1) return { node: Object.assign({}, node, { qty: null }), times: n };
       }
-      /* a choice distributes, so a choice about many things is many choices
-         about one — ask the same question of a single member instead */
+      /* a choice put to each member is many choices about one thing, so it is
+         reported as one of them, asked as often as there are members */
       const key = node.t === 'band' ? 'subject' : (node.t === 'ternary' ? 'cond' : null);
-      if (key) {
+      if (key && eachAsked(node)) {
         const sub = unitNode(node[key]);
         if (sub.times > 1) {
           const one = Object.assign({}, node);
@@ -2964,9 +3025,35 @@
     }
     return { node, times: 1 };
   }
+  /** is the choice answered by every member, or by what the set came to? */
+  const eachAsked = (node) => node.t === 'band'
+    ? node.arms.some((a) => a.each)
+    : (node.cond.mods || []).some((m) => m.t === 'check' && m.each);
+
+  /* One member of a set is a value on its own, so the @ that made a modifier
+     act on members has nothing left to act on and has to come off — it is what
+     the set was for. Only the markers the split undid are cleared; one inside
+     a member is that member's own and stays. */
+  function unEach(node) {
+    const off = (mods) => (mods || []).map((m) =>
+      m.each ? Object.assign({}, m, { each: false }) : m);
+    if (node.t === 'band') {
+      return Object.assign({}, node, {
+        subject: Object.assign({}, node.subject, { mods: off(node.subject.mods) }),
+        arms: node.arms.map((a) => Object.assign({}, a, { each: false }))
+      });
+    }
+    if (node.t === 'ternary') {
+      return Object.assign({}, node, {
+        cond: Object.assign({}, node.cond, { mods: off(node.cond.mods) })
+      });
+    }
+    return Object.assign({}, node, { mods: off(node.mods) });
+  }
+
   const unitOf = (node) => {
     const u = unitNode(node);
-    return { src: plain(u.node), times: u.times };
+    return { src: plain(u.times > 1 ? unEach(u.node) : u.node), times: u.times };
   };
 
   /* A study is the plan for a chart: which sub-expressions are worth reporting
@@ -3027,7 +3114,7 @@
          of choosing one from each — `2(band)` over four words is sixteen, not
          four. That multiplies out fast, so past a point it is left to what the
          run actually turned up. */
-      if (whole) {
+      if (whole && !whole.scored) {
         const lists = [];
         for (const g of groups) {
           if (!g.words.length) continue;
@@ -3536,8 +3623,8 @@
      than a set, since then each arm is simply a slice of that distribution. */
   function armWords(node) {
     if (node.t === 'band') {
-      const arms = node.arms.map((a) => ({ cp: a.cp, then: a.then }));
-      arms.push({ cp: null, then: node.otherwise });
+      const arms = node.arms.map((a) => ({ cp: a.cp, then: a.then, each: a.each }));
+      arms.push({ cp: null, then: node.otherwise, each: node.arms.some((a) => a.each) });
       return { subject: node.subject, arms, lead: null };
     }
     /* A plain two-way choice is the same shape with one arm, once the check
@@ -3556,6 +3643,18 @@
   }
 
   function wordOdds(node, ctx) {
+    if (node.t === 'custom' && !(node.mods || []).length &&
+        node.items.length && node.items.every((i) => !(i.mods || []).length &&
+          (i.t === 'str' || (i.t === 'word' && varSrc(i.name, ctx) === undefined &&
+            !(ctx.fixed && ctx.fixed[i.name]))))) {
+      const out = new Map();
+      const p = 1 / node.items.length;
+      for (const i of node.items) {
+        const w = i.t === 'str' ? i.v : i.name;
+        out.set(w, (out.get(w) || 0) + p);
+      }
+      return out;
+    }
     const spec = armWords(node);
     if (!spec) return null;
     // one answer per member is a different question from one answer
@@ -3584,6 +3683,72 @@
       }
       out.set(word, (out.get(word) || 0) + p);
     }
+    return out;
+  }
+
+  function memberOdds(node, ctx) {
+    if (!node || (node.mods || []).length) return null;
+
+    // n copies of one question, written out as a repeat
+    if (node.t === 'rep' && node.items.length === 1) {
+      const n = constOf(node.count), odds = wordOdds(node.items[0], ctx);
+      return (odds && n !== null && n >= 1 && n <= LIMIT.qty) ? { odds, n } : null;
+    }
+
+    // one question put to every die of a throw at once
+    const spec = armWords(node);
+    if (!spec) return null;
+    const sub = spec.subject;
+    if (!sub || sub.t !== 'dice' || sub.qty === null) return null;
+    // a set modifier ties the members together, and rolled sides are shared
+    if ((sub.mods || []).length || constOf(sub.sides) === null) return null;
+    const n = constOf(sub.qty);
+    if (n === null || !(n >= 1) || n > LIMIT.qty) return null;
+
+    const one = Object.assign({}, sub, { qty: null, mods: [] });
+    let single;
+    if (node.t === 'band') {
+      if (!node.arms.every((a) => a.each)) return null;
+      single = Object.assign({}, node, { subject: one,
+        arms: node.arms.map((a) => Object.assign({}, a, { each: false })) });
+    } else {
+      if (!spec.lead || !spec.lead.each) return null;
+      single = Object.assign({}, node, { cond: Object.assign({}, one,
+        { mods: [Object.assign({}, spec.lead, { each: false })] }) });
+    }
+    const odds = wordOdds(single, ctx);
+    return odds ? { odds, n } : null;
+  }
+
+  /** how often each score comes up, over n members answering with those odds */
+  function scoreDist(odds, n) {
+    const names = Array.from(odds.keys());
+    if (!names.length || !(n >= 1)) return null;
+    let cur = new Map([[names.map(() => 0).join(','), 1]]);
+    for (let i = 0; i < n; i++) {
+      const next = new Map();
+      for (const [k, p] of cur) {
+        const c = k.split(',');
+        for (let j = 0; j < names.length; j++) {
+          const q = odds.get(names[j]);
+          if (!q) continue;
+          const d = c.slice();
+          d[j] = +d[j] + 1;
+          const key = d.join(',');
+          next.set(key, (next.get(key) || 0) + p * q);
+        }
+      }
+      cur = next;
+      if (cur.size > LIMIT.combos * 8) return null;
+    }
+    const kept = new Map();
+    for (const [k, p] of Array.from(cur).sort((a, b) => b[1] - a[1]).slice(0, LIMIT.combos)) {
+      const c = {};
+      k.split(',').forEach((v, j) => { c[names[j]] = +v; });
+      kept.set(scoreKey(c, names), p);
+    }
+    const out = new Map();
+    for (const k of scoreOrder(Array.from(kept.keys()), names)) out.set(k, kept.get(k));
     return out;
   }
 
@@ -3636,6 +3801,9 @@
     if (p.rolls.length === 1 && p.repeat === 1) {
       const w = wordOdds(p.rolls[0].ast, ctx);
       if (w) return { words: w, exact: true };
+      const m = memberOdds(p.rolls[0].ast, ctx);
+      const scores = m && scoreDist(m.odds, m.n);
+      if (scores) return { words: scores, each: m.odds, eachN: m.n, exact: true };
     }
 
     let acc = dOne(0);

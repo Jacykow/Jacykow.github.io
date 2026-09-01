@@ -25,14 +25,15 @@
     {
       name: 'Reset',
       id: 'reset',
-      note: 'Every solid on its own, and nothing else — where a browser with nothing stored starts.',
+      note: 'Every solid on its own, and a coin — where a browser with nothing stored starts.',
       cats: ['Dice'],
       vars: [],
       saved: [
         ['d4 # <d4>', 'Dice'], ['d6 # <d6>', 'Dice'], ['d8 # <d8>', 'Dice'],
         ['d10 # <d10>', 'Dice'], ['d12 # <d12>', 'Dice'], ['d20 # <d20>', 'Dice'],
         ['d100 # <d100>', 'Dice'],
-        '2d6 # 2x <d6>'
+        '2d6 # 2x <d6>',
+        'd2=1?heads:tails # Coin toss'
       ]
     },
 
