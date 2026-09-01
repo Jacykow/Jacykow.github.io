@@ -275,9 +275,16 @@ preset; never change one that has shipped.
   everything it encloses, so it has to be settled after the things inside it
   have finished rising, or two brackets land on the same row.
 - **Subtotal brackets:** a modifier draws its own bracket with no number
-  (`data-steps`), a name rides along with the number (`data-note`), and a node
-  filling its whole row draws nothing because the headline already says it.
-  Labels crop from the end, so the verb and count survive.
+  (`data-steps`, with the modifier's own id in `data-stepx`), a name rides
+  along with the number (`data-note`), and a node filling its whole row draws
+  nothing because the headline already says it. Labels crop from the end, so the
+  verb and count survive — which is why they are written in the present tense
+  and the same everywhere: a bracket hanging under a roll that has happened
+  needs no tense to say so, and three letters fewer is a phrase that fits on a
+  phone. A modifier gets a `uid` from the parser like everything else and
+  `describe` names its span `m<uid>`, so a step bracket lights the two letters
+  it stands for instead of borrowing the id of the term it hangs under — which
+  lit the term, its dice and every other bracket on it.
 - **The dice art uses one shared camera.** Only the resting face and the yaw
   differ per shape; pitch, position and scale are constants, and size comes from
   the shape's own circumradius.

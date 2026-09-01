@@ -468,8 +468,11 @@ one place they fold, since the drawer is where you go to see all of them at once
   a bracket in a tree beneath them, innermost nearest the dice — so `((2d6+d6)*d6)+8d10`
   shows what each bracket came to on the way to the total. Every modifier gets a bracket
   of its own rather than a number, in the order it was applied, so `10d6kh8kl5` reads
-  `kept 8 highest` then `kept 5 lowest`. The verb and the count come first: a bracket too
-  narrow for the whole phrase keeps its front, and `kept 5` says more than `lowest` does.
+  `keep 8 highest` then `keep 5 lowest`. A step names what the modifier does rather than
+  narrating what became of the dice — it hangs under a roll that has plainly happened, so
+  a tense buys nothing and costs the letters that make it fit. It reads the same in the
+  preview, in the result and on a phone. The verb and the count come first: a bracket too
+  narrow for the whole phrase keeps its front, and `keep 5` says more than `lowest` does.
   A variable rides along on its bracket as a name, written before the value so you know
   what the number is before you read it; a short name always shows in full even where the
   bracket is narrower, and a long one gives up letters rather than disappearing. A subtotal
@@ -520,7 +523,9 @@ one place they fold, since the drawer is where you go to see all of them at once
 * **Explain** — one row per token, indented to the depth it sits at, so a bracket's
   contents read as its contents. Click a row to select that token in the field; moving
   the caret highlights the matching row. Hovering any piece — a die, an operator, either
-  half of a bracket pair, or a subtotal — lights up its counterparts everywhere. Node ids
+  half of a bracket pair, or a subtotal — lights up its counterparts everywhere. A step
+  bracket is a modifier's own, so pointing at `drop highest` lights the `dh` that asked
+  for it and that bracket alone, rather than the term it happens to hang under. Node ids
   only mean something within one expression, so hovering is scoped: identical expressions
   share a scope and link to each other, while unrelated history entries stay put. What a
   variable rolls is deliberately left untagged — those dice have no place in the expression

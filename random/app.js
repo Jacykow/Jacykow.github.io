@@ -1544,8 +1544,9 @@
      for its own value. A node's value is skipped when it fills the whole row —
      the headline already says it, and repeating it buys nothing. */
   function barsFor(n, body) {
+    const ids = (n.getAttribute('data-stepx') || '').split('|');
     const out = (n.getAttribute('data-steps') || '').split('|').filter(Boolean)
-      .map((label) => ({ label, sum: null, name: false }));
+      .map((label, i) => ({ label, sum: null, name: false, id: ids[i] || null }));
     const sum = n.getAttribute('data-sum');
     const note = (n.getAttribute('data-note') || '').split('|').filter(Boolean).join(', ');
     const sole = n.parentElement === body && body.children.length === 1;
@@ -1627,7 +1628,8 @@
             bar.className = 'sumbar' + (it.drop ? ' dropped' : '') +
               (it.mark && b.name ? ' ' + it.mark : '') + (b.name ? '' : ' step') +
               (lone ? ' lone' : '');
-            if (it.x) bar.setAttribute('data-x', it.x);
+            const x = b.id || it.x;
+            if (x) bar.setAttribute('data-x', x);
             const top = (shelf(it, r) - base.top) + TREE_TOP + (it.row + k) * SUM_ROW;
             deepest = Math.max(deepest, top + SUM_ROW);
             bar.style.left = (r.left - base.left) + 'px';

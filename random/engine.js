@@ -586,7 +586,7 @@
       }
     }
 
-    fin(start, m) { m.sp = [start, this.i]; return m; }
+    fin(start, m) { m.sp = [start, this.i]; m.uid = ++this.uid; return m; }
 
     modifier() {
       const start = this.mark();
@@ -972,33 +972,25 @@
      member rather than of the one thing they add up to. A bracket spanning one
      die is too narrow to letter, so this wording is the only thing that says
      which it reaches. */
-  function modNote(m, future) {
+  function modNote(m) {
     const end = (e) => e === 'h' ? 'highest' : 'lowest';
     const some = (x) => (!x.nNode && x.n === 1) ? '' : cnt(x) + ' ';
-    const w = (now, then) => future ? now : then;
     const n = cnt(m);
     const each = m.each;
     switch (m.t) {
-      case 'min': return each ? w('floor each at ', 'each floored at ') + n
-                              : w('floor at ', 'floored at ') + n;
-      case 'max': return each ? w('cap each at ', 'each capped at ') + n
-                              : w('cap at ', 'capped at ') + n;
+      case 'min': return (each ? 'floor each at ' : 'floor at ') + n;
+      case 'max': return (each ? 'cap each at ' : 'cap at ') + n;
       case 'explode': {
-        const verb = m.pen ? w('penetrate', 'penetrated') : w('explode', 'exploded');
-        const rep = m.inf ? ' repeatedly' : '';
-        return each ? w(verb + ' each' + rep, 'each die ' + verb + rep)
-                    : verb + rep + (future ? '' : '');
+        const verb = m.pen ? 'penetrate' : 'explode';
+        return verb + (each ? ' each' : '') + (m.inf ? ' repeatedly' : '');
       }
-      case 'reroll': {
-        const rep = m.inf ? ' repeatedly' : '';
-        return each ? w('re-roll each' + rep, 'each die re-rolled' + rep)
-                    : w('re-roll', 're-rolled') + rep;
-      }
-      case 'unique': return w('make unique', 'made unique');
-      case 'keep': return w('keep ', 'kept ') + some(m) + end(m.end);
-      case 'drop': return w('drop ', 'dropped ') + some(m) + end(m.end);
+      case 'reroll':
+        return 're-roll' + (each ? ' each' : '') + (m.inf ? ' repeatedly' : '');
+      case 'unique': return 'make unique';
+      case 'keep': return 'keep ' + some(m) + end(m.end);
+      case 'drop': return 'drop ' + some(m) + end(m.end);
       case 'check': return (each ? 'each ' : '') + CHECK_SHORT[m.check] + ' on ' + cpShort(m.cp);
-      case 'map': return w('each ', 'each ') + m.op + plain(m.r);
+      case 'map': return 'each ' + m.op + plain(m.r);
       case 'adv': {
         const best = m.end === 'h';
         if (!m.nNode && m.n === 2) return best ? 'advantage' : 'disadvantage';
@@ -1009,7 +1001,7 @@
   }
 
   /** every modifier on a node, in the order they are applied */
-  function noteList(mods, future) {
+  function noteSteps(mods, future) {
     if (!mods || !mods.length) return [];
     const rank = (m) => { const k = MODS[m.t === 'check' ? 'check' : m.t]; return k ? k.order : 99; };
     /* The preview writes comparisons out in full, so they are not steps there —
@@ -1017,8 +1009,12 @@
        which would otherwise lose the only thing saying it is per die. */
     return mods.filter((m) => !(future && m.t === 'check' && !m.each))
       .sort((a, b) => rank(a) - rank(b))
-      .map((m) => modNote(m, future)).filter(Boolean);
+      .map((m) => ({ label: modNote(m), id: 'm' + m.uid }))
+      .filter((s) => s.label);
   }
+  const noteList = (mods, future) => noteSteps(mods, future).map((s) => s.label);
+  const noteIds = (mods, future, mute) =>
+    mute ? [] : noteSteps(mods, future).map((s) => s.id);
 
   /* Two kinds of label hang off a subtotal: a descriptor, which names what the
      value is (a variable) and rides along with the number, and a step, which
@@ -1041,7 +1037,8 @@
       (isLone(item) ? ' data-lone="1"' : '') +
       (mark ? ' data-mark="' + mark + '"' : '') +
       noteAttr('data-note', item.note ? [item.note] : []) +
-      noteAttr('data-steps', noteList(item.mods, false));
+      noteAttr('data-steps', noteList(item.mods, false)) +
+      noteAttr('data-stepx', noteIds(item.mods, false, item.mute));
   }
 
   /* --------------------------------------------------------------- values
@@ -1562,7 +1559,10 @@
       else if (m.each) eachMember(value, (item) => applyElement(item, m, ctx));
       else value = applyWhole(value, m, ctx);
     }
-    if (mods && mods.length) value.mods = mods;   // the subtotal bracket names them
+    if (mods && mods.length) {
+      value.mods = mods;                          // the subtotal bracket names them
+      if (ctx && ctx.mute) value.mute = true;     // ...but names nothing in the field
+    }
     return value;
   }
 
@@ -2052,7 +2052,7 @@
         const operand = (m.cp && m.cp.sp) || (m.t === 'map' && m.r && m.r.sp) ||
           m.nSp || m.triesSp || null;
         push([m.sp[0], operand ? operand[0] : m.sp[1]], 't-mod',
-          { title, desc, depth: depth + 1 });
+          { title, desc, depth: depth + 1 }, 'm' + m.uid);
         if (!operand) continue;
         const sub = (m.cp && m.cp.node) || (m.t === 'map' && m.r) || m.nNode || m.triesNode;
         if (sub) walk(sub, depth + 1);
@@ -2302,7 +2302,8 @@
     // every other modifier shows as a step in the tree below, in the tense of
     // something that has not happened yet
     const mods = node.mods || [];
-    const steps = noteAttr('data-steps', noteList(mods, true));
+    const steps = noteAttr('data-steps', noteList(mods, true)) +
+      noteAttr('data-stepx', noteIds(mods, true, ctx.mute));
     const cmp = previewChecks(node, ctx);
 
     switch (node.t) {
@@ -2384,6 +2385,7 @@
         const parts = new Array(shown).fill(onDice ? one + eachCmp : one);
         return '<span class="r-term' + (squeezed ? ' squeezed' : '') + '"' + tag +
           noteAttr('data-steps', noteList(shownMods, true)) +
+          noteAttr('data-stepx', noteIds(shownMods, true, ctx.mute)) +
           squeezeStyle(shown) + '>' + (squeezed ? parts.join('') : parts.join(PLUS)) +
           '</span>' + previewChecks(node, ctx, 'whole');
       }
