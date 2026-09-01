@@ -93,6 +93,11 @@ name is drawn once — on its subtotal bracket — and never twice. A `{name}` i
 the label is the identifier expressions use when that differs from the title;
 `<dN>` in a title draws the die (`nameOf` / `titleOf` / `titleHTML`).
 
+**A collapsed line shows what was thrown, not what was made of it** (`diceHTML`).
+It walks a value the way `countDice` does — a named binding is not thrown twice,
+and a choice threw its condition before it took its branch — and carries the
+state from above, so a dropped die is still struck out on one line.
+
 **Details splits a roll into its repeated pieces** (`unitOf`) and summarises each,
 then the total — but only where the pieces are independent, since keep, drop and
 advantage couple them. A choice is several pieces only when it is marked `@`:
@@ -184,14 +189,17 @@ preset; never change one that has shipped.
   Assigning `.value` wipes it, and then Ctrl+Z does nothing.
 - **Vars and Saved are one list rendered twice** (`LISTS`, `renderList`). They
   differ only in where they are stored and what clicking the name does.
-- **A colour means one thing.** Five roles and two verdicts, listed at the top
+- **A colour means one thing.** Six roles and two verdicts, listed at the top
   of `style.css` and in the README. A number and a word are one role — a value —
-  and a die is a name in the same sense a variable is. Green and red are spent
-  entirely on verdicts. `describe` colours a bare word as a name only when a
-  variable of that name is set, so it takes the variables to answer that. The
-  reference and the Explain chips paint themselves with the editor's own `t-*`
-  classes rather than a colour of their own; emphasis there is carried by
-  fading, never by recolouring.
+  and a die is a name in the same sense a variable is. A label is the exception
+  among names, since it is the one the notation never reads, and it has a sage
+  of its own (`--label`) so that it does not read as a variable. Green and red
+  at full strength are spent entirely on verdicts. `describe` colours a bare
+  word as a name only when a variable of that name is set, so it takes the
+  variables to answer that. The reference, the Explain chips and an opened
+  card's expression paint themselves with the editor's own `t-*` classes
+  (`paint`, `snippet`) rather than a colour of their own; emphasis there is
+  carried by fading, never by recolouring.
 - **The chart is padded, so every overlay lives in `.layer`**, inset by exactly
   that padding. A band measured against the outer box lands a few pixels wide of
   the bars it describes — close enough to look like a rounding bug and waste an

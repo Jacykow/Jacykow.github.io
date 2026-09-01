@@ -2589,6 +2589,19 @@
     return 0;
   }
 
+  function faces(v, o, out) {
+    if (!v || v.ref) return out;
+    if (v.die || v.custom) { out.push(v.html(o)); return out; }
+    const co = ctxFor(o, v);
+    if (v.set) { for (const m of v.members) faces(m, co, out); return out; }
+    if (v.inner) { faces(v.condVal, co, out); faces(v.inner, co, out); return out; }
+    if (v.parts) { for (const p of v.parts) if (typeof p !== 'string') faces(p, co, out); }
+    return out;
+  }
+
+  /** every die of a value, drawn as it fell and in the order it was thrown */
+  const diceHTML = (v, o) => faces(v, o || null, []).join('');
+
   /* Which result types this expression could ever produce — read off the
      checks in the source, not the outcome, so a tally can show a nought for
      the criticals that were possible but did not turn up. */
@@ -3819,7 +3832,7 @@
 
   global.DiceEngine = {
     parse, inspect, evaluate, roll, analyse, preview, setVars, fmt, esc, shapeFor,
-    splitLabel, outcomes, distribution, study, migrate,
+    splitLabel, outcomes, distribution, study, migrate, diceHTML,
     DiceError, LIMIT, FUNCS, CHECKS, MARK_ORDER
   };
 }(window));

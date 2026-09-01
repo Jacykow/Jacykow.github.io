@@ -468,9 +468,16 @@ one place they fold, since the drawer is where you go to see all of them at once
   Past three dice a term overlaps its own dice so it never takes more room than three;
   the individual faces stop mattering there and the subtotal speaks for the term.
 
+  An opened card writes the expression in the colours the editor gives it, since a colour
+  means one thing everywhere.
+
   Each card carries a **roll again** button, and clicking an opened entry anywhere inert
-  folds it back up. Collapsed entries show their dice, and their label if they have one,
-  otherwise the expression — never both.
+  folds it back up. A collapsed entry is four columns — what you called it, what it came
+  to, what it was thrown with, and when — in the order they matter when you are looking
+  back down a log. The name is the label if there is one and the expression if there is
+  not, never both, and it holds a column of its own so the results line up under each
+  other. The dice are only the dice: ten coins read as ten faces, and the reasoning that
+  turned them into words is the opened card's business.
 
   Each die is a 3D render of a real solid, drawn from one inline SVG sprite referenced
   with `<use>`, so the shapes cost no extra requests and recolour from CSS:
@@ -591,7 +598,8 @@ reference and the Explain list all draw the same token the same way.
 | | | |
 |---|---|---|
 | **value** | white | a number or a word, a die face, a total — including a number that is an operand, like the 3 in `d6>3` or `3[a,b]` |
-| **name** | amber | a variable, a die, a `# label`, a binding, `max` and `min` |
+| **name** | amber | a variable, a die, a binding, `max` and `min` |
+| **label** | sage | the `# name` a roll is given, and the titles it becomes |
 | **modifier** | blue | `kh3`, `e`, `>=5`, `@*2`, `6x` — and a die a modifier reached |
 | **joinery** | grey | brackets, commas, operators, `?` and `:` |
 | **inert** | fainter grey | times, hints, and scaffolding shown for context |
@@ -608,7 +616,12 @@ value it is: the count in `4d6`, the `3` in `3[a,b]`, the threshold in `d6>3`. A
 baked into a modifier’s spelling is part of that modifier’s name and is not — `kh3` and
 `min2` are one token each.
 
-Green and red are spent entirely on verdicts, and a verdict always beats the role colour
+A label is the one name the notation never reads: it is what you called the roll rather
+than something standing for a value, so it is the one name that is not amber. Its sage is
+deliberately cooler and quieter than the verdict green, which is never a colour you can
+write.
+
+Green and red at full strength are spent entirely on verdicts, and a verdict always beats the role colour
 of whatever carries it, so the same `"Miss"` is white where it is only a word and red
 where a check made it one. A bare word is drawn as a name exactly when a variable of that
 name is set, and as a value when it is not — the colour answers the question the word

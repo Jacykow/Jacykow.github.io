@@ -861,10 +861,11 @@
     const name = roll.label
       ? '<span class="ll">' + dieText(roll.label) + '</span>'
       : '<span class="lx">' + esc(roll.notation) + '</span>';
+    const opts = roll.diceCount > DENSITY.plain ? { plain: true } : null;
     return '<div class="line" data-open="' + idx + '" data-scope="' + scopeFor(roll.input) +
-      '" title="show the breakdown">' +
-      '<span class="lt">' + totalHTML(roll) + '</span>' + name +
-      '<span class="ldice">' + roll.sets[0].html(roll.diceCount > DENSITY.plain ? { plain: true } : null) + '</span>' +
+      '" title="show the breakdown">' + name +
+      '<span class="lt">' + totalHTML(roll) + '</span>' +
+      '<span class="ldice">' + roll.sets.map((s) => E.diceHTML(s, opts)).join('') + '</span>' +
       '<span class="lm">' + esc(roll.time) + '</span>' +
     '</div>';
   }
@@ -920,7 +921,7 @@
       '<div class="top">' +
         '<div class="total">' + totalHTML(roll) + '</div>' +
         '<div class="meta">' +
-          '<div class="expr">' + esc(roll.notation) + '</div>' +
+          '<div class="expr">' + paint(roll.notation) + '</div>' +
           ((roll.defs || []).length
             ? '<div class="defs">' + roll.defs.map(esc).join('<span>&middot;</span>') + '</div>'
             : '') +
@@ -1361,6 +1362,20 @@
       }
     } catch (e) { /* an example that does not parse keeps the plain colour */ }
     return cls;
+  }
+
+  /** an expression in the colours the editor gives it */
+  function paint(src) {
+    const cls = tokenClasses(src);
+    let html = '', i = 0;
+    while (i < src.length) {
+      const c = cls[i];
+      let j = i;
+      while (j < src.length && cls[j] === c) j++;
+      html += '<i class="' + (c || 't-op') + '">' + esc(src.slice(i, j)) + '</i>';
+      i = j;
+    }
+    return html;
   }
 
   function snippet(code) {
