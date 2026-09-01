@@ -914,7 +914,10 @@
     if (many) meta.push(roll.sets.length + ' sets, summed');
     if (live) meta.push('<span class="pulse">live &mdash; Enter to keep</span>');
     else meta.push(roll.time);
-    meta.push('<button class="again" data-again="' + idx + '">roll again</button>');
+    meta.push('<button class="again" data-again="' + idx + '" ' +
+      'title="throw this expression again">roll again</button>' +
+      '<button class="again" data-edit="' + idx + '" ' +
+      'title="put this expression back in the field">edit</button>');
 
     return '<div class="card' + (live ? ' live' : '') + '" data-card="' + idx +
       '" data-scope="' + scopeFor(roll.input) + '">' +
@@ -1553,12 +1556,12 @@
 
   /* The tree is drawn as an overlay rather than a strip underneath, so it
      survives content that wraps: a node that runs onto two lines has two
-     rectangles, and each gets its own bracket beneath its own line. Room for
-     them comes from the line-height, which is set to fit the deepest stack. */
+     rectangles, and each gets its own bracket beneath its own line. */
   function drawTrees(root) {
     root.querySelectorAll('.setrow .body, .treehost').forEach((body) => {
       body.querySelectorAll('.sumtree').forEach((n) => n.remove());
       body.style.removeProperty('line-height');
+      body.style.removeProperty('padding-bottom');
       const nodes = Array.prototype.slice.call(body.querySelectorAll(SEL_TREE));
       if (!nodes.length) return;
 
@@ -1582,11 +1585,35 @@
       }
       const rows = items.reduce((a, it) => Math.max(a, it.row + it.bars.length), 0);
 
-      // every line needs room under it for the deepest stack that can sit there
+      /* What is on the line, rather than what the line says it holds: a die is
+         an inline block and hangs below the text box its parent reports. */
+      const shelf = (it, r) => {
+        let bot = r.bottom;
+        it.node.querySelectorAll('.die, .chip-die').forEach((d) => {
+          const q = d.getBoundingClientRect();
+          if (q.top < r.bottom && q.bottom > r.top) bot = Math.max(bot, q.bottom);
+        });
+        return bot;
+      };
+
       const lh = parseFloat(getComputedStyle(body).lineHeight) || 20;
-      body.style.lineHeight = Math.max(lh, TREE_TOP + rows * SUM_ROW) + 'px';
+      let over = 0, text = 0;
+      for (const it of items) {
+        for (const r of it.node.getClientRects()) {
+          text = Math.max(text, r.height);
+          over = Math.max(over, shelf(it, r) - r.bottom);
+        }
+      }
+      /* One line hangs its stack into the padding below. Several lines have to
+         clear each other, and a line box gives only half its leading to the
+         space under what it holds, hence the doubling. */
+      const under = over + TREE_TOP + rows * SUM_ROW;
+      if (body.getBoundingClientRect().height > lh * 1.5) {
+        body.style.lineHeight = Math.max(lh, text + 2 * under) + 'px';
+      }
 
       const base = body.getBoundingClientRect();
+      let deepest = 0;
       const layer = document.createElement('div');
       layer.className = 'sumtree';
       const drawn = [];
@@ -1601,9 +1628,11 @@
               (it.mark && b.name ? ' ' + it.mark : '') + (b.name ? '' : ' step') +
               (lone ? ' lone' : '');
             if (it.x) bar.setAttribute('data-x', it.x);
+            const top = (shelf(it, r) - base.top) + TREE_TOP + (it.row + k) * SUM_ROW;
+            deepest = Math.max(deepest, top + SUM_ROW);
             bar.style.left = (r.left - base.left) + 'px';
             bar.style.width = Math.max(r.width, 20) + 'px';
-            bar.style.top = ((r.bottom - base.top) + (it.row + k) * SUM_ROW) + 'px';
+            bar.style.top = top + 'px';
             // the label leads, so you know what the number is before you read it
             bar.innerHTML = '<span class="sumval">' + (b.label ? '<i></i>' : '') +
               (b.sum === null ? '' : '<b>' + esc(b.sum) + '</b>') + '</span>';
@@ -1613,6 +1642,8 @@
         });
       }
       body.appendChild(layer);
+      // the last line's stack has nothing below it to borrow from
+      body.style.paddingBottom = Math.max(0, deepest - base.height) + 'px';
 
       for (const [bar, b, it] of drawn) {
         if (b.label) fitLabel(bar, b.label, b.name, it.lone);
@@ -1625,11 +1656,12 @@
      disappears entirely: it gives up letters instead, down to a stub. */
   const NAME_STUB = 3;
   const NAME_ROOM = 76;      // a short name is worth spilling past its bracket for
+  const STEP_ROOM = 100;     // and a step is worth the end it took
   function fitLabel(bar, label, named, lone) {
     const val = bar.querySelector('.sumval');
     const tag = val.querySelector('i');
     const room = () =>
-      Math.max(bar.getBoundingClientRect().width, named ? NAME_ROOM : 0);
+      Math.max(bar.getBoundingClientRect().width, named ? NAME_ROOM : STEP_ROOM);
     const fits = () => val.getBoundingClientRect().width <= room();
 
     /* A bracket over one value has nothing to span. When the name will not sit
@@ -2354,7 +2386,13 @@
       const again = ev.target.closest('[data-again]');
       if (again) {
         const e = state.log[+again.getAttribute('data-again')];
-        if (e) { typeInto(e.roll.input, true); commitRoll(); }
+        if (e) commitRoll(e.roll.input);      // the field is not what is being thrown
+        return;
+      }
+      const edit = ev.target.closest('[data-edit]');
+      if (edit) {
+        const e = state.log[+edit.getAttribute('data-edit')];
+        if (e) typeInto(e.roll.input, true);
         return;
       }
       const open = ev.target.closest('[data-open]');
