@@ -1224,6 +1224,16 @@
     return c;
   }
 
+  /** tally the words in a value; the outermost word speaks for what is under it */
+  function collectWords(v, out) {
+    if (!v || v.dropped) return;
+    const w = v.word;
+    if (w !== undefined && w !== null) { out[w] = (out[w] || 0) + 1; return; }
+    if (v.set) { for (const m of v.members) collectWords(m, out); return; }
+    if (v.inner) { collectWords(v.inner, out); return; }
+    if (v.parts) { for (const p of v.parts) if (typeof p !== 'string') collectWords(p, out); }
+  }
+
   /** tally the result types in a value. the closest check speaks for what is under it */
   function collectMarks(v, out) {
     if (!v || v.dropped) return;
@@ -2627,11 +2637,20 @@
     const marks = {};
     for (const s of sets) collectMarks(s, marks);
 
+    /* Every word the expression could land on, in the order it names them, and
+       how many of each it did land on. */
+    const wctx = { vars: p.vars, fixed: p.fixed, seen: new Set() };
+    const words = [];
+    for (const part of p.rolls) wordsOf(part.ast, words, wctx);
+    const tally = {};
+    for (const s of sets) collectWords(s, tally);
+
     return {
       input: p.trimmed, notation: p.notation, label: p.label, repeat: reps,
       sets, diceCount, total, numeric, possible: possibleMarks(p),
       defs: p.parts.filter((x) => x.assign && !x.once)
         .map((x) => x.assign + ' := ' + plain(x.ast)),
+      words, tally,
       text: sets.map(wordText).filter(Boolean).join(', '),
       marks: Object.keys(marks).length ? marks : null
     };

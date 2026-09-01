@@ -124,8 +124,8 @@
 
   /* Safari rate-limits replaceState to about a hundred calls per half minute,
      so this is only ever called on a roll, never on a keystroke. */
-  function syncURL() {
-    const e = el.ta.value.trim();
+  function syncURL(src) {
+    const e = String(src === undefined ? el.ta.value : src).trim();
     try {
       history.replaceState(null, '', e ? '#' + encodeURIComponent(e) : location.pathname);
     } catch (err) { /* file:// refuses replaceState */ }
@@ -518,7 +518,8 @@
     /* A chip names the item it stands for by where it is kept, so the bar can
        be cut into groups without the wiring having to count anything. */
     const rollChip = (r, i) =>
-      '<button class="sc roll" data-roll="' + i + '" title="' + esc(r.expr) + '">' +
+      '<button class="sc roll" data-roll="' + i + '" title="' + esc(r.expr) +
+      ' — click to roll, right-click or hold to put it in the field">' +
         titleHTML(r.expr) + '</button>';
     const varChip = (v) => {
       const body = bodyOf(v.expr);
@@ -589,16 +590,38 @@
       if (fold) { toggleShut(fold.getAttribute('data-fold')); renderShortcuts(); return; }
       const r = ev.target.closest('[data-roll]');
       if (!r) return;
+      if (held) { held = false; return; }      // the press has already loaded it
       const item = loadSaved()[+r.getAttribute('data-roll')];
-      if (!item) return;
-      typeInto(item.expr, true);
-      commitRoll();              // a bookmark is a roll, not a thing to load
+      if (item) commitRoll(item.expr);
     });
-    // the right button is the quick way to move by ten without a keyboard
+
+    /* The right button moves a number by ten, and loads a roll into the field
+       rather than throwing it. */
     el.shortcuts.addEventListener('contextmenu', (ev) => {
       const s = stepDelta(ev);
-      if (s) stepVar(s.b, s.by);
+      if (s) return stepVar(s.b, s.by);
+      const r = ev.target.closest('[data-roll]');
+      if (!r) return;
+      ev.preventDefault();
+      const item = loadSaved()[+r.getAttribute('data-roll')];
+      if (item) typeInto(item.expr, true);
     });
+
+    /* A long press is the right button on a screen that has none. The flag
+       stops the click that follows it from throwing what was just loaded. */
+    let held = false, timer = null;
+    const letGo = () => { clearTimeout(timer); timer = null; };
+    el.shortcuts.addEventListener('pointerdown', (ev) => {
+      const r = ev.target.closest('[data-roll]');
+      if (!r || ev.button) return;
+      timer = setTimeout(() => {
+        held = true;
+        const item = loadSaved()[+r.getAttribute('data-roll')];
+        if (item) typeInto(item.expr, true);
+      }, 500);
+    });
+    ['pointerup', 'pointercancel', 'pointerleave', 'pointermove']
+      .forEach((e) => el.shortcuts.addEventListener(e, letGo));
   }
 
   /* Where the line wraps, the field has to grow to hold it — and the <pre>
@@ -783,10 +806,21 @@
      still shows its nought. */
   function scoreHTML(roll) {
     const poss = roll.possible || [];
-    if (!poss.length) return null;
     const m = roll.marks || {};
-    return '<span class="score">' + poss.map((k) =>
-      '<b class="' + k + '">' + (m[k] || 0) + '</b>').join('<i>-</i>') + '</span>';
+    if (poss.length) {
+      return '<span class="score">' + poss.map((k) =>
+        '<b class="' + k + '">' + (m[k] || 0) + '</b>').join('<i>-</i>') + '</span>';
+    }
+    /* A roll that came down on several words reads as a score too: one figure
+       per word the expression could have named, in the order it names them, so
+       a word that never came up still shows its nought. */
+    const words = roll.words || [], tally = roll.tally || {};
+    let landed = 0;
+    for (const w of words) landed += tally[w] || 0;
+    if (words.length < 2 || landed < 2) return null;
+    return '<span class="score" title="' + esc(words.map((w) =>
+      w + ' ' + (tally[w] || 0)).join(', ')) + '">' + words.map((w) =>
+      '<b>' + (tally[w] || 0) + '</b>').join('<i>-</i>') + '</span>';
   }
 
   /* The headline: a number, a score, or the word it landed on. A number and a
@@ -887,9 +921,9 @@
     drawTrees(el.result);
   }
 
-  function makeRoll() {
+  function makeRoll(src) {
     let roll;
-    try { roll = E.roll(el.ta.value); }
+    try { roll = E.roll(src === undefined ? el.ta.value : src); }
     catch (e) { return null; }
     roll.time = new Date().toLocaleTimeString();
     return { roll, expanded: false };
@@ -904,16 +938,17 @@
   }
 
   /** Rolling only ever happens here: on Enter, or the Roll button. */
-  function commitRoll() {
-    if (state.error) { flashError(); return; }
-    const entry = makeRoll();
+  function commitRoll(src) {
+    // the field may be mid-edit and invalid while a bookmark beside it is not
+    if (src === undefined && state.error) { flashError(); return; }
+    const entry = makeRoll(src);
     if (!entry) { flashError(); return; }
     el.rollBtn.classList.remove('pulse');   // it has been rolled; it can stop asking
     setTimeout(noteRoll, 0);                // and it belongs on the chart at once
     // on a phone the field keeping focus means the keyboard covering the result
     if (!wide.matches) el.ta.blur();
     state.log.unshift(entry);
-    syncURL();                 // the link in the bar is the roll you just made
+    syncURL(src);              // the link in the bar is the roll you just made
     if (state.log.length > LOG_MAX) state.log.length = LOG_MAX;
     renderResult();
     el.result.scrollTop = 0;
