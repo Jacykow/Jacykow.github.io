@@ -164,8 +164,25 @@
   /* Division is whole-number, truncated toward zero: dice deal in whole
      numbers, and rounding here is what lets `/` and `%` read digits off a roll. */
   const idiv = (a, b) => Math.trunc(a / b);
+  /* Anything past the hundredths is noise from a division nobody asked to be
+     exact, so it is not shown; what was typed is kept whole by `numText`. */
   const fmt = (n) => !isFinite(n) ? String(n)
-    : (Number.isInteger(n) ? String(n) : String(Math.round(n * 1000) / 1000));
+    : (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
+
+  /** a number as it was written, since a written `.` is what makes a division real */
+  const numText = (n) => (n.float && Number.isInteger(n.v)) ? n.v + '.0' : String(n.v);
+
+  /** does a written fraction reach this far? a die never makes one on its own */
+  function isReal(n) {
+    if (!n || typeof n !== 'object') return false;
+    switch (n.t) {
+      case 'num': case 'bin': return !!n.float;   // a bin settled this when it was built
+      case 'neg': case 'paren': return isReal(n.v);
+      case 'func': return (n.args || []).some(isReal);
+      case 'set': case 'rep': return (n.items || []).some(isReal);
+    }
+    return false;
+  }
   /* The other side of a comparison is either a literal or an expression, in
      which case it is worked out afresh for every comparison it takes part in. */
   const cpSrc = (cp) => cp.node ? plain(cp.node) : fmt(cp.v);
@@ -209,7 +226,13 @@
       const m = /^\d+(\.\d+)?/.exec(this.s.slice(this.i));
       if (!m) return null;
       this.i += m[0].length;
+      this.wroteDot = !!m[1];
       return parseFloat(m[0]);
+    }
+
+    bin(op, a, l, r) {
+      return { t: 'bin', op, opSp: [a, this.i], uid: ++this.uid, l, r,
+               float: isReal(l) || isReal(r) };
     }
 
     signedInt() {
@@ -290,8 +313,8 @@
       let l = this.term();
       for (;;) {
         const a = this.mark();
-        if (this.lit('+')) l = { t: 'bin', op: '+', opSp: [a, this.i], uid: ++this.uid, l, r: this.term() };
-        else if (this.lit('-')) l = { t: 'bin', op: '-', opSp: [a, this.i], uid: ++this.uid, l, r: this.term() };
+        if (this.lit('+')) l = this.bin('+', a, l, this.term());
+        else if (this.lit('-')) l = this.bin('-', a, l, this.term());
         else return l;
       }
     }
@@ -300,10 +323,10 @@
       let l = this.power();
       for (;;) {
         const a = this.mark();
-        if (this.lit('**')) l = { t: 'bin', op: '^', opSp: [a, this.i], uid: ++this.uid, l, r: this.power() };
-        else if (this.lit('*')) l = { t: 'bin', op: '*', opSp: [a, this.i], uid: ++this.uid, l, r: this.power() };
-        else if (this.lit('/')) l = { t: 'bin', op: '/', opSp: [a, this.i], uid: ++this.uid, l, r: this.power() };
-        else if (this.lit('%')) l = { t: 'bin', op: '%', opSp: [a, this.i], uid: ++this.uid, l, r: this.power() };
+        if (this.lit('**')) l = this.bin('^', a, l, this.power());
+        else if (this.lit('*')) l = this.bin('*', a, l, this.power());
+        else if (this.lit('/')) l = this.bin('/', a, l, this.power());
+        else if (this.lit('%')) l = this.bin('%', a, l, this.power());
         else return l;
       }
     }
@@ -312,7 +335,7 @@
       const base = this.unary();
       const a = this.mark();
       if (this.lit('**') || this.lit('^')) {
-        return { t: 'bin', op: '^', opSp: [a, this.i], uid: ++this.uid, l: base, r: this.power() };
+        return this.bin('^', a, base, this.power());
       }
       return base;
     }
@@ -376,7 +399,7 @@
       const nA = this.mark();
       const n = this.number();
       if (n !== null) {
-        const numNode = { t: 'num', v: n, sp: [nA, this.i] };
+        const numNode = { t: 'num', v: n, float: this.wroteDot, sp: [nA, this.i] };
         if (this.atDice()) return this.dice(numNode, a);
         // a count in front of anything repeatable builds a set: 4(...), 2int, 3[a,b]
         const c = this.peek();
@@ -951,6 +974,7 @@
      which it reaches. */
   function modNote(m, future) {
     const end = (e) => e === 'h' ? 'highest' : 'lowest';
+    const some = (x) => (!x.nNode && x.n === 1) ? '' : cnt(x) + ' ';
     const w = (now, then) => future ? now : then;
     const n = cnt(m);
     const each = m.each;
@@ -971,8 +995,8 @@
                     : w('re-roll', 're-rolled') + rep;
       }
       case 'unique': return w('make unique', 'made unique');
-      case 'keep': return w('keep ', 'kept ') + n + ' ' + end(m.end);
-      case 'drop': return w('drop ', 'dropped ') + n + ' ' + end(m.end);
+      case 'keep': return w('keep ', 'kept ') + some(m) + end(m.end);
+      case 'drop': return w('drop ', 'dropped ') + some(m) + end(m.end);
       case 'check': return (each ? 'each ' : '') + CHECK_SHORT[m.check] + ' on ' + cpShort(m.cp);
       case 'map': return w('each ', 'each ') + m.op + plain(m.r);
       case 'adv': {
@@ -1370,13 +1394,13 @@
 
   /* Infinity and NaN mean nothing as a roll, so they are an error here rather
      than a total nobody can read. A sum and a map both come through here. */
-  function arith(op, a, b, sp) {
+  function arith(op, a, b, sp, real) {
     let v;
     switch (op) {
       case '+': v = a + b; break;
       case '-': v = a - b; break;
       case '*': v = a * b; break;
-      case '/': v = idiv(a, b); break;
+      case '/': v = real ? a / b : idiv(a, b); break;
       case '%': v = a % b; break;
       case '^': v = Math.pow(a, b); break;
     }
@@ -1814,7 +1838,7 @@
 
       case 'bin': {
         const l = evalNode(node.l, ctx), r = evalNode(node.r, ctx);
-        const v = arith(node.op, l.total(), r.total(), node.opSp);
+        const v = arith(node.op, l.total(), r.total(), node.opSp, node.float);
         const tag = uidOf(node, ctx) ? ' data-x="o' + node.uid + '"' : '';
         return Expr(v, [l, '<span class="r-op"' + tag + '>' + esc(node.op) + '</span>', r]);
       }
@@ -1897,7 +1921,7 @@
   function plain(node) {
     const mods = (node.mods || []).map(modText).join('');
     switch (node.t) {
-      case 'num': return fmt(node.v);
+      case 'num': return numText(node);
       case 'str': return '"' + node.v + '"' + mods;
       case 'word': return (node.forced ? '{' + node.name + '}' : node.name) + mods;
       case 'custom': return '[' + node.items.map(plain).join(',') + ']' + mods;
@@ -2229,7 +2253,8 @@
         if (a === null || b === null) return null;
         switch (node.op) {
           case '+': return a + b; case '-': return a - b; case '*': return a * b;
-          case '/': return idiv(a, b); case '%': return a % b; case '^': return Math.pow(a, b);
+          case '/': return node.float ? a / b : idiv(a, b);
+          case '%': return a % b; case '^': return Math.pow(a, b);
         }
         return null;
       }
@@ -2281,7 +2306,7 @@
     const cmp = previewChecks(node, ctx);
 
     switch (node.t) {
-      case 'num': return '<span class="r-num">' + fmt(node.v) + '</span>';
+      case 'num': return '<span class="r-num">' + esc(numText(node)) + '</span>';
       case 'str': return '<span class="r-str">' + esc(node.v) + '</span>' + cmp;
       /* a variable is opened up, so the preview shows the dice it stands for.
          Its name goes on the bracket below rather than in among the dice. */
@@ -2772,12 +2797,15 @@
   /* What a binary operator can come to, given what each side can. Division
      needs a divisor that never touches zero; a remainder and a power are only
      pinned down when the right side is fixed. */
-  function opBounds(op, l, r) {
+  function opBounds(op, l, r, real) {
     if (!l || !r) return null;
     if (op === '+') return pair(l, r, (x, y) => x + y);
     if (op === '-') return pair(l, r, (x, y) => x - y);
     if (op === '*') return pair(l, r, (x, y) => x * y);
-    if (op === '/') return (r.min <= 0 && r.max >= 0) ? null : pair(l, r, idiv);
+    if (op === '/') {
+      return (r.min <= 0 && r.max >= 0) ? null
+        : pair(l, r, real ? (x, y) => x / y : idiv);
+    }
     if (op === '%') {
       if (r.min !== r.max || r.min <= 0 || l.min < 0) return null;
       return span(0, Math.min(r.min - 1, Math.floor(l.max)));
@@ -2811,7 +2839,7 @@
       case 'neg': { const v = boundsOf(node.v, ctx); b = v && span(-v.min, -v.max); break; }
       case 'paren': b = boundsOf(node.v, ctx); break;
       case 'bin':
-        b = opBounds(node.op, boundsOf(node.l, ctx), boundsOf(node.r, ctx));
+        b = opBounds(node.op, boundsOf(node.l, ctx), boundsOf(node.r, ctx), node.float);
         break;
       case 'func': {
         const parts = node.args.map((a) => boundsOf(a, ctx));
@@ -3456,7 +3484,7 @@
       case 'neg': { const d = distOf(node.v, ctx); return d && dPair(d, dOne(0), (x) => -x); }
       case 'paren': return withMods(distOf(node.v, ctx), node, ctx);
       case 'bin': return dPair(distOf(node.l, ctx), distOf(node.r, ctx),
-        (x, y) => arith(node.op, x, y, node.opSp));
+        (x, y) => arith(node.op, x, y, node.opSp, node.float));
       case 'func': {
         const f = FUNCS[node.name];
         let acc = distOf(node.args[0], ctx);

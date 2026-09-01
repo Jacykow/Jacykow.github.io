@@ -208,6 +208,7 @@ kbd{
 .card .expr i{font-style:normal}
 .card .lbl{color:var(--label); font-size:12.5px}
 .card .sub{font-size:11.5px; color:var(--dimmer); margin-top:2px; display:flex; gap:10px; flex-wrap:wrap}
+.card .sub .again + .again{margin-left:-6px}
 .card .sub .pulse{color:var(--accent)}
 .card .sub .again{
   background:none; border:1px solid var(--border); color:var(--dim); font-size:11px;
@@ -332,7 +333,7 @@ kbd{
 
 /* subtotal tree drawn under the dice, innermost bracket nearest them */
 .setrow .body, .treehost{display:block; position:relative}
-.sumtree{position:relative; margin-top:2px}
+.sumtree{position:absolute; top:0; left:0; width:100%; height:0}
 .sumbar{position:absolute; height:15px; border-top:1px solid #3a4152}
 .sumbar::before, .sumbar::after{
   content:''; position:absolute; top:-4px; width:1px; height:4px; background:#3a4152;

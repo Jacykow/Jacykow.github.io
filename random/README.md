@@ -210,6 +210,20 @@ d100%10          the units digit (0–9)
 roll::=d100, roll/10, roll%10      both, off one die
 ```
 
+Unless you ask otherwise, and a written `.` is how you ask. Nobody types a decimal point
+by accident, so a number that has one makes the arithmetic it takes part in real:
+
+```
+7/2              3      three whole shares
+7/2.0            3.5    a half is wanted, and a half is written
+5d20dhdl/3.0     the middle three d20s, averaged
+```
+
+The `.` is what carries: `3.0` and `3` are the same number and not the same thing to
+divide by. Nothing else makes a fraction on its own — no die, no modifier, no average —
+so an expression without a decimal point in it answers in whole numbers as it always did.
+A result is shown to the hundredth; what you wrote is kept exactly as you wrote it.
+
 #### Doing it to each member
 
 Arithmetic reduces a set to a value first: `2d6*2` doubles the **total**. `@` is the way
@@ -463,7 +477,10 @@ one place they fold, since the drawer is where you go to see all of them at once
   fills the whole row has no bracket at all, since the headline already says it.
 
   Brackets in the result mark where something reaches, so they are only drawn where there
-  is a reach to mark: a variable standing for one value is written bare.
+  is a reach to mark: a variable standing for one value is written bare. A bracket hangs
+  from the bottom of what is on the line rather than from the line's own text, so it sits
+  under the dice it is about and not over them, and the room for a stack of them is taken
+  under the last line rather than out of the space between every pair of lines.
 
   Past three dice a term overlaps its own dice so it never takes more room than three;
   the individual faces stop mattering there and the subtotal speaks for the term.
@@ -471,8 +488,10 @@ one place they fold, since the drawer is where you go to see all of them at once
   An opened card writes the expression in the colours the editor gives it, since a colour
   means one thing everywhere.
 
-  Each card carries a **roll again** button, and clicking an opened entry anywhere inert
-  folds it back up. A collapsed entry is four columns — what you called it, what it came
+  Each card carries **roll again**, which throws that expression again and leaves the
+  field alone, and **edit**, which puts it back in the field and throws nothing — two
+  wants that one button cannot serve, since having the first would cost you whatever you
+  were editing. Clicking an opened entry anywhere inert folds it back up. A collapsed entry is four columns — what you called it, what it came
   to, what it was thrown with, and when — in the order they matter when you are looking
   back down a log. The name is the label if there is one and the expression if there is
   not, never both, and it holds a column of its own so the results line up under each

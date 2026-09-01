@@ -32,9 +32,9 @@
       saved: [
         ['d6 # <d6>', 'Dice'], ['d10 # <d10>', 'Dice'], ['d12 # <d12>', 'Dice'],
         ['d20 # <d20>', 'Dice'], ['d100 # <d100>', 'Dice'],
-        ['2d6 # 2x <d6>', 'Try out'],
+        ['2d6 # <d6><d6>', 'Try out'],
         ['d2=1?heads:tails # Coin toss', 'Try out'],
-        ['4d6dl1 # Best 3 of 4', 'Try out']
+        ['5d20dhdl/3.0 # Olympic mean', 'Try out']
       ]
     },
 

@@ -122,7 +122,8 @@ for (const preset of window.RandomEnginePresets) {
 /* and a generated sweep over the shapes the solver claims to know */
 E.setVars({ mod: '3', pool: '5', atk: 'd20+5' });
 {
-  const ATOM = ['d6', 'd20', '4d6', '3d10', 'd4', '2', '7', 'mod', 'atk', '[1,2,3]', '[0,0,1]', 'd100'];
+  const ATOM = ['d6', 'd20', '4d6', '3d10', 'd4', '2', '7', 'mod', 'atk', '[1,2,3]', '[0,0,1]',
+                'd100', '3.0', '2.5'];
   const MOD = ['', 'kh2', 'kl1', 'dl1', 'a', 'da', 'min3', 'max4', 'r1', 'ri2', '@*2', '@+1', '>=4', 's>=3'];
   const OP = ['+', '-', '*', '/', '%'];
   // a question put to every member of a set, which is answered as a score

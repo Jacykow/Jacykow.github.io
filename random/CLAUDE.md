@@ -53,8 +53,10 @@ that same array rather than into a new set.
 
 **Numbers are whole where dice are.** `/` truncates toward zero (`idiv`), which
 is what lets `d100/10` and `d100%10` read the two digits of a percentile roll and
-keeps `(a/b)*b + a%b` equal to `a`. `arith` is the one place a `+`, a `@` or a
-computed die size does the sum, so all three refuse an infinity the same way.
+keeps `(a/b)*b + a%b` equal to `a` — unless a written `.` says otherwise, which
+is the one way to ask for a fraction and is settled at parse time. `arith` is the
+one place a `+`, a `@` or a computed die size does the sum, so all three refuse
+an infinity the same way.
 
 **Element modifiers distribute, and so does `?:`.** `4d20>5?hit:miss` is four
 comparisons and four choices, never one taken on the sum. Anything that reads a
@@ -193,6 +195,21 @@ preset; never change one that has shipped.
   description lives in `TAB_HINT` beside them rather than in the pane it
   describes, so a new tab cannot arrive without one and six render functions do
   not each hold a paragraph.
+- **Whole-number arithmetic is the default, and a written `.` is the exception.**
+  `isReal` reads it off the source at parse time and a `bin` node carries the
+  answer in `float`, so evaluation, `constOf`, `boundsOf` and `distOf` all
+  divide the same way — a runtime flag on the value would have left the solver
+  answering a different question from the roll. `fmt` shows a result to the
+  hundredth; `numText` prints a literal back as it was written, `3.0` and all,
+  or a saved roll would quietly become a different one.
+- **A subtotal bracket hangs from what is on the line, not from the line.** An
+  inline node reports the box its own text fills and a die is taller than that,
+  so `shelf` takes the bottom of the dice on that line. `.sumtree` is absolutely
+  positioned at the body's top so a bar's `top` means what `drawTrees` measured;
+  in the flow it started under the line instead, which put every bracket a
+  line-height too low. Room for the last line's stack is `padding-bottom` on the
+  body — a line box gives only half its leading below its content, so paying for
+  the stack in `line-height` wasted as much again above the dice.
 - **Vars and Saved are one list rendered twice** (`LISTS`, `renderList`). They
   differ only in where they are stored and what clicking the name does.
 - **A colour means one thing.** Six roles and two verdicts, listed at the top
@@ -239,9 +256,8 @@ preset; never change one that has shipped.
 - **The subtotal tree is an overlay, not a strip underneath.** Bars are placed
   from `getClientRects()`, one per line a node runs onto, so it survives content
   that wraps — which it does on a desktop, where the expression and its preview
-  wrap rather than scroll. Room comes from the line-height, set to fit the
-  deepest stack. A bracket over a single value (`data-lone`) becomes a line from
-  its name to it when the name will not fit inside.
+  wrap rather than scroll. A bracket over a single value (`data-lone`) becomes a
+  line from its name to it when the name will not fit inside.
 - **Subtotal rows are assigned deepest-first.** An enclosing bracket sits above
   everything it encloses, so it has to be settled after the things inside it
   have finished rising, or two brackets land on the same row.
