@@ -27,6 +27,7 @@
     notation: $('notation'), result: $('result'), rollBtn: $('rollBtn'),
     tabs: $('tabs'), explain: $('tab-explain'), details: $('tab-details'),
     reference: $('tab-reference'), saved: $('tab-saved'), vars: $('tab-vars'), toast: $('toast'),
+    tabhint: $('tabhint'),
     paneTools: $('paneTools'), drawer: $('drawerToggle'), refSide: $('refSide'),
     preview: $('preview'), shortcuts: $('shortcuts')
   };
@@ -41,7 +42,6 @@
   const DEFAULT_EXPR = '2d6';
   const LS_SAVED = 're.saved.v1';
   const LS_LAST = 're.last.v1';
-  const LS_DRAWER = 're.drawer.v1';
   const LS_VARS = 're.vars.v1';
   const LS_CATS = 're.cats.v1';
   const LS_LANG = 're.lang.v2';
@@ -52,7 +52,7 @@
     spans: [],         // spans actually painted (overlaps removed)
     error: null,
     log: [],           // [{roll, expanded}] newest first
-    activeTab: window.matchMedia('(min-width: 1000px)').matches ? 'explain' : 'reference',
+    activeTab: null,
     statsToken: 0,
     curRow: null,      // Explain row the caret last sat on
     setOpen: null,     // which of the Preset tab's two boxes is open, if any
@@ -921,7 +921,7 @@
       '<div class="top">' +
         '<div class="total">' + totalHTML(roll) + '</div>' +
         '<div class="meta">' +
-          '<div class="expr">' + paint(roll.notation) + '</div>' +
+          '<div class="expr">' + paintExpr(roll.notation) + '</div>' +
           ((roll.defs || []).length
             ? '<div class="defs">' + roll.defs.map(esc).join('<span>&middot;</span>') + '</div>'
             : '') +
@@ -1340,7 +1340,7 @@
           '<span class="dieval">D' + n + '</span>' +
         '</span></div>';
     }).join('');
-    return '<div class="refgroup"><h3>Quick dice</h3><div class="refdice">' + dice + '</div></div>';
+    return '<div class="refgroup"><h3>Common dice</h3><div class="refdice">' + dice + '</div></div>';
   }
 
   /* '4d6~kh3' -> '4d6' faded, 'kh3' at full strength. Odd segments are the
@@ -1364,8 +1364,8 @@
     return cls;
   }
 
-  /** an expression in the colours the editor gives it */
-  function paint(src) {
+  /** any expression in the colours the editor gives its own */
+  function paintExpr(src) {
     const cls = tokenClasses(src);
     let html = '', i = 0;
     while (i < src.length) {
@@ -1660,20 +1660,9 @@
      A variable and a saved roll are the same thing — an expression named by
      its own label — so one pair of functions draws and wires both. All that
      differs is where they are kept and what clicking the name does. */
-  /* Categories belong to neither list, so the same sentence explains them in
-     both. */
-  const CAT_HINT = ' Categories are shared with the other list. They group the ' +
-    'shortcuts under the expression, where a category can be folded away; drag ' +
-    'something by its name to put it under another.';
-
   const LISTS = {
     var: {
       pane: 'vars', add: '+ add a variable',
-      hint: 'A variable holds an expression and is worked out again at every occurrence. ' +
-        'It is named by the <code>#&nbsp;name</code> at its end, and its name can only use ' +
-        'letters and _. Inside an expression, <code>atk:=d20+5</code> as its own item sets ' +
-        'one for that roll alone, and <code>atk::=d20+5</code> rolls it once however often ' +
-        'it is mentioned.' + CAT_HINT,
       placeholder: 'd20+5 # name',
       nameHint: 'put this name into the expression',
       load: loadVars,
@@ -1683,9 +1672,6 @@
     },
     saved: {
       pane: 'saved', add: '+ add a roll',
-      hint: 'A roll is an expression named by the <code>#&nbsp;name</code> at its end. ' +
-        'Save the one you are editing with the Save button, or ' +
-        '<kbd>Ctrl</kbd>+<kbd>S</kbd>.' + CAT_HINT,
       placeholder: '4d6dl1 # name',
       nameHint: 'put this roll into the expression',
       load: loadSaved,
@@ -1759,8 +1745,7 @@
         rows.map((r) => rowHTML(kind, r[0], r[1])).join('') + '</div>';
     }).join('');
 
-    host.innerHTML =
-      '<div class="varhint">' + L.hint + '</div>' + body +
+    host.innerHTML = body +
       '<div class="listend">' +
         '<button class="varadd" data-add="1">' + esc(L.add) + '</button>' +
         '<button class="varadd" data-addcat="1">+ add a category</button>' +
@@ -1984,28 +1969,38 @@
   const renderSaved = () => renderList('saved');
 
   /* The label names it, so there is nothing to ask for — and nothing that can
-     drift out of step with what the expression actually says. */
+     drift out of step with what the expression actually says. Not having one
+     is no reason to refuse: an unnamed roll is `roll 1`, then `roll 2`, and
+     the name is a field in the list like any other. */
+  function autoName(expr) {
+    const taken = loadSaved().map((x) => titleOf(x.expr));
+    let n = 1;
+    while (taken.indexOf('roll ' + n) >= 0) n++;
+    return expr + ' # roll ' + n;
+  }
+
+  /* Saying "saved" and leaving it at that asks you to take it on trust. Showing
+     the row it became says the same thing and shows where it went. */
+  function revealSaved(expr) {
+    switchTab('saved');
+    const at = loadSaved().findIndex((x) => x.expr === expr);
+    const row = el.saved.querySelector('.lrow[data-i="' + at + '"]');
+    if (!row) return;
+    row.scrollIntoView({ block: 'nearest' });
+    row.classList.remove('fresh');
+    void row.offsetWidth;                      // so a second save flashes again
+    row.classList.add('fresh');
+  }
+
   function saveCurrent() {
-    const expr = el.ta.value.trim();
+    let expr = el.ta.value.trim();
     if (!expr) return;
-    if (!titleOf(expr)) {
-      toast('name it first — add # a name to the end');
-      return;
-    }
+    if (!titleOf(expr)) expr = autoName(expr);
     const items = loadSaved().filter((x) => titleOf(x.expr) !== titleOf(expr));
     items.unshift({ expr, mark: false });
     store.write(LS_SAVED, items.slice(0, 60));
     renderSaved(); renderShortcuts();
-    switchTab('saved');
-    toast('saved');
-  }
-
-  /* =============================================================== drawer */
-  function setDrawer(collapsed) {
-    el.paneTools.classList.toggle('collapsed', collapsed);
-    el.drawer.setAttribute('aria-expanded', String(!collapsed));
-    el.drawer.setAttribute('aria-label', collapsed ? 'Expand panel' : 'Collapse panel');
-    store.write(LS_DRAWER, collapsed);
+    revealSaved(expr);
   }
 
   /* ------------------------------------------------------ what is stored
@@ -2058,12 +2053,6 @@
     const link = setupLink();
     const back = lastImport();
     $('tab-setup').innerHTML =
-      '<div class="varhint">Your saved rolls and variables together, kept in this ' +
-      'browser between visits. The link below carries them somewhere else: open it there, ' +
-      'or paste one here to look it over first. A ready-made preset has a short link of ' +
-      'its own, since both ends already have it — take one with its name, or copy that ' +
-      'link with the button beside it. The expression link in the top bar is a ' +
-      'different thing — it holds only the roll you last made.</div>' +
       /* The two boxes are big and wanted rarely, so they stay shut until asked
          for. Which one is open outlives a redraw, or opening one would close it
          again the moment the lists were drawn afresh. */
@@ -2194,9 +2183,38 @@
     });
   }
 
-  /* ================================================================= tabs */
+  /* ================================================================= tabs
+     A tab is open or the drawer is shut, and there is no third state: pressing
+     the tab that is already open shuts it, which makes the way back to a taller
+     result the button you are already pointing at. Nothing is open on arrival.
+
+     One line under the tabs says what the open tab is for. They are written
+     together so that they read in one voice and so that a tab cannot arrive
+     without one — the panes themselves carry no prose. */
+  const TAB_HINT = {
+    reference: 'Every piece of the notation, a line each — click one to write it into ' +
+      'the expression.',
+    explain: 'What the expression says, a token at a time — click a row to select that ' +
+      'token in the field.',
+    details: 'What the expression can come to: worked out exactly where its shape allows, ' +
+      'and thrown a great many times where it does not.',
+    vars: 'A variable holds an expression, is named by the <code>#&nbsp;name</code> at its ' +
+      'end, and is worked out afresh wherever its name appears.',
+    saved: 'A roll is an expression named by the <code>#&nbsp;name</code> at its end — save ' +
+      'the one you are editing with Save, or <kbd>Ctrl</kbd>+<kbd>S</kbd>.',
+    setup: 'Your rolls and variables together, kept in this browser; the link below ' +
+      'carries them to another one, and a preset brings a whole game at once.'
+  };
+
+  let lastTab = wide.matches ? 'explain' : 'reference';
+
   function switchTab(name) {
-    state.activeTab = name;
+    state.activeTab = name || null;
+    if (name) lastTab = name;
+    el.paneTools.classList.toggle('collapsed', !name);
+    el.drawer.setAttribute('aria-expanded', String(!!name));
+    el.drawer.setAttribute('aria-label', name ? 'Collapse panel' : 'Expand panel');
+    el.tabhint.innerHTML = TAB_HINT[name] || '';
     el.tabs.querySelectorAll('button').forEach((b) =>
       b.classList.toggle('on', b.getAttribute('data-tab') === name));
     ['reference', 'explain', 'details', 'vars', 'saved', 'setup'].forEach((n) =>
@@ -2290,7 +2308,7 @@
     renderShortcuts();
     wireShortcuts();
     renderSetup();
-    switchTab(state.activeTab);   // on a phone that is the reference, not Explain
+    switchTab(null);              // the tools open when you go looking for them
 
     // a setup link is adopted whole; anything else in the bar is an expression
     const fromLink = readSetup();
@@ -2327,8 +2345,9 @@
       renderReference();
       growEditor();
       renderPreview();
-      if (!wide.matches && state.activeTab === 'reference') switchTab('explain');
-      else if (wide.matches && state.activeTab === 'reference') switchTab('explain');
+      // the reference has a rail of its own on a wide screen, so its tab goes
+      if (wide.matches && state.activeTab === 'reference') switchTab('explain');
+      if (wide.matches && lastTab === 'reference') lastTab = 'explain';
     });
 
     el.result.addEventListener('click', (ev) => {
@@ -2362,15 +2381,14 @@
     $('btnUndo').addEventListener('click', () => editUndo('undo'));
     $('btnRedo').addEventListener('click', () => editUndo('redo'));
 
-    setDrawer(store.read(LS_DRAWER, false) === true);
     el.drawer.addEventListener('click', () =>
-      setDrawer(!el.paneTools.classList.contains('collapsed')));
+      switchTab(state.activeTab ? null : lastTab));
 
     el.tabs.addEventListener('click', (ev) => {
       const b = ev.target.closest('button[data-tab]');
       if (!b) return;
-      setDrawer(false);                        // tapping a tab always opens the drawer
-      switchTab(b.getAttribute('data-tab'));
+      const name = b.getAttribute('data-tab');
+      switchTab(name === state.activeTab ? null : name);
     });
 
     // only a person can cause this: replaceState never fires it

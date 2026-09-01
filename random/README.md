@@ -58,7 +58,7 @@ into the `e`/`ei`, `r`/`ri` pairs described below.
 | `d20` | one twenty-sided die |
 | `4d6` | four six-sided dice, summed |
 | `(2+2)d6` | computed quantity |
-| `3d(2*6)` | computed number of sides |
+| `3d(3*5)` | computed number of sides |
 
 ### Values and sets
 
@@ -569,7 +569,10 @@ one place they fold, since the drawer is where you go to see all of them at once
   number. Clicking the name puts a variable
   into the expression, or replaces the expression with a saved roll — and <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back, as it does for anything
   else that writes into the field. <kbd>Ctrl</kbd>+<kbd>S</kbd> saves what you are
-  editing, under its `# name`.
+  editing, under its `# name` — or under `roll 1`, then `roll 2`, when it has none, since
+  a missing name is a thing to supply rather than a reason to refuse. Saving opens this
+  list at the row it just made and marks it for a moment, which says what "saved" would
+  have said and shows where it went.
 
   Both lists are grouped under the same categories, so adding one in either adds it to
   both, and renaming one renames it in both. Each heading says how much it holds, counted
@@ -658,8 +661,12 @@ still works if you want it.
 Neither reaches the server — a fragment never leaves the browser — so length is only a
 question of what a browser holds, which a setup of any sane size comes nowhere near.
 
-The tool drawer collapses to just its tab strip via the chevron on the right, handing the
-full screen to the results — worth it on a phone. The choice is remembered. Layout uses
+A tab is open or the drawer is shut, and there is no third state. Nothing is open when you
+arrive: the tools are there when you go looking for them, and until then the results have
+the room. Pressing the tab that is already open shuts it again, so the way back to a taller
+result is the button you are already pointing at, and the chevron on the right does the
+same for the tab you had last. One line under the tabs says what the open tab is for, and
+the panes themselves carry no prose — a tab cannot arrive without its line. Layout uses
 `dvh` units and safe-area insets, so browser chrome, the on-screen keyboard and notches
 don't clip it.
 

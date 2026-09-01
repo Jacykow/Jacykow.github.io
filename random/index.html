@@ -286,7 +286,7 @@
     <div class="tabsrow">
       <div class="tabs" id="tabs">
         <button data-tab="reference">Reference</button>
-        <button data-tab="explain" class="on">Explain</button>
+        <button data-tab="explain">Explain</button>
         <button data-tab="details">Details</button>
         <button data-tab="vars">Variables</button>
         <button data-tab="saved">Rolls</button>
@@ -295,12 +295,15 @@
       <button class="drawer" id="drawerToggle" aria-label="Collapse panel" aria-expanded="true">&#9662;</button>
     </div>
     <div class="toolbody">
-      <div class="tabpane" id="tab-reference"></div>
-      <div class="tabpane on" id="tab-explain"></div>
-      <div class="tabpane" id="tab-details"></div>
-      <div class="tabpane" id="tab-vars"></div>
-      <div class="tabpane" id="tab-saved"></div>
-      <div class="tabpane" id="tab-setup"></div>
+      <div class="tabhint" id="tabhint"></div>
+      <div class="tabpanes">
+        <div class="tabpane" id="tab-reference"></div>
+        <div class="tabpane" id="tab-explain"></div>
+        <div class="tabpane" id="tab-details"></div>
+        <div class="tabpane" id="tab-vars"></div>
+        <div class="tabpane" id="tab-saved"></div>
+        <div class="tabpane" id="tab-setup"></div>
+      </div>
     </div>
   </section>
 

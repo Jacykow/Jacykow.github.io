@@ -25,15 +25,16 @@
     {
       name: 'Reset',
       id: 'reset',
-      note: 'Every solid on its own, and a coin — where a browser with nothing stored starts.',
-      cats: ['Dice'],
+      note: 'A die of each common size and three rolls to press — where a browser with ' +
+        'nothing stored starts.',
+      cats: ['Dice', 'Try out'],
       vars: [],
       saved: [
-        ['d4 # <d4>', 'Dice'], ['d6 # <d6>', 'Dice'], ['d8 # <d8>', 'Dice'],
-        ['d10 # <d10>', 'Dice'], ['d12 # <d12>', 'Dice'], ['d20 # <d20>', 'Dice'],
-        ['d100 # <d100>', 'Dice'],
-        '2d6 # 2x <d6>',
-        'd2=1?heads:tails # Coin toss'
+        ['d6 # <d6>', 'Dice'], ['d10 # <d10>', 'Dice'], ['d12 # <d12>', 'Dice'],
+        ['d20 # <d20>', 'Dice'], ['d100 # <d100>', 'Dice'],
+        ['2d6 # 2x <d6>', 'Try out'],
+        ['d2=1?heads:tails # Coin toss', 'Try out'],
+        ['4d6dl1 # Best 3 of 4', 'Try out']
       ]
     },
 

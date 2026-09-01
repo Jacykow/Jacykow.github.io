@@ -187,6 +187,12 @@ preset; never change one that has shipped.
 - **Everything that writes into the field goes through `typeInto`**, which uses
   `execCommand('insertText')` so the browser keeps its own undo history.
   Assigning `.value` wipes it, and then Ctrl+Z does nothing.
+- **A tab and the drawer are one switch** (`switchTab`). `state.activeTab` is `null`
+  when the drawer is shut, which is how it starts and what pressing the open tab
+  goes back to; `lastTab` is what the chevron reopens. Every tab's one-line
+  description lives in `TAB_HINT` beside them rather than in the pane it
+  describes, so a new tab cannot arrive without one and six render functions do
+  not each hold a paragraph.
 - **Vars and Saved are one list rendered twice** (`LISTS`, `renderList`). They
   differ only in where they are stored and what clicking the name does.
 - **A colour means one thing.** Six roles and two verdicts, listed at the top

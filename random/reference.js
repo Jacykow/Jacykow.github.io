@@ -30,7 +30,7 @@
       ['~d20', 'one die — a value', 'atom', 'One die is a value, not a set. Set modifiers like kh have nothing to work on and are refused. Any positive number of sides works: a size with no solid of its own borrows the nearest one to draw with.'],
       ['~4d6', 'four dice — a set, summed when a value is needed', 'atom', 'A count makes a set. Summing is the only thing that ever turns one back into a value.'],
       ['~(2+2)~d6', 'computed quantity', 'atom', 'The bracket is worked out first and used as the number of dice.'],
-      ['3d~(2*6)', 'computed number of sides', 'atom', 'Sides can be computed too, so a die can be as big as the maths makes it.']
+      ['3d~(3*5)', 'computed number of sides', 'atom', 'Sides can be computed too, so a die can be as big as the maths makes it.']
     ]],
     ['Sets', [
       ['(d6~,~d8)', 'a set built by listing values', 'atom', 'The comma is what builds a set. Whitespace never does: d10-2d6 and d10 -2d6 are the same roll.'],
