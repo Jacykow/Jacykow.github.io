@@ -2329,8 +2329,24 @@
   }
 
   /* ================================================================ wiring */
+  /* A browser with nothing stored starts from the first preset. One that
+     arrived on a preset link was asked for that preset, and starting from the
+     first one underneath leaves whatever the link happens not to contain — a
+     d100, a category of things to try — in the bar beside it, looking like
+     part of what was sent. So the ground is cleared first, and only for a
+     browser that has never kept anything. */
+  function clearForLink(st) {
+    if (!st || !(st.vars.length || st.saved.length)) return;
+    if (store.read(LS_SAVED, null) !== null || store.read(LS_VARS, null) !== null) return;
+    store.write(LS_SAVED, []);
+    store.write(LS_VARS, []);
+    store.write(LS_CATS, []);
+  }
+
   function init() {
     migrateStored();
+    const fromLink = readSetup();
+    clearForLink(fromLink);
     renderReference();
     renderSaved();
     pushVars(loadVars());
@@ -2343,7 +2359,6 @@
     switchTab(null);              // the tools open when you go looking for them
 
     // a setup link is adopted whole; anything else in the bar is an expression
-    const fromLink = readSetup();
     const missing = !fromLink && presetIdIn();
     el.ta.value = readExpr() || store.read(LS_LAST, '') || DEFAULT_EXPR;
 
@@ -2433,6 +2448,7 @@
     window.addEventListener('hashchange', () => {
       const st = readSetup();
       if (st && (st.vars.length || st.saved.length)) {
+        clearForLink(st);
         const n = addSetup(st);
         toast(n ? 'preset loaded — ' + n + ' added' : 'preset already loaded');
         renderSetup(); onInput();

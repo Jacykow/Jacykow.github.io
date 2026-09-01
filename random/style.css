@@ -96,7 +96,16 @@ button.tb:hover{color:var(--text); border-color:#3b4356}
 /* Only the result pane gives ground; the others keep whatever height their
    contents need, or a bar of shortcuts would be squeezed out of sight. */
 .pane{background:var(--bg); display:flex; flex-direction:column; min-height:0; flex:none}
-.pane.grow{flex:1; min-height:88px}   /* never let the result pane clip its own header */
+.pane.grow{flex:1 1 150px; min-height:88px}  /* never let it clip its own header */
+/* A screen is only so tall, and the panes have to agree about who gives when
+   there is not enough of it. The tools never do: a tab strip clipped off the
+   bottom is nobody's choice, and shutting the drawer is always available. The
+   bookmark bar gives first and scrolls what it cannot show, the result gives
+   next and can be squeezed to a line, and the expression itself gives nothing.
+   On a phone the result may go down to almost nothing before the tools move. */
+#paneExpr{flex:0 1 auto}
+#paneExpr .panehead, #paneExpr .preview, #paneExpr .editor, #paneExpr .status{flex:none}
+@media(max-width:999px){ .pane.grow{min-height:44px} }
 .panehead{
   display:flex; align-items:center; gap:10px; padding:0 14px; height:34px;
   background:var(--head); border-bottom:1px solid var(--border); flex:none;
@@ -646,11 +655,14 @@ kbd{
 /* ----------------------------------------------------------- shortcuts
    Bookmarked rolls and variables, under the expression, where a session's
    handful of things stays in reach without opening the drawer. */
-/* A preset with many categories could otherwise take the whole screen, so
-   the bar gives way to a scroll rather than to the result below it. */
+/* A preset with many categories would otherwise take the whole screen, so the
+   bar is the part of the expression pane that shrinks: it holds as many rows
+   as are left over once everything else has what it needs, and scrolls to the
+   rest. A fraction of the viewport cannot do this — it does not know what else
+   is on the screen, which is how a tall bar pushed the tab strip off it. */
 .shortcuts{
   display:flex; flex-direction:column; gap:5px; padding:0 18px 8px;
-  max-height:34vh; overflow-y:auto; overscroll-behavior:contain;
+  flex:0 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain;
 }
 .shortcuts:empty{display:none}
 .sc{
