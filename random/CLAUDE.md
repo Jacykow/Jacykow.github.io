@@ -210,6 +210,19 @@ preset; never change one that has shipped.
   line-height too low. Room for the last line's stack is `padding-bottom` on the
   body — a line box gives only half its leading below its content, so paying for
   the stack in `line-height` wasted as much again above the dice.
+- **A preset link is the whole of what an untouched browser asked for**
+  (`clearForLink`). Nothing stored means the first preset, and a link means the
+  link; doing both leaves the parts of the default the link did not happen to
+  contain looking like part of what was sent. It fires on the page load and on
+  a hash change, and only while `LS_SAVED` and `LS_VARS` have never been
+  written — once this browser has kept anything, a link is added to it as usual.
+- **Height is shared in a fixed order, and only in CSS.** The tools pane never
+  shrinks, the shortcut bar is the part of the expression pane that does
+  (`flex:0 1 auto; min-height:0` with its own scroll), and the result pane
+  competes with a flex basis rather than none so it is not squeezed to its
+  minimum whenever the bar has rows to show. A viewport fraction cannot do this
+  — `max-height:34vh` knew nothing about what else was on the screen, which is
+  how a tall bar pushed the tab strip off a phone.
 - **Vars and Saved are one list rendered twice** (`LISTS`, `renderList`). They
   differ only in where they are stored and what clicking the name does.
 - **A colour means one thing.** Six roles and two verdicts, listed at the top

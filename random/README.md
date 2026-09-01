@@ -577,7 +577,7 @@ one place they fold, since the drawer is where you go to see all of them at once
   nothing to attach to. If nothing fits, the click is refused.
 * **Shortcuts** — the star beside a saved roll or a variable puts it on a bar under the
   expression, so a session's handful of things stays in reach without opening the drawer.
-  A roll shortcut loads the expression; a variable shortcut edits the value and never the
+  A roll shortcut rolls it; a variable shortcut edits the value and never the
   name, since the name is what expressions refer to. A whole number gets a −/+ pair,
   which move by one, or by ten with shift or the right mouse button. The bar is cut into
   the categories the items sit under, and each category folds away by its heading — this
@@ -677,8 +677,20 @@ first preset is the exception: it is what a browser with nothing stored already 
 from, so there is nobody to send it to, and its button is left off. `#preset=reset`
 still works if you want it.
 
+A link is adopted into what you already have. A browser that has nothing yet is the one
+case where there is nothing to adopt it into: it would otherwise start from the first
+preset and then take the link on top, leaving whatever the link happened not to contain
+sitting in the bar beside it, looking like part of what was sent. So a link opened in a
+browser that has never kept anything is the whole of what that browser gets.
+
 Neither reaches the server — a fragment never leaves the browser — so length is only a
 question of what a browser holds, which a setup of any sane size comes nowhere near.
+
+A screen is only so tall, and the panes agree about who gives way when there is not enough
+of it. The tools never do — a tab strip clipped off the bottom of a phone is nobody's
+choice, and shutting the drawer is always at hand — so the bookmark bar holds as many rows
+as are left once everything else has what it needs and scrolls to the rest, and the result
+takes what remains after that. The expression itself gives nothing.
 
 A tab is open or the drawer is shut, and there is no third state. Nothing is open when you
 arrive: the tools are there when you go looking for them, and until then the results have
